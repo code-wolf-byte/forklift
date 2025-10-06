@@ -1,1 +1,10 @@
-/target
+certs/
+env/
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+.idea/
+.vscode/
+idp-metadata.xml
+sp-metadata.xml
