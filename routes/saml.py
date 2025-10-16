@@ -1,23 +1,50 @@
 from __future__ import annotations
 
-from pathlib import Path
+import json
+import logging
+from typing import Iterable, Mapping
 
-from flask import Blueprint, make_response, redirect, request, session
-
+from flask import (
+    Blueprint,
+    make_response,
+    redirect,
+    request,
+    session,
+    url_for,
+)
 from saml2 import BINDING_HTTP_POST, BINDING_HTTP_REDIRECT
 from saml2.client import Saml2Client
 from saml2.config import Config
 from saml2.response import StatusAuthnFailed, StatusError
+from sqlalchemy import select
 
-import settings
+from utils.database import User, session_scope
+from utils.metadata import METADATA_CONFIG, ensure_metadata_on_startup
+from utils.settings import CONFIG
 
 saml_bp = Blueprint("saml", __name__)
+logger = logging.getLogger(__name__)
 
 
 def _build_saml_client() -> Saml2Client:
     cfg = Config()
-    cfg.load(settings.SAML_CONFIG)
+    cfg.load(METADATA_CONFIG.SAML_CONFIG)
     return Saml2Client(config=cfg)
+
+
+def _first_attribute(attributes: Mapping[str, list[str]], keys: Iterable[str]) -> str | None:
+    for key in keys:
+        values = attributes.get(key)
+        if not values:
+            continue
+        return values[0]
+    return None
+
+
+def _safe_redirect(target: str | None) -> str | None:
+    if target and target.startswith("/"):
+        return target
+    return None
 
 
 @saml_bp.route("/auth/saml/login")
@@ -25,7 +52,6 @@ def saml_login():
     relay_state = request.args.get("next")
     client = _build_saml_client()
 
-    # Use redirect binding by default; pysaml2 will fall back to POST if required.
     session_id, result = client.prepare_for_authenticate(
         relay_state=relay_state,
         binding=BINDING_HTTP_REDIRECT,
@@ -57,6 +83,7 @@ def saml_acs():
 
     client = _build_saml_client()
     request_id = session.pop("saml_request_id", None)
+    relay_state = request.form.get("RelayState") or request.args.get("RelayState")
 
     try:
         authn_response = client.parse_authn_request_response(
@@ -65,31 +92,114 @@ def saml_acs():
             request_id=request_id,
         )
     except (StatusError, StatusAuthnFailed) as exc:
+        logger.warning("SAML authentication failed: %s", exc)
         return f"SAML authentication failed: {exc}", 401
-    except Exception as exc:
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("Unexpected error processing SAML response")
         return f"Error processing SAML response: {exc}", 500
 
-    identity = authn_response.ava or {}
-    attributes = {
-        key: values[0] if isinstance(values, (list, tuple)) and len(values) == 1 else values
-        for key, values in identity.items()
-    }
+    raw_attributes = authn_response.ava or {}
+    attribute_lists: dict[str, list[str]] = {}
+    for key, value in raw_attributes.items():
+        if isinstance(value, (list, tuple, set)):
+            attribute_lists[key] = [str(item) for item in value if item not in (None, "")]
+        elif value not in (None, ""):
+            attribute_lists[key] = [str(value)]
+        else:
+            attribute_lists[key] = []
 
+    attribute_map = CONFIG.SAML_ATTRIBUTE_MAP
+    asurite = _first_attribute(attribute_lists, attribute_map["asurite"])
+    email = _first_attribute(attribute_lists, attribute_map["email"])
+    full_name = _first_attribute(attribute_lists, attribute_map["full_name"])
+    first_name = _first_attribute(attribute_lists, attribute_map["first_name"])
+    last_name = _first_attribute(attribute_lists, attribute_map["last_name"])
+
+    affiliations_values: list[str] = []
+    for key in attribute_map["affiliations"]:
+        values = attribute_lists.get(key)
+        if values:
+            affiliations_values = values
+            break
+
+    if not asurite:
+        logger.error("SAML response missing ASURITE identifier")
+        return "SAML assertion missing required ASURITE attribute", 400
+
+    if not email:
+        logger.error("SAML response missing email attribute for %s", asurite)
+        return "SAML assertion missing required email attribute", 400
+
+    session_index = authn_response.session_index()
     subject = authn_response.get_subject()
-    user_info = {
-        "name_id": subject.text if subject is not None else None,
-        "session_index": authn_response.session_index(),
-        "attributes": attributes,
-        "relay_state": request.form.get("RelayState"),
+    name_id = subject.text if subject is not None else None
+
+    user_record_id: int | None = None
+    with session_scope() as db_session:
+        stmt = select(User).where(User.asurite_id == asurite)
+        user = db_session.execute(stmt).scalar_one_or_none()
+
+        if user is None:
+            user = User(asurite_id=asurite, email=email)
+            db_session.add(user)
+
+        user.email = email
+        if full_name:
+            user.full_name = full_name
+        if first_name:
+            user.first_name = first_name
+        if last_name:
+            user.last_name = last_name
+        if affiliations_values:
+            user.affiliations = ",".join(sorted(set(affiliations_values)))
+
+        user.saml_session_index = session_index
+        user.saml_attributes = json.dumps(attribute_lists)
+
+        db_session.flush()
+        user_record_id = user.id
+
+    verification_state = session.get("verification_state", {})
+    verification_state.update(
+        {
+            "user_id": user_record_id,
+            "asurite": asurite,
+            "email": email,
+            "saml_complete": True,
+            "relay_state": relay_state or verification_state.get("relay_state"),
+        }
+    )
+    session["verification_state"] = verification_state
+
+    session["saml_user"] = {
+        "name_id": name_id,
+        "session_index": session_index,
+        "attributes": attribute_lists,
     }
 
-    session["saml_user"] = user_info
-    return user_info
+    next_step = _safe_redirect(verification_state.get("relay_state"))
+    if next_step:
+        return redirect(next_step)
+
+    try:
+        discord_login_url = url_for("discord.discord_login")
+    except Exception:
+        discord_login_url = None
+
+    if discord_login_url:
+        return redirect(discord_login_url)
+
+    message = {
+        "status": "saml_complete",
+        "asurite": asurite,
+        "email": email,
+    }
+    return message
 
 
 @saml_bp.route("/saml/metadata")
 def saml_metadata():
-    metadata_path = Path(settings.BASE_DIR, "sp-metadata.xml")
+    metadata_path = ensure_metadata_on_startup()
     if not metadata_path.exists():
         return "SP metadata file not found", 404
 
