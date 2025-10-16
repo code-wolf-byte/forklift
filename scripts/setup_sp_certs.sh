@@ -13,7 +13,8 @@ set -euo pipefail
 # CONFIGURATION (edit to match your environment)
 ###############################################################################
 DOMAIN="verify.devil2devil.asu.edu"      # FQDN managed by certbot
-APP_DIR="/srv/forklift"                  # Root of the Forklift repo on the server
+# Root of the Forklift repo on the server (certs/ lives inside this directory)
+APP_DIR="/home/ubuntu/forklift"
 APP_USER="ubuntu"                        # Unix user that should own the copied certs
 USE_FULLCHAIN="false"                    # Set to "true" if IdP expects fullchain.pem
 APP_SERVICE=""                           # Optional: systemd unit to restart post-deploy
