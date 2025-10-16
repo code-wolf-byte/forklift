@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   forklift:
     image: ghcr.io/your-org/forklift:latest
@@ -7,26 +5,11 @@ services:
       context: .
     env_file:
       - .env
+    ports:
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./certs:/app/certs:ro
       - ./data:/app/data
-    restart: unless-stopped
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
-      - "com.centurylinklabs.watchtower.scope=forklift"
-
-  nginx:
-    image: nginx:1.27-alpine
-    depends_on:
-      - forklift
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/verify.conf:/etc/nginx/conf.d/verify.conf:ro
-      - ./letsencrypt:/etc/letsencrypt
-      - ./letsencrypt-webroot:/var/www/letsencrypt
-      - ./webroot:/var/www/verify
     restart: unless-stopped
     labels:
       - "com.centurylinklabs.watchtower.enable=true"

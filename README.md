@@ -41,25 +41,60 @@ docker run --rm -p 8000:8000 \
 
 ### docker-compose with Watchtower
 
-The provided `docker-compose.yml` now includes three services:
+The compose file now ships two services:
 
-- `forklift` – the Gunicorn + Flask application.
-- `nginx` – a TLS-terminating reverse proxy using the supplied ASU SSO-friendly config.
-- `watchtower` – optional auto-updater that tracks both containers via labels.
+- `forklift` – the Gunicorn + Flask application listening on container port 8000 and published to the host at `127.0.0.1:8000`.
+- `watchtower` – optional auto-updater that tracks the application container via labels.
 
-Before the first launch create the bind-mount directories:
-
-```bash
-mkdir -p data certs letsencrypt letsencrypt-webroot webroot
-```
-
-Run certbot on the host with `--config-dir "$(pwd)/letsencrypt"` and `--webroot "$(pwd)/letsencrypt-webroot"` (or copy your existing `/etc/letsencrypt` tree) so the containerized Nginx can read the certificates plus `options-ssl-nginx.conf`. When ready, build/run the stack:
+Create the bind-mount directories and start the stack:
 
 ```bash
+mkdir -p data certs
 docker compose up -d --build
 ```
 
 Watchtower only updates services carrying the `watchtower.scope=forklift` label. Adjust the `command` flags if you prefer poll-based or schedule-based updates.
+
+### Host nginx reverse proxy
+
+If you manage Nginx directly on the VPS, point your virtual host at the container by proxying to `http://127.0.0.1:8000/`. Add the WebSocket helper map once in the global `http` block:
+
+```nginx
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+```
+
+Then update `/etc/nginx/sites-available/verify.devil2devil.asu.edu` (HTTPS section shown) to match:
+
+```nginx
+    location / {
+        proxy_pass http://127.0.0.1:8000/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+        proxy_buffering on;
+    }
+```
+
+Reload the host service once the compose stack is running:
+
+```bash
+sudo systemctl reload nginx
+```
+
+The `WATCHTOWER` container can continue to manage updates while Nginx stays on the host.
 
 ### Required environment variables
 
@@ -90,7 +125,7 @@ SAML_METADATA_PATH=/app/data/sp-metadata.xml
 SAML_IDP_METADATA=/app/data/idp-metadata.xml
 ```
 
-If you rely on Nginx for TLS termination, keep certbot’s deployment hooks pointed at the `letsencrypt` and `letsencrypt-webroot` directories so the container sees fresh certificates without rebuilds.
+If you rely on host-level Nginx for TLS termination, keep certbot’s deployment hooks pointed at `/etc/letsencrypt` and ensure the Flask container mounts the resulting keypair inside `certs/`.
 
 ### Automating SP certificate deployment
 
