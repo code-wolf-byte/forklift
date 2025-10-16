@@ -12,6 +12,7 @@ defusedxml==0.7.1
 elementpath==5.0.4
 Flask==3.1.1
 gunicorn==23.0.0
+SQLAlchemy==2.0.36
 frozenlist==1.7.0
 idna==3.10
 itsdangerous==2.2.0
