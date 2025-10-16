@@ -41,7 +41,19 @@ docker run --rm -p 8000:8000 \
 
 ### docker-compose with Watchtower
 
-The provided `docker-compose.yml` spins up the Flask app alongside Watchtower for automated updates. Push your image to a registry (e.g., GHCR) and ensure the `forklift` service references that tag. Then:
+The provided `docker-compose.yml` now includes three services:
+
+- `forklift` – the Gunicorn + Flask application.
+- `nginx` – a TLS-terminating reverse proxy using the supplied ASU SSO-friendly config.
+- `watchtower` – optional auto-updater that tracks both containers via labels.
+
+Before the first launch create the bind-mount directories:
+
+```bash
+mkdir -p data certs letsencrypt letsencrypt-webroot webroot
+```
+
+Run certbot on the host with `--config-dir "$(pwd)/letsencrypt"` and `--webroot "$(pwd)/letsencrypt-webroot"` (or copy your existing `/etc/letsencrypt` tree) so the containerized Nginx can read the certificates plus `options-ssl-nginx.conf`. When ready, build/run the stack:
 
 ```bash
 docker compose up -d --build
@@ -77,6 +89,24 @@ SAML_ATTR_AFFILIATIONS=eduPersonAffiliation
 SAML_METADATA_PATH=/app/data/sp-metadata.xml
 SAML_IDP_METADATA=/app/data/idp-metadata.xml
 ```
+
+If you rely on Nginx for TLS termination, keep certbot’s deployment hooks pointed at the `letsencrypt` and `letsencrypt-webroot` directories so the container sees fresh certificates without rebuilds.
+
+### Automating SP certificate deployment
+
+The script `scripts/setup_sp_certs.sh` bootstraps certificate management on the host where certbot runs:
+
+```bash
+sudo bash scripts/setup_sp_certs.sh
+```
+
+It copies the active `cert.pem`/`privkey.pem` (or `fullchain.pem` if enabled) into the mounted `certs/` directory, installs a certbot deploy hook to repeat the copy after future renewals, and executes
+
+```bash
+docker compose exec -T forklift python -m utils.metadata --refresh-if-expired
+```
+
+so the service provider metadata is re-signed with the new key automatically. Edit the configuration block at the top of the script to match your server paths, user, and docker-compose command before running it.
 
 The default SAML attribute mapping matches ASU SSO metadata. Adjust the names if
 your IdP uses different URIs or friendly names. The Discord bot must be present
