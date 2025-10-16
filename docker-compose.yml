@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+  forklift:
+    image: ghcr.io/your-org/forklift:latest
+    build:
+      context: .
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./certs:/app/certs:ro
+      - ./data:/app/data
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.centurylinklabs.watchtower.scope=forklift"
+
+  watchtower:
+    image: containrrr/watchtower:1.7.1
+    restart: unless-stopped
+    command: --label-enable --scope forklift --cleanup --interval 300
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

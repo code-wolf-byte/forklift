@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Forklift Verification{% endblock %}</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Roboto:wght@300;400;500&display=swap" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/asu.css') }}" />
+    {% block head %}{% endblock %}
+  </head>
+  <body class="{% block body_class %}page{% endblock %}">
+    <header class="asu-header">
+      <div class="asu-header__band">
+        <div class="asu-header__content">
+          <span class="asu-header__title">Arizona State University</span>
+          <span class="asu-header__subtitle">Devils to Devils Verification</span>
+        </div>
+      </div>
+    </header>
+    <main class="asu-main">
+      {% block content %}{% endblock %}
+    </main>
+    <footer class="asu-footer">
+      <div class="asu-footer__content">
+        <p>&copy; {{ current_year }} Arizona State University</p>
+        <p class="asu-footer__note">Need help? Contact the Devils to Devils moderators for assistance.</p>
+      </div>
+    </footer>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

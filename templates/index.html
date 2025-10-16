@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Forklift Verification · Arizona State University{% endblock %}
+{% block content %}
+  <section class="asu-hero">
+    <div class="asu-hero__content">
+      <h1>Join the Devils to Devils Discord</h1>
+      <p class="asu-hero__lead">
+        Verify your connection to ASU and unlock community channels, student resources, and events tailored to Sun Devils.
+      </p>
+      <div class="asu-hero__actions">
+        <a class="asu-button asu-button--primary" href="{{ url_for('saml.saml_login') }}">Sign in with ASU SSO</a>
+        <a class="asu-button asu-button--outline" href="#verification-steps">View steps</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="asu-panel-grid" id="verification-steps">
+    <article class="asu-panel">
+      <span class="asu-panel__step">Step 1</span>
+      <h2>Authenticate with ASU SSO</h2>
+      <p>
+        Use your ASURITE ID to confirm your affiliation with Arizona State University.
+        We collect only the attributes required to validate your student or staff status.
+      </p>
+      <a class="asu-link" href="{{ url_for('saml.saml_login') }}">Begin ASU sign in</a>
+    </article>
+
+    <article class="asu-panel">
+      <span class="asu-panel__step">Step 2</span>
+      <h2>Connect your Discord account</h2>
+      <p>
+        After ASU SSO finishes you will be redirected to Discord. Approve access so our bot can
+        add you to the Devils to Devils server and grant the verified role automatically.
+      </p>
+      <a class="asu-link" href="{{ url_for('discord.discord_login') }}">Reconnect Discord</a>
+    </article>
+
+    <article class="asu-panel">
+      <span class="asu-panel__step">Step 3</span>
+      <h2>Access verified channels</h2>
+      <p>
+        Once both steps succeed, the Discord bot applies the <strong>Verified Sun Devil</strong> role.
+        You&rsquo;ll see new channels and announcements curated for your ASU affiliation.
+      </p>
+      <p class="asu-panel__tip">Need help? Reach out in the <em>#help-desk</em> channel after joining.</p>
+    </article>
+  </section>
+
+  <section class="asu-info">
+    <div class="asu-info__card">
+      <h3>Why we verify</h3>
+      <p>
+        Verification keeps Devils to Devils safe for Sun Devils by ensuring members are current
+        students, faculty, or staff. Your ASU credentials are never stored; we save the minimal data
+        necessary to confirm eligibility.
+      </p>
+    </div>
+    <div class="asu-info__card">
+      <h3>Privacy reminders</h3>
+      <ul>
+        <li>ASU SSO is handled by the official ASU Identity Provider.</li>
+        <li>We store your ASURITE ID, email, and affiliations in accordance with community policy.</li>
+        <li>Discord OAuth only grants the permissions needed to join the server and manage your role.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="asu-support">
+    <h2>Questions along the way?</h2>
+    <p>Email <a href="mailto:d2d-support@asu.edu">d2d-support@asu.edu</a> or message a moderator in Discord.</p>
+  </section>
+{% endblock %}

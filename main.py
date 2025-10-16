@@ -1,4 +1,6 @@
-from flask import Flask
+from datetime import datetime
+
+from flask import Flask, render_template
 
 from routes import discord_bp, saml_bp
 from utils.database import init_db
@@ -17,10 +19,14 @@ app.config["SESSION_COOKIE_SAMESITE"] = CONFIG.SESSION_COOKIE_SAMESITE
 app.register_blueprint(saml_bp)
 app.register_blueprint(discord_bp)
 
+@app.context_processor
+def inject_globals():
+    return {"current_year": datetime.utcnow().year}
+
 
 @app.route("/")
 def hello_world():
-    return "Hello, World!"
+    return render_template("index.html")
 
 
 @app.route("/health")
