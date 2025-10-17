@@ -85,11 +85,15 @@ def saml_acs():
     request_id = session.pop("saml_request_id", None)
     relay_state = request.form.get("RelayState") or request.args.get("RelayState")
 
+    outstanding_queries = None
+    if request_id:
+        outstanding_queries = {request_id: {"relay_state": relay_state}}
+
     try:
         authn_response = client.parse_authn_request_response(
             saml_response,
             BINDING_HTTP_POST,
-            request_id=request_id,
+            outstanding=outstanding_queries,
         )
     except (StatusError, StatusAuthnFailed) as exc:
         logger.warning("SAML authentication failed: %s", exc)
