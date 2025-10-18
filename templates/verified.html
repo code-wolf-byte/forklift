@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Verification Complete · Devils to Devils{% endblock %}
+{% block content %}
+  <section class="asu-hero">
+    <div class="asu-hero__content">
+      <h1>You're all set!</h1>
+      <p class="asu-hero__lead">
+        Thanks{% if verification_state.asurite %}, {{ verification_state.asurite }}{% endif %}! Your ASU and Discord accounts
+        are linked. Enjoy full access to the Devils to Devils Discord server.
+      </p>
+      <div class="asu-hero__actions">
+        <a class="asu-button asu-button--primary" href="https://discord.com/app">Open Discord</a>
+        <a class="asu-button asu-button--outline" href="{{ url_for('hello_world') }}">Back to verification</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="asu-panel-grid">
+    <article class="asu-panel asu-panel--complete">
+      <span class="asu-panel__step">Step 1</span>
+      <h2>ASU Sign-In</h2>
+      <p>
+        Signed in with
+        {% if verification_state.email %}
+          <strong>{{ verification_state.email }}</strong>
+        {% else %}
+          your ASU account
+        {% endif %}.
+      </p>
+    </article>
+
+    <article class="asu-panel asu-panel--complete">
+      <span class="asu-panel__step">Step 2</span>
+      <h2>Discord Linked</h2>
+      <p>
+        Discord account
+        <strong>{{ verification_state.discord_username or discord_user.username or "connected" }}</strong>
+        is verified.
+      </p>
+    </article>
+
+    <article class="asu-panel">
+      <span class="asu-panel__step">Next</span>
+      <h2>Join the conversation</h2>
+      <p>
+        Head to Discord to explore verified channels, meet fellow Sun Devils, and stay current on events.
+        If you run into issues, contact the moderators anytime.
+      </p>
+    </article>
+  </section>
+{% endblock %}

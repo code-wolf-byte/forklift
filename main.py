@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from flask import Flask, render_template, session, url_for
+from flask import Flask, redirect, render_template, session, url_for
 
 from routes import discord_bp, saml_bp
 from utils.database import init_db
@@ -24,8 +24,7 @@ def inject_globals():
     return {"current_year": datetime.utcnow().year}
 
 
-@app.route("/")
-def hello_world():
+def _verification_context() -> dict:
     verification_state = session.get("verification_state") or {}
     saml_complete = bool(verification_state.get("saml_complete"))
     discord_complete = bool(
@@ -56,12 +55,27 @@ def hello_world():
         "verification_error": verification_error,
         "discord_configured": DISCORD_CONFIG is not None,
     }
+    return context
+
+
+@app.route("/")
+def hello_world():
+    context = _verification_context()
+    return render_template("index.html", **context)
     return render_template("index.html", **context)
 
 
 @app.route("/health")
 def health():
     return {"status": "healthy"}
+
+
+@app.route("/verified")
+def verified():
+    context = _verification_context()
+    if not context["discord_complete"]:
+        return redirect(url_for("hello_world"))
+    return render_template("verified.html", **context)
 
 
 if __name__ == "__main__":
