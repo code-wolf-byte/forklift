@@ -51,13 +51,39 @@ class AppConfig:
     def __post_init__(self) -> None:
         if not self.SECRET_KEY or self.SECRET_KEY == "change-me":
             self.SECRET_KEY = "change-me"
+        default_asurite = [
+            "uid",
+            "asuEduID",
+            "asuEduPersonID",
+            "eduPersonPrincipalName",
+            "urn:oid:0.9.2342.19200300.100.1.1",
+            "urn:oid:1.3.6.1.4.1.5923.1.1.1.6",
+        ]
+        default_email = [
+            "mail",
+            "email",
+            "urn:oid:0.9.2342.19200300.100.1.3",
+            "urn:oid:1.2.840.113549.1.9.1",
+        ]
+        default_full_name = [
+            "displayName",
+            "cn",
+            "urn:oid:2.16.840.1.113730.3.1.241",
+            "urn:oid:2.5.4.3",
+        ]
+        default_first_name = ["givenName", "urn:oid:2.5.4.42"]
+        default_last_name = ["sn", "surname", "urn:oid:2.5.4.4"]
+        default_affiliations = [
+            "eduPersonAffiliation",
+            "urn:oid:1.3.6.1.4.1.5923.1.1.1.1",
+        ]
         self.SAML_ATTRIBUTE_MAP = {
-            "asurite": _env_list("SAML_ATTR_ASURITE", default=["uid", "asuEduID", "asuEduPersonID"]),
-            "email": _env_list("SAML_ATTR_EMAIL", default=["mail", "email"]),
-            "full_name": _env_list("SAML_ATTR_FULL_NAME", default=["displayName"]),
-            "first_name": _env_list("SAML_ATTR_FIRST_NAME", default=["givenName"]),
-            "last_name": _env_list("SAML_ATTR_LAST_NAME", default=["sn"]),
-            "affiliations": _env_list("SAML_ATTR_AFFILIATIONS", default=["eduPersonAffiliation"]),
+            "asurite": _env_list("SAML_ATTR_ASURITE", default=default_asurite),
+            "email": _env_list("SAML_ATTR_EMAIL", default=default_email),
+            "full_name": _env_list("SAML_ATTR_FULL_NAME", default=default_full_name),
+            "first_name": _env_list("SAML_ATTR_FIRST_NAME", default=default_first_name),
+            "last_name": _env_list("SAML_ATTR_LAST_NAME", default=default_last_name),
+            "affiliations": _env_list("SAML_ATTR_AFFILIATIONS", default=default_affiliations),
         }
 
 

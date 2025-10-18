@@ -126,17 +126,38 @@ def saml_acs():
             affiliations_values = values
             break
 
+    subject = authn_response.get_subject()
+    name_id = subject.text if subject is not None else None
+
+    if not asurite and name_id:
+        logger.info("Falling back to SAML NameID for ASURITE attribute")
+        asurite = name_id
+
     if not asurite:
-        logger.error("SAML response missing ASURITE identifier")
+        logger.error(
+            "SAML response missing ASURITE identifier; available attribute keys: %s",
+            sorted(attribute_lists.keys()),
+        )
         return "SAML assertion missing required ASURITE attribute", 400
 
     if not email:
-        logger.error("SAML response missing email attribute for %s", asurite)
+        logger.error(
+            "SAML response missing email attribute for %s; available attribute keys: %s",
+            asurite,
+            sorted(attribute_lists.keys()),
+        )
         return "SAML assertion missing required email attribute", 400
 
     session_index = authn_response.session_index()
-    subject = authn_response.get_subject()
-    name_id = subject.text if subject is not None else None
+
+    if not name_id:
+        name_id = session.get("saml_user", {}).get("name_id")
+
+    if not name_id:
+        name_id = asurite
+
+    if name_id and not isinstance(name_id, str):
+        name_id = str(name_id)
 
     user_record_id: int | None = None
     with session_scope() as db_session:
