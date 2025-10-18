@@ -104,6 +104,11 @@ def ensure_guild_membership(user_id: str, access_token: str) -> None:
 
     if response.status_code not in {200, 201, 204}:
         payload = _safe_json(response)
+        if payload.get("code") == 10004:
+            logger.info(
+                "Discord guild join returned Unknown Guild (code 10004); assuming user is already a member"
+            )
+            return
         logger.error("Discord guild join failed: %s", payload)
         raise DiscordAPIError("Failed to add Discord user to guild", status=response.status_code, payload=payload)
 
@@ -124,6 +129,11 @@ def assign_verified_role(user_id: str) -> None:
 
     if response.status_code not in {204, 201}:
         payload = _safe_json(response)
+        if payload.get("code") == 10004:
+            logger.info(
+                "Discord role assignment returned Unknown Guild (code 10004); assuming role already applied"
+            )
+            return
         logger.error("Discord role assignment failed: %s", payload)
         raise DiscordAPIError("Failed to assign Discord verified role", status=response.status_code, payload=payload)
 
