@@ -44,6 +44,11 @@ def _verification_context() -> dict:
     except Exception:
         discord_login_url = None
 
+    try:
+        logout_url = url_for("saml.saml_logout")
+    except Exception:
+        logout_url = None
+
     context = {
         "verification_state": verification_state,
         "saml_complete": saml_complete,
@@ -54,6 +59,7 @@ def _verification_context() -> dict:
         "discord_login_url": discord_login_url,
         "verification_error": verification_error,
         "discord_configured": DISCORD_CONFIG is not None,
+        "logout_url": logout_url,
     }
     return context
 
@@ -61,7 +67,6 @@ def _verification_context() -> dict:
 @app.route("/")
 def hello_world():
     context = _verification_context()
-    return render_template("index.html", **context)
     return render_template("index.html", **context)
 
 

@@ -246,3 +246,16 @@ def saml_metadata():
     response.headers["Content-Disposition"] = "inline; filename=sp-metadata.xml"
     response.headers["Cache-Control"] = "no-cache"
     return response
+
+
+@saml_bp.route("/auth/logout", methods=["POST"])
+def saml_logout():
+    logger.info("User requested logout from ASU and Discord sessions")
+    redirect_url = url_for("hello_world")
+
+    preserved_keys = {"_fresh", "_id", "_permanent"}
+    keys_to_remove = [key for key in list(session.keys()) if key not in preserved_keys]
+    for key in keys_to_remove:
+        session.pop(key, None)
+
+    return redirect(redirect_url)

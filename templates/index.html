@@ -37,6 +37,11 @@
             <button type="submit" class="asu-button asu-button--primary">Login with Discord</button>
           </form>
         {% endif %}
+        {% if (saml_complete or discord_complete) and logout_url %}
+          <form method="post" action="{{ logout_url }}" class="asu-hero__action-form" style="display:inline">
+            <button type="submit" class="asu-button asu-button--outline">Log out</button>
+          </form>
+        {% endif %}
         <a class="asu-button asu-button--outline" href="#verification-steps">View steps</a>
       </div>
       {% if verification_error %}

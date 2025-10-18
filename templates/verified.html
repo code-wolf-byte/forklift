@@ -11,6 +11,11 @@
       <div class="asu-hero__actions">
         <a class="asu-button asu-button--primary" href="https://discord.com/app">Open Discord</a>
         <a class="asu-button asu-button--outline" href="{{ url_for('hello_world') }}">Back to verification</a>
+        {% if logout_url %}
+          <form method="post" action="{{ logout_url }}" style="display:inline">
+            <button type="submit" class="asu-button asu-button--outline">Log out</button>
+          </form>
+        {% endif %}
       </div>
     </div>
   </section>
