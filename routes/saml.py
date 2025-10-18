@@ -148,7 +148,20 @@ def saml_acs():
         )
         return "SAML assertion missing required email attribute", 400
 
-    session_index = authn_response.session_index()
+    try:
+        session_info = authn_response.session_info() or {}
+    except Exception:
+        logger.warning("Unable to extract session info from SAML response", exc_info=True)
+        session_info = {}
+
+    session_index = session_info.get("session_index")
+    if isinstance(session_index, (list, tuple, set)):
+        session_index = next((item for item in session_index if item not in (None, "")), None)
+    if session_index and not isinstance(session_index, str):
+        session_index = str(session_index)
+
+    if not name_id:
+        name_id = session_info.get("name_id")
 
     if not name_id:
         name_id = session.get("saml_user", {}).get("name_id")
