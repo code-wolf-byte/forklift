@@ -1,11 +1,11 @@
 from datetime import datetime
 
-from flask import Flask, render_template
+from flask import Flask, render_template, session, url_for
 
 from routes import discord_bp, saml_bp
 from utils.database import init_db
 from utils.metadata import ensure_metadata_on_startup
-from utils.settings import CONFIG
+from utils.settings import CONFIG, DISCORD_CONFIG
 
 ensure_metadata_on_startup()
 init_db()
@@ -26,7 +26,37 @@ def inject_globals():
 
 @app.route("/")
 def hello_world():
-    return render_template("index.html")
+    verification_state = session.get("verification_state") or {}
+    saml_complete = bool(verification_state.get("saml_complete"))
+    discord_complete = bool(
+        verification_state.get("discord_complete") or verification_state.get("verified")
+    )
+    saml_user = session.get("saml_user") or {}
+    discord_user = session.get("discord_user") or {}
+    verification_error = session.pop("verification_error", None)
+
+    try:
+        saml_login_url = url_for("saml.saml_login")
+    except Exception:
+        saml_login_url = None
+
+    try:
+        discord_login_url = url_for("discord.discord_login")
+    except Exception:
+        discord_login_url = None
+
+    context = {
+        "verification_state": verification_state,
+        "saml_complete": saml_complete,
+        "discord_complete": discord_complete,
+        "saml_user": saml_user,
+        "discord_user": discord_user,
+        "saml_login_url": saml_login_url,
+        "discord_login_url": discord_login_url,
+        "verification_error": verification_error,
+        "discord_configured": DISCORD_CONFIG is not None,
+    }
+    return render_template("index.html", **context)
 
 
 @app.route("/health")

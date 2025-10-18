@@ -215,17 +215,17 @@ def saml_acs():
         "attributes": attribute_lists,
     }
 
-    next_step = _safe_redirect(verification_state.get("relay_state"))
+    next_step = _safe_redirect(relay_state) or _safe_redirect(verification_state.get("relay_state"))
     if next_step:
         return redirect(next_step)
 
     try:
-        discord_login_url = url_for("discord.discord_login")
+        home_url = url_for("hello_world")
     except Exception:
-        discord_login_url = None
+        home_url = None
 
-    if discord_login_url:
-        return redirect(discord_login_url)
+    if home_url:
+        return redirect(home_url)
 
     message = {
         "status": "saml_complete",

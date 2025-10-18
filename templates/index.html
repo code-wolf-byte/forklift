@@ -3,46 +3,122 @@
 {% block content %}
   <section class="asu-hero">
     <div class="asu-hero__content">
-      <h1>Join the Devils to Devils Discord</h1>
-      <p class="asu-hero__lead">
-        Verify your connection to ASU and unlock community channels, student resources, and events tailored to Sun Devils.
-      </p>
+      {% if discord_complete %}
+        <h1>Verification complete</h1>
+        <p class="asu-hero__lead">
+          Your ASU account{% if verification_state.asurite %} (<strong>{{ verification_state.asurite }}</strong>){% endif %}
+          and Discord are linked. Welcome to Devils to Devils!
+        </p>
+      {% elif saml_complete %}
+        <h1>Next step: connect Discord</h1>
+        <p class="asu-hero__lead">
+          You're signed in with ASU
+          {% if verification_state.asurite %}
+            as <strong>{{ verification_state.asurite }}</strong>
+          {% endif %}
+          {% if verification_state.email %}
+            ({{ verification_state.email }})
+          {% endif %}.
+          Connect your Discord account to finish verification.
+        </p>
+      {% else %}
+        <h1>Join the Devils to Devils Discord</h1>
+        <p class="asu-hero__lead">
+          Verify your connection to ASU and unlock community channels, student resources, and events tailored to Sun Devils.
+        </p>
+      {% endif %}
       <div class="asu-hero__actions">
-        <a class="asu-button asu-button--primary" href="{{ url_for('saml.saml_login') }}">Sign in with ASU SSO</a>
+        {% if not saml_complete and saml_login_url %}
+          <form method="get" action="{{ saml_login_url }}" class="asu-hero__action-form" style="display:inline">
+            <button type="submit" class="asu-button asu-button--primary">Sign in with ASU SSO</button>
+          </form>
+        {% elif saml_complete and not discord_complete and discord_login_url and discord_configured %}
+          <form method="get" action="{{ discord_login_url }}" class="asu-hero__action-form" style="display:inline">
+            <button type="submit" class="asu-button asu-button--primary">Login with Discord</button>
+          </form>
+        {% endif %}
         <a class="asu-button asu-button--outline" href="#verification-steps">View steps</a>
       </div>
+      {% if verification_error %}
+        <p class="asu-hero__error">Verification issue: {{ verification_error }}</p>
+      {% endif %}
     </div>
   </section>
 
   <section class="asu-panel-grid" id="verification-steps">
-    <article class="asu-panel">
+    <article class="asu-panel {% if saml_complete %}asu-panel--complete{% endif %}">
       <span class="asu-panel__step">Step 1</span>
       <h2>Authenticate with ASU SSO</h2>
-      <p>
-        Use your ASURITE ID to confirm your affiliation with Arizona State University.
-        We collect only the attributes required to validate your student or staff status.
-      </p>
-      <a class="asu-link" href="{{ url_for('saml.saml_login') }}">Begin ASU sign in</a>
+      {% if saml_complete %}
+        <p>
+          Logged in with ASU
+          {% if verification_state.asurite %}
+            as <strong>{{ verification_state.asurite }}</strong>
+          {% endif %}
+          {% if verification_state.email %}
+            ({{ verification_state.email }})
+          {% endif %}.
+        </p>
+      {% else %}
+        <p>
+          Use your ASURITE ID to confirm your affiliation with Arizona State University.
+          We collect only the attributes required to validate your student or staff status.
+        </p>
+      {% endif %}
+      {% if saml_login_url %}
+        <form method="get" action="{{ saml_login_url }}" class="asu-panel__actions">
+          <button type="submit"
+                  class="asu-button {% if saml_complete %}asu-button--outline{% else %}asu-button--primary{% endif %}">
+            {% if saml_complete %}Reauthenticate with ASU{% else %}Sign in with ASU{% endif %}
+          </button>
+        </form>
+      {% endif %}
     </article>
 
-    <article class="asu-panel">
+    <article class="asu-panel {% if discord_complete %}asu-panel--complete{% endif %}">
       <span class="asu-panel__step">Step 2</span>
       <h2>Connect your Discord account</h2>
-      <p>
-        After ASU SSO finishes you will be redirected to Discord. Approve access so our bot can
-        add you to the Devils to Devils server and grant the verified role automatically.
-      </p>
-      <a class="asu-link" href="{{ url_for('discord.discord_login') }}">Reconnect Discord</a>
+      {% if discord_complete %}
+        <p>
+          Discord connected as
+          <strong>{{ verification_state.discord_username or discord_user.username or "your account" }}</strong>.
+        </p>
+      {% else %}
+        <p>
+          After ASU SSO finishes you will be redirected to Discord. Approve access so our bot can
+          add you to the Devils to Devils server and grant the verified role automatically.
+        </p>
+      {% endif %}
+      {% if not discord_configured %}
+        <p class="asu-panel__tip">Discord integration is not configured yet.</p>
+      {% elif discord_login_url %}
+        <form method="get" action="{{ discord_login_url }}" class="asu-panel__actions">
+          <button type="submit"
+                  class="asu-button {% if discord_complete %}asu-button--outline{% else %}asu-button--primary{% endif %}"
+                  {% if not saml_complete %}disabled aria-disabled="true"{% endif %}>
+            {% if discord_complete %}Reconnect Discord{% else %}Login with Discord{% endif %}
+          </button>
+        </form>
+      {% endif %}
+      {% if not saml_complete %}
+        <p class="asu-panel__tip">Complete ASU sign in first to enable this step.</p>
+      {% endif %}
     </article>
 
     <article class="asu-panel">
       <span class="asu-panel__step">Step 3</span>
       <h2>Access verified channels</h2>
-      <p>
-        Once both steps succeed, the Discord bot applies the <strong>Verified Sun Devil</strong> role.
-        You&rsquo;ll see new channels and announcements curated for your ASU affiliation.
-      </p>
-      <p class="asu-panel__tip">Need help? Reach out in the <em>#help-desk</em> channel after joining.</p>
+      {% if discord_complete %}
+        <p>
+          Both steps are finished. Join the server and explore channels curated for your ASU affiliation.
+        </p>
+      {% else %}
+        <p>
+          Once both steps succeed, the Discord bot applies the <strong>Verified Sun Devil</strong> role.
+          You&rsquo;ll see new channels and announcements curated for your ASU affiliation.
+        </p>
+        <p class="asu-panel__tip">Need help? Reach out in the <em>#help-desk</em> channel after joining.</p>
+      {% endif %}
     </article>
   </section>
 
