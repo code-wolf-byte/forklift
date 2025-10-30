@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
-from datetime import datetime, timezone
+import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
@@ -12,6 +14,9 @@ from xml.etree import ElementTree
 from saml2 import BINDING_HTTP_POST, BINDING_HTTP_REDIRECT, config as saml2_config
 from saml2.metadata import create_metadata_string
 from saml2.sigver import SignatureError
+
+
+logger = logging.getLogger(__name__)
 
 
 class MetadataConfig:
@@ -48,6 +53,15 @@ class MetadataConfig:
         self.VALIDATE_CERTIFICATE = self._str_to_bool(
             os.getenv("SAML_VALIDATE_CERTIFICATE"),
             default=False,
+        )
+
+        self.METADATA_REFRESH_INTERVAL_SECONDS = max(
+            60,
+            int(os.getenv("SAML_METADATA_REFRESH_INTERVAL_SECONDS", "600")),
+        )
+        self.METADATA_REFRESH_LEEWAY_SECONDS = max(
+            0,
+            int(os.getenv("SAML_METADATA_REFRESH_LEEWAY_SECONDS", "300")),
         )
 
         self._ensure_legacy_openssl(project_root)
@@ -120,6 +134,35 @@ class MetadataGenerator:
         self._config = metadata_config
         self._default_valid_days = metadata_config.METADATA_VALIDITY_DAYS
 
+    def _read_valid_until(self, metadata_path: Path) -> datetime:
+        if not metadata_path.exists():
+            raise FileNotFoundError(f"Metadata file not found: {metadata_path}")
+
+        try:
+            root = ElementTree.fromstring(metadata_path.read_text(encoding="utf-8"))
+        except ElementTree.ParseError as exc:
+            raise ValueError(f"Cannot parse metadata XML: {metadata_path}") from exc
+
+        valid_until_raw = next(
+            (elem.attrib.get("validUntil") for elem in root.iter() if "validUntil" in elem.attrib),
+            None,
+        )
+        if valid_until_raw is None:
+            raise ValueError("Metadata is missing validUntil; cannot determine expiration.")
+
+        if valid_until_raw.endswith("Z"):
+            valid_until_raw = f"{valid_until_raw[:-1]}+00:00"
+
+        try:
+            valid_until = datetime.fromisoformat(valid_until_raw)
+        except ValueError as exc:
+            raise ValueError(f"Unexpected validUntil format: {valid_until_raw}") from exc
+
+        if valid_until.tzinfo is None:
+            valid_until = valid_until.replace(tzinfo=timezone.utc)
+
+        return valid_until
+
     @staticmethod
     def _write_metadata(output_path: Path, xml_payload: bytes | str) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -184,31 +227,7 @@ class MetadataGenerator:
     ) -> bool:
         """Return True when the metadata file has expired according to validUntil."""
         metadata_path = Path(metadata_path or self._config.METADATA_PATH)
-        if not metadata_path.exists():
-            raise FileNotFoundError(f"Metadata file not found: {metadata_path}")
-
-        try:
-            root = ElementTree.fromstring(metadata_path.read_text(encoding="utf-8"))
-        except ElementTree.ParseError as exc:
-            raise ValueError(f"Cannot parse metadata XML: {metadata_path}") from exc
-
-        valid_until_raw = next(
-            (elem.attrib.get("validUntil") for elem in root.iter() if "validUntil" in elem.attrib),
-            None,
-        )
-        if valid_until_raw is None:
-            raise ValueError("Metadata is missing validUntil; cannot determine expiration.")
-
-        if valid_until_raw.endswith("Z"):
-            valid_until_raw = f"{valid_until_raw[:-1]}+00:00"
-
-        try:
-            valid_until = datetime.fromisoformat(valid_until_raw)
-        except ValueError as exc:
-            raise ValueError(f"Unexpected validUntil format: {valid_until_raw}") from exc
-
-        if valid_until.tzinfo is None:
-            valid_until = valid_until.replace(tzinfo=timezone.utc)
+        valid_until = self._read_valid_until(metadata_path)
 
         comparison_time = at_time or datetime.now(timezone.utc)
         if comparison_time.tzinfo is None:
@@ -216,19 +235,31 @@ class MetadataGenerator:
 
         return comparison_time >= valid_until
 
+    def metadata_valid_until(
+        self,
+        metadata_path: str | Path | None = None,
+    ) -> datetime:
+        """Return the metadata validUntil timestamp."""
+        metadata_path = Path(metadata_path or self._config.METADATA_PATH)
+        return self._read_valid_until(metadata_path)
+
     def ensure_metadata(
         self,
         metadata_path: str | Path | None = None,
         *,
         valid_days: int | None = None,
         unsigned: bool = False,
+        check_time: datetime | None = None,
     ) -> bool:
         """Regenerate metadata if the file is missing or expired; return True when refreshed."""
         metadata_path = Path(metadata_path or self._config.METADATA_PATH)
+        comparison_time = check_time or datetime.now(timezone.utc)
+        if comparison_time.tzinfo is None:
+            comparison_time = comparison_time.replace(tzinfo=timezone.utc)
         try:
             expired = self.metadata_has_expired(
                 metadata_path,
-                at_time=datetime.now(timezone.utc),
+                at_time=comparison_time,
             )
         except FileNotFoundError:
             expired = True
@@ -247,9 +278,85 @@ class MetadataGenerator:
 METADATA_CONFIG = MetadataConfig()
 METADATA_GENERATOR = MetadataGenerator(METADATA_CONFIG)
 
+_REFRESH_THREAD: threading.Thread | None = None
+_REFRESH_STOP = threading.Event()
+_SCHEDULER_UNSIGNED = False
+
+
+def _next_refresh_delay() -> float:
+    """Determine how long to wait before the next metadata check."""
+    interval = METADATA_CONFIG.METADATA_REFRESH_INTERVAL_SECONDS
+    leeway = METADATA_CONFIG.METADATA_REFRESH_LEEWAY_SECONDS
+    try:
+        valid_until = METADATA_GENERATOR.metadata_valid_until(
+            metadata_path=METADATA_CONFIG.METADATA_PATH
+        )
+    except FileNotFoundError:
+        return 0.0
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Unable to read metadata validity; using default interval", exc_info=exc)
+        return float(interval)
+
+    now = datetime.now(timezone.utc)
+    refresh_at = valid_until - timedelta(seconds=leeway)
+    delay = (refresh_at - now).total_seconds()
+    if delay <= 0:
+        return 0.0
+    return min(delay, float(interval))
+
+
+def _metadata_refresh_loop() -> None:
+    """Ensure metadata refreshes in the background without downtime."""
+    while not _REFRESH_STOP.is_set():
+        try:
+            check_time = datetime.now(timezone.utc) + timedelta(
+                seconds=METADATA_CONFIG.METADATA_REFRESH_LEEWAY_SECONDS
+            )
+            refreshed = METADATA_GENERATOR.ensure_metadata(
+                metadata_path=METADATA_CONFIG.METADATA_PATH,
+                valid_days=METADATA_CONFIG.METADATA_VALIDITY_DAYS,
+                unsigned=_SCHEDULER_UNSIGNED,
+                check_time=check_time,
+            )
+            if refreshed:
+                logger.info("Regenerated SAML metadata at %s", METADATA_CONFIG.METADATA_PATH)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to refresh SAML metadata")
+
+        delay = max(1.0, _next_refresh_delay())
+        if _REFRESH_STOP.wait(delay):
+            break
+
+
+def start_metadata_scheduler() -> None:
+    """Start the background scheduler that keeps metadata fresh."""
+    global _REFRESH_THREAD
+    if _REFRESH_THREAD and _REFRESH_THREAD.is_alive():
+        return
+
+    _REFRESH_STOP.clear()
+    _REFRESH_THREAD = threading.Thread(
+        target=_metadata_refresh_loop,
+        name="metadata-refresh",
+        daemon=True,
+    )
+    _REFRESH_THREAD.start()
+
+
+def stop_metadata_scheduler() -> None:
+    """Stop the background metadata scheduler."""
+    global _REFRESH_THREAD
+    if not _REFRESH_THREAD:
+        return
+    _REFRESH_STOP.set()
+    _REFRESH_THREAD.join(timeout=5)
+    _REFRESH_THREAD = None
+
 
 def ensure_metadata_on_startup(*, unsigned: bool = False) -> Path:
     """Ensure metadata exists and is current, returning the active metadata path."""
+    global _SCHEDULER_UNSIGNED
+    _SCHEDULER_UNSIGNED = unsigned
     METADATA_GENERATOR.ensure_metadata(
         metadata_path=METADATA_CONFIG.METADATA_PATH,
         valid_days=METADATA_CONFIG.METADATA_VALIDITY_DAYS,

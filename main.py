@@ -1,14 +1,23 @@
+import os
 from datetime import datetime
 
 from flask import Flask, redirect, render_template, session, url_for
 
 from routes import discord_bp, saml_bp
 from utils.database import init_db
-from utils.metadata import ensure_metadata_on_startup
+from utils.metadata import ensure_metadata_on_startup, start_metadata_scheduler
 from utils.settings import CONFIG, DISCORD_CONFIG
+
+
+def _should_start_metadata_scheduler() -> bool:
+    flag = os.environ.get("WERKZEUG_RUN_MAIN")
+    return flag is None or flag == "true"
+
 
 ensure_metadata_on_startup()
 init_db()
+if _should_start_metadata_scheduler():
+    start_metadata_scheduler()
 
 app = Flask(__name__)
 app.secret_key = CONFIG.SECRET_KEY

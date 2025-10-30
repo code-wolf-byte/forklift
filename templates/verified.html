@@ -1,56 +1,123 @@
 {% extends "base.html" %}
 {% block title %}Verification Complete · Devils to Devils{% endblock %}
 {% block content %}
-  <section class="asu-hero">
-    <div class="asu-hero__content">
-      <h1>You're all set!</h1>
-      <p class="asu-hero__lead">
-        Thanks{% if verification_state.asurite %}, {{ verification_state.asurite }}{% endif %}! Your ASU and Discord accounts
-        are linked. Enjoy full access to the Devils to Devils Discord server.
-      </p>
-      <div class="asu-hero__actions">
-        <a class="asu-button asu-button--primary" href="https://discord.com/app">Open Discord</a>
-        <a class="asu-button asu-button--outline" href="{{ url_for('hello_world') }}">Back to verification</a>
-        {% if logout_url %}
-          <form method="post" action="{{ logout_url }}" style="display:inline">
-            <button type="submit" class="asu-button asu-button--outline">Log out</button>
-          </form>
-        {% endif %}
+  <div class="container">
+    <section class="hero-section rounded-4 shadow-lg text-white p-5 position-relative overflow-hidden">
+      <div class="row g-4 align-items-center">
+        <div class="col-lg-8">
+          <h1 class="display-5 fw-semibold mb-3">You&rsquo;re all set!</h1>
+          <p class="lead mb-4">
+            Thanks{% if verification_state.asurite %}, {{ verification_state.asurite }}{% endif %}! Your ASU and Discord accounts
+            are linked. Enjoy full access to the Devils to Devils Discord server.
+          </p>
+          <div class="d-flex flex-wrap align-items-center gap-3">
+            <a class="btn btn-asu-gold btn-lg" href="https://discord.com/app" target="_blank" rel="noopener">
+              Open Discord
+            </a>
+            <a class="btn btn-outline-light btn-lg" href="{{ url_for('hello_world') }}">
+              Back to verification
+            </a>
+            {% if logout_url %}
+              <form method="post" action="{{ logout_url }}" class="d-inline">
+                <button type="submit" class="btn btn-outline-light btn-lg">
+                  Log out
+                </button>
+              </form>
+            {% endif %}
+          </div>
+        </div>
+        <div class="col-lg-4">
+          <div class="card hero-status-card bg-white text-dark border-0 shadow h-100">
+            <div class="card-body p-4">
+              <h2 class="h5 text-uppercase fw-semibold mb-3 tracking-wide text-asu-maroon">Next steps</h2>
+              <p class="small mb-0">
+                Visit <strong>#welcome</strong> to introduce yourself, review the community guidelines in <strong>#rules</strong>,
+                and keep an eye on <strong>#announcements</strong> for upcoming events.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <section id="verification-steps" class="py-5 bg-white">
+    <div class="container">
+      <div class="row g-4">
+        <div class="col-md-4">
+          <div class="card verification-card border-0 shadow-sm h-100">
+            <div class="card-body p-4 d-flex flex-column">
+              <div class="badge rounded-pill bg-success text-uppercase fw-semibold mb-3">Step 1 complete</div>
+              <h2 class="h4">ASU sign-in</h2>
+              <p class="mb-0">
+                Signed in with
+                {% if verification_state.email %}
+                  <strong>{{ verification_state.email }}</strong>
+                {% else %}
+                  your ASU account
+                {% endif %}.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card verification-card border-0 shadow-sm h-100">
+            <div class="card-body p-4 d-flex flex-column">
+              <div class="badge rounded-pill bg-success text-uppercase fw-semibold mb-3">Step 2 complete</div>
+              <h2 class="h4">Discord linked</h2>
+              <p class="mb-0">
+                Discord account
+                <strong>{{ verification_state.discord_username or discord_user.username or "connected" }}</strong>
+                is verified.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card verification-card border-0 shadow-sm h-100">
+            <div class="card-body p-4 d-flex flex-column">
+              <div class="badge rounded-pill bg-asu-maroon text-white text-uppercase fw-semibold mb-3">What&rsquo;s next</div>
+              <h2 class="h4">Join the conversation</h2>
+              <p>
+                Head to Discord to explore verified channels, meet fellow Sun Devils, and stay current on events.
+                If you run into issues, contact the moderators anytime.
+              </p>
+              <p class="small text-muted mb-0">Need help? Email <a href="mailto:d2d-support@asu.edu">d2d-support@asu.edu</a>.</p>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </section>
 
-  <section class="asu-panel-grid">
-    <article class="asu-panel asu-panel--complete">
-      <span class="asu-panel__step">Step 1</span>
-      <h2>ASU Sign-In</h2>
-      <p>
-        Signed in with
-        {% if verification_state.email %}
-          <strong>{{ verification_state.email }}</strong>
-        {% else %}
-          your ASU account
-        {% endif %}.
-      </p>
-    </article>
+  <section id="about-verification" class="py-5 bg-white">
+    <div class="container">
+      <div class="info-panel border rounded-4 shadow-sm p-4">
+        <p class="text-uppercase fw-semibold small tracking-wide text-asu-maroon mb-2">Need a refresher?</p>
+        <p class="mb-0">
+          You can return to this page anytime to re-run verification or reconnect Discord.
+          We will always confirm your ASU affiliation before granting or updating access.
+        </p>
+      </div>
+    </div>
+  </section>
 
-    <article class="asu-panel asu-panel--complete">
-      <span class="asu-panel__step">Step 2</span>
-      <h2>Discord Linked</h2>
-      <p>
-        Discord account
-        <strong>{{ verification_state.discord_username or discord_user.username or "connected" }}</strong>
-        is verified.
-      </p>
-    </article>
-
-    <article class="asu-panel">
-      <span class="asu-panel__step">Next</span>
-      <h2>Join the conversation</h2>
-      <p>
-        Head to Discord to explore verified channels, meet fellow Sun Devils, and stay current on events.
-        If you run into issues, contact the moderators anytime.
-      </p>
-    </article>
+  <section id="support" class="py-5 bg-asu-maroon text-white">
+    <div class="container">
+      <div class="row align-items-center g-4">
+        <div class="col-lg-8">
+          <h2 class="h3 fw-semibold mb-2">Questions or feedback?</h2>
+          <p class="mb-0">
+            Email <a class="link-light text-decoration-underline" href="mailto:d2d-support@asu.edu">d2d-support@asu.edu</a>
+            or message a moderator in Discord for help.
+          </p>
+        </div>
+        <div class="col-lg-4 text-lg-end">
+          <a class="btn btn-outline-light btn-lg" href="https://discord.com/app" target="_blank" rel="noopener">
+            Return to Discord <i class="bi bi-arrow-up-right ms-2" aria-hidden="true"></i>
+          </a>
+        </div>
+      </div>
+    </div>
   </section>
 {% endblock %}
