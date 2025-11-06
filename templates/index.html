@@ -1029,18 +1029,13 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
         </p>
       {% endif %}
       <div class="d-flex flex-wrap gap-3 align-items-center mt-4">
-        {% if not saml_complete and saml_login_url %}
-          <form method="get" action="{{ saml_login_url }}">
-            <button type="submit" class="btn-default btn-maroon btn">
-              Sign in with ASU SSO
-            </button>
-          </form>
-        {% elif saml_complete and not discord_complete and discord_login_url and discord_configured %}
-          <form method="get" action="{{ discord_login_url }}">
-            <button type="submit" class="btn-default btn-maroon btn">
-              Connect Discord
-            </button>
-          </form>
+        <a class="btn btn-outline-light" href="#verification-steps">
+          View verification steps
+        </a>
+        {% if discord_complete %}
+          <a class="btn-default btn-maroon btn" href="https://discord.com/channels/1187144343400751234/1435338904994709626" target="_blank" rel="noopener">
+            Visit Devil2Devil
+          </a>
         {% endif %}
         {% if (saml_complete or discord_complete) and logout_url %}
           <form method="post" action="{{ logout_url }}">
@@ -1048,11 +1043,6 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
               Log out
             </button>
           </form>
-        {% endif %}
-        {% if not discord_complete %}
-          <a href="https://my.asu.edu/" class="btn-default btn-maroon btn" data-ga-event="link" data-ga-action="click" data-ga-name="onclick" data-ga-type="internal link" data-ga-section="Devil2Devil" data-ga-component="" data-ga-region="main content" data-ga-text="Join Devil2Devil from My ASU">
-            Join Devil2Devil from My ASU
-          </a>
         {% endif %}
       </div>
       {% if saml_complete and not discord_complete and (not discord_configured or not discord_login_url) %}
@@ -1074,6 +1064,136 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
               </div>
     </div>
   </div>
+
+{% set step1_complete = saml_complete %}
+{% set step2_complete = discord_complete %}
+{% set step2_enabled = saml_complete %}
+{% set step3_enabled = discord_complete %}
+<section id="verification-steps" class="py-5 bg-white">
+  <style>
+    .step-card {
+      border-radius: 1rem;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      height: 100%;
+      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    }
+    .step-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 1.5rem 3rem rgba(0, 0, 0, 0.08);
+    }
+    .step-card.step-complete {
+      border-color: var(--asu-maroon);
+      box-shadow: 0 0.75rem 2rem rgba(140, 29, 64, 0.18);
+    }
+    .step-card.disabled-card {
+      opacity: 0.55;
+    }
+    .step-card.disabled-card .btn {
+      pointer-events: none;
+      cursor: not-allowed;
+    }
+    .step-card .step-badge {
+      letter-spacing: 0.08em;
+    }
+    .step-card .btn.disabled-link {
+      pointer-events: none;
+      cursor: not-allowed;
+    }
+  </style>
+  <div class="container">
+    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-end gap-3 mb-4">
+      <div>
+        <p class="text-uppercase fw-semibold small tracking-wide text-asu-maroon mb-1">Three quick steps</p>
+        <h2 class="h3 fw-semibold mb-0">Verify and join the Devils to Devils community</h2>
+      </div>
+      <div class="text-muted small">
+        {% if discord_complete %}
+          <span class="badge text-bg-success">All steps complete</span>
+        {% elif saml_complete %}
+          Next up: connect your Discord account.
+        {% else %}
+          Start by signing in with your ASURITE ID.
+        {% endif %}
+      </div>
+    </div>
+    <div class="row g-4">
+      <div class="col-md-4">
+        <div class="card step-card {% if step1_complete %}step-complete{% endif %}">
+          <div class="card-body d-flex flex-column h-100">
+            <span class="badge bg-asu-gold text-dark text-uppercase fw-semibold step-badge">Step 1</span>
+            <h3 class="h4 mt-3">Log in with your ASURITE</h3>
+            <p class="flex-grow-1">
+              Use ASU single sign-on so we can confirm your admission status. You'll come right back here once the login is complete.
+            </p>
+            {% if saml_login_url %}
+              <form method="get" action="{{ saml_login_url }}" class="mt-3">
+                <button type="submit" class="btn {% if step1_complete %}btn-outline-asu-maroon{% else %}btn-asu-gold{% endif %}">
+                  {% if step1_complete %}Reauthenticate with ASU{% else %}Sign in with ASU SSO{% endif %}
+                </button>
+              </form>
+            {% else %}
+              <button type="button" class="btn btn-secondary mt-3" disabled aria-disabled="true">
+                ASU login unavailable
+              </button>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card step-card {% if not step2_enabled %}disabled-card{% endif %} {% if step2_complete %}step-complete{% endif %}">
+          <div class="card-body d-flex flex-column h-100">
+            <span class="badge bg-asu-gold text-dark text-uppercase fw-semibold step-badge">Step 2</span>
+            <h3 class="h4 mt-3">Connect your Discord account</h3>
+            <p class="flex-grow-1">
+              {% if step2_complete %}
+                Discord is already linked{% if verification_state.discord_username or discord_user.username %} as <strong>{{ verification_state.discord_username or discord_user.username }}</strong>{% endif %}. You can reconnect any time to refresh permissions.
+              {% elif step2_enabled %}
+                Approve the Devils to Devils bot so we can add you to the server and grant the verified role automatically.
+              {% else %}
+                Complete Step&nbsp;1 to unlock this step.
+              {% endif %}
+            </p>
+            {% if discord_login_url and discord_configured %}
+              <form method="get" action="{{ discord_login_url }}" class="mt-3">
+                <button type="submit" class="btn {% if step2_complete %}btn-outline-asu-maroon{% else %}btn-asu-gold{% endif %}" {% if not step2_enabled %}disabled aria-disabled="true"{% endif %}>
+                  {% if step2_complete %}Manage Discord link{% else %}Connect Discord{% endif %}
+                </button>
+              </form>
+            {% else %}
+              <div class="alert alert-secondary mt-3 mb-0 small">
+                Discord integration is not configured yet.
+              </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card step-card {% if not step3_enabled %}disabled-card{% endif %} {% if discord_complete %}step-complete{% endif %}">
+          <div class="card-body d-flex flex-column h-100">
+            <span class="badge bg-asu-gold text-dark text-uppercase fw-semibold step-badge">Step 3</span>
+            <h3 class="h4 mt-3">Visit Devil2Devil</h3>
+            <p class="flex-grow-1">
+              Head to the Devils to Devils server and start meeting the class of 2030. Introduce yourself, find your community, and catch the latest updates.
+            </p>
+            <a
+              class="btn btn-asu-gold {% if not step3_enabled %}disabled-link{% endif %} mt-3"
+              href="{% if step3_enabled %}https://discord.com/channels/1187144343400751234/1435338904994709626{% else %}#{% endif %}"
+              {% if step3_enabled %}
+                target="_blank"
+                rel="noopener"
+              {% else %}
+                aria-disabled="true"
+              {% endif %}
+            >
+              Visit Devil2Devil
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
         <div class="layout__fixed-width">
           <div class="bg-top bg-percent-100 max-size-container center-container bg-white">
         <div class="container">
