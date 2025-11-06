@@ -89,7 +89,7 @@ def verified():
     context = _verification_context()
     if not context["discord_complete"]:
         return redirect(url_for("hello_world"))
-    return render_template("verified.html", **context)
+    return render_template("index.html", **context)
 
 
 if __name__ == "__main__":

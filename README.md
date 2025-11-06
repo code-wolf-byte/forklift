@@ -1,102 +1,24 @@
-## Automated SAML metadata refresh
+## Devils to Devils Verification
 
-The application exposes the service provider metadata at `/saml/metadata`. To keep
-the file valid, schedule the metadata generator with the refresh flag each night
-so the file regenerates when expired:
+This Flask app links an ASU SSO session with a Discord account so admitted or
+current students can join the Devils to Devils community with the verified role.
+The HTML template mirrors the public ASU site while exposing states for new,
+ASU-authenticated, and fully verified users.
 
-```cron
-0 0 * * * /path/to/venv/bin/python /home/tupreti/Projects/forklift/metadata.py --refresh-if-expired >> /var/log/forklift_metadata.log 2>&1
-```
-
-Adjust the Python interpreter path as needed for your deployment. The CLI checks
-the `validUntil` attribute in `sp-metadata.xml` and only writes a new file when
-the existing metadata is missing or expired.
-
-## Discord + ASU verification flow
-
-1. A user starts at `/auth/saml/login`, completes ASU SSO, and returns to the Assertion Consumer Service at `/auth/saml/acs`. The ACS endpoint persists the SAML identity attributes (ASURITE, email, affiliations, etc.) and primes the verification session.
-2. After SAML succeeds the browser is redirected to `/auth/discord/login`, which initiates Discord OAuth2 consent.
-3. Discord redirects to `/auth/discord/callback`. The callback exchanges the authorization code, retrieves the Discord profile, joins the user to the configured guild, and assigns the verified role with the bot token.
-4. The verification session is marked complete, and the combined record is stored in the `users` table with the SAML metadata, Discord identifiers, and verification status.
-
-## Container image
-
-Build a production image with Gunicorn and xmlsec support:
+## Local development
 
 ```bash
-docker build -t forklift:latest .
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env  # update secrets before running
+python main.py
 ```
 
-Run the container locally while mounting the certs and persistent data folder:
+The server listens on `http://127.0.0.1:8000/`. Adjust values in `.env` to match
+your SAML metadata, Discord application, and cookie preferences.
 
-```bash
-mkdir -p data certs
-cp .env.example .env  # adjust values before running
-docker run --rm -p 8000:8000 \
-  --env-file .env \
-  -v "$(pwd)/certs:/app/certs:ro" \
-  -v "$(pwd)/data:/app/data" \
-  forklift:latest
-```
-
-### docker-compose with Watchtower
-
-The compose file now ships two services:
-
-- `forklift` – the Gunicorn + Flask application listening on container port 8000 and published to the host at `127.0.0.1:8000`.
-- `watchtower` – optional auto-updater that tracks the application container via labels.
-
-Create the bind-mount directories and start the stack:
-
-```bash
-mkdir -p data certs
-docker compose up -d --build
-```
-
-Watchtower only updates services carrying the `watchtower.scope=forklift` label. Adjust the `command` flags if you prefer poll-based or schedule-based updates.
-
-### Host nginx reverse proxy
-
-If you manage Nginx directly on the VPS, point your virtual host at the container by proxying to `http://127.0.0.1:8000/`. Add the WebSocket helper map once in the global `http` block:
-
-```nginx
-map $http_upgrade $connection_upgrade {
-    default upgrade;
-    ''      close;
-}
-```
-
-Then update `/etc/nginx/sites-available/verify.devil2devil.asu.edu` (HTTPS section shown) to match:
-
-```nginx
-    location / {
-        proxy_pass http://127.0.0.1:8000/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host $host;
-        proxy_set_header X-Forwarded-Port $server_port;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
-
-        proxy_connect_timeout 5s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-        proxy_buffering on;
-    }
-```
-
-Reload the host service once the compose stack is running:
-
-```bash
-sudo systemctl reload nginx
-```
-
-The `WATCHTOWER` container can continue to manage updates while Nginx stays on the host.
-
-### Required environment variables
+## Required environment variables
 
 ```
 DISCORD_CLIENT_ID=<Discord application client id>
@@ -106,44 +28,64 @@ DISCORD_BOT_TOKEN=<Discord bot token with Manage Roles permission>
 DISCORD_GUILD_ID=<Target guild snowflake>
 DISCORD_VERIFIED_ROLE_ID=<Role snowflake to assign after verification>
 FLASK_SECRET_KEY=<random string used for Flask sessions>
-DATABASE_URL=sqlite:////app/data/forklift.db    # defaults to the mounted ./data volume
+DATABASE_URL=sqlite:////absolute/path/to/forklift.db
 ```
 
 Optional overrides:
 
 ```
-DISCORD_SCOPE=identify guilds.join           # customize OAuth scopes
-DISCORD_SUCCESS_REDIRECT=/verified           # relative redirect after success
-DISCORD_FAILURE_REDIRECT=/verification-error # relative redirect on failure
-SAML_ATTR_ASURITE=uid                        # override ASU attribute mapping
+DISCORD_SCOPE=identify guilds.join
+DISCORD_SUCCESS_REDIRECT=/verified
+DISCORD_FAILURE_REDIRECT=/verification-error
+SAML_ATTR_ASURITE=uid
 SAML_ATTR_EMAIL=mail
 SAML_ATTR_FULL_NAME=displayName
 SAML_ATTR_FIRST_NAME=givenName
 SAML_ATTR_LAST_NAME=sn
 SAML_ATTR_AFFILIATIONS=eduPersonAffiliation
-SAML_METADATA_PATH=/app/data/sp-metadata.xml
-SAML_IDP_METADATA=/app/data/idp-metadata.xml
+SAML_METADATA_PATH=/path/to/sp-metadata.xml
+SAML_IDP_METADATA=/path/to/idp-metadata.xml
+SAML_METADATA_VALIDITY_DAYS=365
 ```
 
-If you rely on host-level Nginx for TLS termination, keep certbot’s deployment hooks pointed at `/etc/letsencrypt` and ensure the Flask container mounts the resulting keypair inside `certs/`.
+## Verification flow
 
-### Automating SP certificate deployment
+1. `/auth/saml/login` starts ASU SSO and persists key identity attributes at the
+   Assertion Consumer Service (`/auth/saml/acs`).
+2. On success the browser continues to `/auth/discord/login` for Discord OAuth2
+   consent.
+3. `/auth/discord/callback` exchanges the authorization code, joins the guild,
+   and assigns the verified role.
+4. The combined record is stored in the `users` table and the session is marked
+   complete so the landing page shows the verified state.
 
-The script `scripts/setup_sp_certs.sh` bootstraps certificate management on the host where certbot runs:
+## Automated SAML metadata refresh
 
-```bash
-sudo bash scripts/setup_sp_certs.sh
+Expose the generated service-provider metadata at `/saml/metadata`. Schedule the
+refresh command so the file regenerates before the `validUntil` timestamp:
+
+```cron
+0 0 * * * /path/to/venv/bin/python /path/to/project/utils/metadata.py --refresh-if-expired >> /var/log/forklift_metadata.log 2>&1
 ```
 
-It copies the active `cert.pem`/`privkey.pem` (or `fullchain.pem` if enabled) into the mounted `certs/` directory, installs a certbot deploy hook to repeat the copy after future renewals, and executes
+The CLI only writes a new file when the existing metadata is missing or expired.
+Adjust the interpreter path and logging location to match your deployment.
 
-```bash
-docker compose exec -T forklift python -m utils.metadata --refresh-if-expired
+## Discord bot
+
+The project ships with a lightweight Discord bot (powered by [py-cord]) that can
+manage verification directly in the guild. Instantiate it with:
+
+```python
+from asu_discord import create_bot
+from utils.settings import DISCORD_CONFIG
+
+bot = create_bot(command_prefix="!")
+bot.run(DISCORD_CONFIG.bot_token)
 ```
 
-so the service provider metadata is re-signed with the new key automatically. Edit the configuration block at the top of the script to match your server paths, user, and docker-compose command before running it.
+The bot loads a verification cog that exposes `!verify @member` and
+`!unverify @member` commands (requires the `Manage Roles` permission) to assign
+or remove the configured verification role.
 
-The default SAML attribute mapping matches ASU SSO metadata. Adjust the names if
-your IdP uses different URIs or friendly names. The Discord bot must be present
-in the guild with the `Manage Roles` permission and the verified role must be
-below the bot's highest role.
+[py-cord]: https://pypi.org/project/py-cord/

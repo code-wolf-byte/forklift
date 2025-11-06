@@ -6,7 +6,7 @@ from datetime import datetime
 
 from flask import Blueprint, redirect, request, session, url_for
 
-from services.discord import (
+from asu_discord.api import (
     DiscordAPIError,
     assign_verified_role,
     build_authorize_url,
