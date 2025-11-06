@@ -568,7 +568,6 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
     <title>Home | Devil 2 Devil</title>
 <link rel="stylesheet" media="all" href="{{ url_for('static', filename='css/devil2devil-main.css') }}">
 <link rel="stylesheet" media="all" href="{{ url_for('static', filename='css/devil2devil-components.css') }}">
-<link rel="stylesheet" media="all" href="{{ url_for('static', filename='css/verification.css') }}">
 
     
             <script defer="" src="{{ url_for('static', filename='js/devil2devil-all.min.js') }}"></script>
@@ -1070,14 +1069,44 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
 {% set step2_complete = discord_complete %}
 {% set step2_enabled = saml_complete %}
 {% set step3_enabled = discord_complete %}
-<section id="verification-steps" class="verification-section py-5 bg-white">
+<section id="verification-steps" class="py-5 bg-white">
+  <style>
+    .step-card {
+      border-radius: 1rem;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      height: 100%;
+      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    }
+    .step-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 1.5rem 3rem rgba(0, 0, 0, 0.08);
+    }
+    .step-card.step-complete {
+      border-color: var(--asu-maroon);
+      box-shadow: 0 0.75rem 2rem rgba(140, 29, 64, 0.18);
+    }
+    .step-card.disabled-card {
+      opacity: 0.65;
+    }
+    .step-card.disabled-card .btn {
+      pointer-events: none;
+      cursor: not-allowed;
+    }
+    .step-card .step-badge {
+      letter-spacing: 0.08em;
+    }
+    .step-card .btn.disabled-link {
+      pointer-events: none;
+      cursor: not-allowed;
+    }
+  </style>
   <div class="container">
-    <div class="verification-section__header d-flex flex-column flex-lg-row justify-content-between align-items-lg-end gap-3 mb-4">
+    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-end gap-3 mb-4">
       <div>
-        <p class="text-uppercase fw-semibold small text-asu-maroon mb-1">Three quick steps</p>
+        <p class="text-uppercase fw-semibold small tracking-wide text-asu-maroon mb-1">Three quick steps</p>
         <h2 class="h3 fw-semibold mb-0">Verify and join the Devils to Devils community</h2>
       </div>
-      <div class="text-muted small fw-semibold verification-section__status">
+      <div class="text-muted small">
         {% if step3_enabled %}
           <span class="badge text-bg-success">All steps complete</span>
         {% elif step2_enabled %}
@@ -1087,89 +1116,88 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
         {% endif %}
       </div>
     </div>
-    <div class="row g-4 verification-section__row">
+    <div class="row g-4">
       <div class="col-md-4">
-        <article class="verification-card card h-100 d-flex flex-column {% if step1_complete %}verification-card--complete{% endif %}">
-          <header class="card-header border-0 bg-transparent pb-0">
-            <span class="verification-card__badge badge bg-warning text-dark text-uppercase fw-semibold">Step 1</span>
-            <h3 class="card-title h4 mt-3 mb-0">Sign in with ASURITE</h3>
-          </header>
-          <div class="card-body d-flex flex-column">
-            <p class="verification-card__description">
-              Use ASU single sign-on so we can confirm your admission status. You'll land right back here once the login finishes.
+        <div class="card step-card {% if step1_complete %}step-complete{% endif %}">
+          <div class="card-body d-flex flex-column h-100">
+            <span class="badge bg-asu-gold text-dark text-uppercase fw-semibold step-badge">Step 1</span>
+            <h3 class="h4 mt-3">Log in with your ASURITE</h3>
+            <p class="flex-grow-1">
+              Use ASU single sign-on so we can confirm your admission status. You'll come right back here once the login is complete.
             </p>
-            {% if step1_complete %}
-              <p class="mb-0"><span class="badge text-bg-success">Completed</span></p>
-            {% endif %}
-          </div>
-          <div class="card-footer bg-transparent border-0 mt-auto pt-0">
             {% if saml_login_url %}
-              <form method="get" action="{{ saml_login_url }}">
-                <button type="submit" class="btn btn-maroon w-100">
+              <form method="get" action="{{ saml_login_url }}" class="mt-3">
+                <button type="submit" class="btn {% if step1_complete %}btn-outline-asu-maroon{% else %}btn-asu-gold{% endif %}">
                   {% if step1_complete %}Reauthenticate with ASU{% else %}Sign in with ASU SSO{% endif %}
                 </button>
               </form>
             {% else %}
-              <button type="button" class="btn btn-secondary w-100" disabled aria-disabled="true">ASU login unavailable</button>
+              <button type="button" class="btn btn-secondary mt-3" disabled aria-disabled="true">
+                ASU login unavailable
+              </button>
+            {% endif %}
+            {% if step1_complete %}
+              <p class="mb-0 mt-3"><span class="badge text-bg-success">Completed</span></p>
             {% endif %}
           </div>
-        </article>
+        </div>
       </div>
       <div class="col-md-4">
-        <article class="verification-card card h-100 d-flex flex-column {% if step2_complete %}verification-card--complete{% elif not step2_enabled %}verification-card--disabled{% endif %}">
-          <header class="card-header border-0 bg-transparent pb-0">
-            <span class="verification-card__badge badge bg-warning text-dark text-uppercase fw-semibold">Step 2</span>
-            <h3 class="card-title h4 mt-3 mb-0">Connect Discord</h3>
-          </header>
-          <div class="card-body d-flex flex-column">
-            <p class="verification-card__description">
+        <div class="card step-card {% if not step2_enabled %}disabled-card{% endif %} {% if step2_complete %}step-complete{% endif %}">
+          <div class="card-body d-flex flex-column h-100">
+            <span class="badge bg-asu-gold text-dark text-uppercase fw-semibold step-badge">Step 2</span>
+            <h3 class="h4 mt-3">Connect your Discord account</h3>
+            <p class="flex-grow-1">
               {% if step2_complete %}
-                Discord is linked{% if verification_state.discord_username or discord_user.username %} as <strong>{{ verification_state.discord_username or discord_user.username }}</strong>{% endif %}. Reconnect any time to refresh permissions.
+                Discord is already linked{% if verification_state.discord_username or discord_user.username %} as <strong>{{ verification_state.discord_username or discord_user.username }}</strong>{% endif %}. You can reconnect any time to refresh permissions.
               {% elif step2_enabled %}
                 Approve the Devils to Devils bot so we can add you to the server and grant the verified role automatically.
               {% else %}
                 Complete Step&nbsp;1 to unlock this step.
               {% endif %}
             </p>
-            {% if step2_complete %}
-              <p class="mb-0"><span class="badge text-bg-success">Completed</span></p>
-            {% endif %}
-          </div>
-          <div class="card-footer bg-transparent border-0 mt-auto pt-0">
             {% if discord_login_url and discord_configured %}
-              <form method="get" action="{{ discord_login_url }}">
-                <button type="submit" class="btn btn-maroon w-100" {% if not step2_enabled %}disabled aria-disabled="true"{% endif %}>
+              <form method="get" action="{{ discord_login_url }}" class="mt-3">
+                <button type="submit" class="btn {% if step2_complete %}btn-outline-asu-maroon{% else %}btn-asu-gold{% endif %}" {% if not step2_enabled %}disabled aria-disabled="true"{% endif %}>
                   {% if step2_complete %}Manage Discord link{% else %}Connect Discord{% endif %}
                 </button>
               </form>
             {% else %}
-              <span class="btn btn-secondary w-100 disabled" aria-disabled="true">Discord integration unavailable</span>
+              <div class="alert alert-secondary mt-3 mb-0 small">
+                Discord integration is not configured yet.
+              </div>
+            {% endif %}
+            {% if step2_complete %}
+              <p class="mb-0 mt-3"><span class="badge text-bg-success">Completed</span></p>
             {% endif %}
           </div>
-        </article>
+        </div>
       </div>
       <div class="col-md-4">
-        <article class="verification-card card h-100 d-flex flex-column {% if step3_enabled %}verification-card--complete{% else %}verification-card--disabled{% endif %}">
-          <header class="card-header border-0 bg-transparent pb-0">
-            <span class="verification-card__badge badge bg-warning text-dark text-uppercase fw-semibold">Step 3</span>
-            <h3 class="card-title h4 mt-3 mb-0">Visit Devil2Devil</h3>
-          </header>
-          <div class="card-body d-flex flex-column">
-            <p class="verification-card__description">
-              Head to the Devils to Devils server to meet classmates, find resources, and introduce yourself to the community.
+        <div class="card step-card {% if not step3_enabled %}disabled-card{% endif %} {% if discord_complete %}step-complete{% endif %}">
+          <div class="card-body d-flex flex-column h-100">
+            <span class="badge bg-asu-gold text-dark text-uppercase fw-semibold step-badge">Step 3</span>
+            <h3 class="h4 mt-3">Visit Devil2Devil</h3>
+            <p class="flex-grow-1">
+              Head to the Devils to Devils server and start meeting the class of 2030. Introduce yourself, find your community, and catch the latest updates.
             </p>
-            {% if step3_enabled %}
-              <p class="mb-0"><span class="badge text-bg-success">Ready to join</span></p>
-            {% endif %}
-          </div>
-          <div class="card-footer bg-transparent border-0 mt-auto pt-0">
-            <a class="btn btn-maroon w-100{% if not step3_enabled %} disabled{% endif %}"
-               href="{% if step3_enabled %}https://discord.com/channels/1187144343400751234/1435338904994709626{% else %}#{% endif %}"
-               {% if step3_enabled %}target="_blank" rel="noopener"{% else %}aria-disabled="true"{% endif %}>
+            <a
+              class="btn {% if step3_enabled %}btn-asu-gold{% else %}btn-asu-gold disabled-link{% endif %} mt-3"
+              href="{% if step3_enabled %}https://discord.com/channels/1187144343400751234/1435338904994709626{% else %}#{% endif %}"
+              {% if step3_enabled %}
+                target="_blank"
+                rel="noopener"
+              {% else %}
+                aria-disabled="true"
+              {% endif %}
+            >
               Visit Devil2Devil
             </a>
+            {% if step3_enabled %}
+              <p class="mb-0 mt-3"><span class="badge text-bg-success">Ready to join</span></p>
+            {% endif %}
           </div>
-        </article>
+        </div>
       </div>
     </div>
   </div>
