@@ -1,0 +1,75 @@
+/* Custom styles for the verification step cards (mirrors Webspark card aesthetics). */
+
+.verification-section {
+  position: relative;
+}
+
+.verification-section__header .badge {
+  letter-spacing: 0.05em;
+}
+
+.verification-section__status .badge {
+  font-size: 0.75rem;
+}
+
+.verification-card {
+  border-radius: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  background-color: #fff;
+}
+
+.verification-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.08);
+}
+
+.verification-card--complete {
+  border-color: #8c1d40;
+  box-shadow: 0 18px 40px rgba(140, 29, 64, 0.18);
+}
+
+.verification-card--disabled {
+  opacity: 0.65;
+}
+
+.verification-card--disabled .btn {
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+.verification-card .card-header {
+  padding-top: 1.5rem;
+  padding-bottom: 0.5rem;
+}
+
+.verification-card__badge {
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+}
+
+.verification-card__description {
+  flex-grow: 1;
+  font-size: 0.95rem;
+  color: #484848;
+}
+
+.verification-card .btn.disabled,
+.verification-card .btn:disabled,
+.verification-card .btn[aria-disabled="true"] {
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+@media (max-width: 767.98px) {
+  .verification-section__header {
+    text-align: center;
+  }
+
+  .verification-section__status {
+    width: 100%;
+  }
+}
