@@ -1065,150 +1065,117 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
     </div>
   </div>
 
-<div id="verification-steps" class="site-section">
 {% set step1_complete = saml_complete %}
 {% set step2_complete = discord_complete %}
 {% set step2_enabled = saml_complete %}
 {% set step3_enabled = discord_complete %}
-  <div class="layout__fixed-width">
-    <div class="bg-top bg-percent-100 max-size-container center-container bg-white">
+<div class="layout__fixed-width" id="verification-steps">
+  <div class="bg-top bg-percent-100 max-size-container center-container bg-white">
     <div class="container">
       <div class="row">
         <div class="col-12">
           <div class="layout__region layout__region--first">
-            
-<div class="block block-layout-builder block-inline-blocktext-content clearfix default">
-    
-
-    
-    
-  
-  <div class="formatted-text">
-      <div class="uds-highlighted-heading"><h2><span class="highlight-gold">Verify and join the community</span></h2></div>
-  </div>
-
-</div>
-
-<div class="spacing-bottom-72 block block-layout-builder block-inline-blockcard-arrangement">
-    
-
-  
-    
-  
-      <div class="uds-card-arrangement ">
-  <div class="uds-card-arrangement-content-container default">
-        
-    
-
-  </div>
-  <div class="uds-card-arrangement-card-container auto-arrangement four-columns">
-            
-
-    <div class="card-wrapper">
-      <div class="sc-fqkvVR glpyHd card cards-components" data-testid="card-container">
-        <div class="card-header" data-testid="card-title">
-          <h3 class="card-title">Step 1 · Sign in with ASURITE</h3>
-        </div>
-        <div class="card-body" data-testid="card-body">
-          <div>
-            <p>Use ASU single sign-on so we can confirm your admission status. You will return here once the login finishes.</p>
-            {% if step1_complete %}
-              <p class="mb-0"><span class="badge text-bg-success">Completed</span></p>
-            {% endif %}
-          </div>
-        </div>
-        <div class="card-buttons">
-          {% if saml_login_url %}
-            <div class="card-button" data-testid="card-button">
-              <form method="get" action="{{ saml_login_url }}">
-                <button type="submit" class="btn btn-maroon">
-                  {% if step1_complete %}Reauthenticate with ASU{% else %}Sign in with ASU SSO{% endif %}
-                </button>
-              </form>
+            <div class="block block-layout-builder block-inline-blocktext-content clearfix default">
+              <div class="formatted-text">
+                <div class="uds-highlighted-heading">
+                  <h2><span class="highlight-gold">Verify and join the community</span></h2>
+                </div>
+              </div>
             </div>
-          {% else %}
-            <div class="card-button" data-testid="card-button">
-              <button type="button" class="btn btn-secondary" disabled aria-disabled="true">ASU login unavailable</button>
+            <div class="spacing-bottom-72 block block-layout-builder block-inline-blockcard-arrangement">
+              <div class="uds-card-arrangement">
+                <div class="uds-card-arrangement-content-container default">
+                  <div class="text-muted small fw-semibold">
+                    {% if step3_enabled %}
+                      <span class="badge text-bg-success">All steps complete</span>
+                    {% elif step2_enabled %}
+                      Next up: connect your Discord account.
+                    {% else %}
+                      Start by signing in with your ASURITE ID.
+                    {% endif %}
+                  </div>
+                </div>
+                <div class="uds-card-arrangement-card-container auto-arrangement four-columns">
+                  <div class="card-wrapper">
+                    <div class="card uds-card h-100 {% if step1_complete %}border border-success-subtle{% endif %}">
+                      <div class="uds-card__content">
+                        <span class="badge bg-warning text-dark text-uppercase fw-semibold">Step 1</span>
+                        <h3 class="h4 mt-3 mb-3">Sign in with ASURITE</h3>
+                        <p class="mb-3">
+                          Use ASU single sign-on so we can confirm your admission status. You'll land right back here once the login finishes.
+                        </p>
+                        {% if step1_complete %}
+                          <p class="mb-0"><span class="badge text-bg-success">Completed</span></p>
+                        {% endif %}
+                      </div>
+                      <div class="uds-card__cta mt-auto pt-3">
+                        {% if saml_login_url %}
+                          <form method="get" action="{{ saml_login_url }}">
+                            <button type="submit" class="btn btn-maroon w-100">
+                              {% if step1_complete %}Reauthenticate with ASU{% else %}Sign in with ASU SSO{% endif %}
+                            </button>
+                          </form>
+                        {% else %}
+                          <button type="button" class="btn btn-secondary w-100" disabled aria-disabled="true">ASU login unavailable</button>
+                        {% endif %}
+                      </div>
+                    </div>
+                  </div>
+                  <div class="card-wrapper">
+                    <div class="card uds-card h-100 {% if step2_complete %}border border-success-subtle{% elif not step2_enabled %}opacity-50{% endif %}">
+                      <div class="uds-card__content">
+                        <span class="badge bg-warning text-dark text-uppercase fw-semibold">Step 2</span>
+                        <h3 class="h4 mt-3 mb-3">Connect Discord</h3>
+                        <p class="mb-3">
+                          {% if step2_complete %}
+                            Discord is linked{% if verification_state.discord_username or discord_user.username %} as <strong>{{ verification_state.discord_username or discord_user.username }}</strong>{% endif %}. Reconnect any time to refresh permissions.
+                          {% elif step2_enabled %}
+                            Approve the Devils to Devils bot so we can add you to the server and grant the verified role automatically.
+                          {% else %}
+                            Complete Step&nbsp;1 to unlock this step.
+                          {% endif %}
+                        </p>
+                        {% if step2_complete %}
+                          <p class="mb-0"><span class="badge text-bg-success">Completed</span></p>
+                        {% endif %}
+                      </div>
+                      <div class="uds-card__cta mt-auto pt-3">
+                        {% if discord_login_url and discord_configured %}
+                          <form method="get" action="{{ discord_login_url }}">
+                            <button type="submit" class="btn btn-maroon w-100" {% if not step2_enabled %}disabled aria-disabled="true"{% endif %}>
+                              {% if step2_complete %}Manage Discord link{% else %}Connect Discord{% endif %}
+                            </button>
+                          </form>
+                        {% else %}
+                          <span class="btn btn-secondary w-100 disabled" aria-disabled="true">Discord integration unavailable</span>
+                        {% endif %}
+                      </div>
+                    </div>
+                  </div>
+                  <div class="card-wrapper">
+                    <div class="card uds-card h-100 {% if step3_enabled %}border border-success-subtle{% else %}opacity-75{% endif %}">
+                      <div class="uds-card__content">
+                        <span class="badge bg-warning text-dark text-uppercase fw-semibold">Step 3</span>
+                        <h3 class="h4 mt-3 mb-3">Visit Devil2Devil</h3>
+                        <p class="mb-3">
+                          Head to the Devils to Devils server to meet classmates, find resources, and introduce yourself to the community.
+                        </p>
+                        {% if step3_enabled %}
+                          <p class="mb-0"><span class="badge text-bg-success">Ready to join</span></p>
+                        {% endif %}
+                      </div>
+                      <div class="uds-card__cta mt-auto pt-3">
+                        <a class="btn btn-maroon w-100{% if not step3_enabled %} disabled{% endif %}"
+                           href="{% if step3_enabled %}https://discord.com/channels/1187144343400751234/1435338904994709626{% else %}#{% endif %}"
+                           {% if step3_enabled %}target="_blank" rel="noopener"{% else %}aria-disabled="true"{% endif %}>
+                          Visit Devil2Devil
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-          {% endif %}
-        </div>
-      </div>
-    </div>
-
-
-
-    <div class="card-wrapper">
-      <div class="sc-fqkvVR glpyHd card cards-components" data-testid="card-container">
-        <div class="card-header" data-testid="card-title">
-          <h3 class="card-title">Step 2 · Connect Discord</h3>
-        </div>
-        <div class="card-body" data-testid="card-body">
-          <div>
-            {% if step2_complete %}
-              <p>Discord is linked{% if verification_state.discord_username or discord_user.username %} as <strong>{{ verification_state.discord_username or discord_user.username }}</strong>{% endif %}. Reconnect any time to refresh permissions.</p>
-              <p class="mb-0"><span class="badge text-bg-success">Completed</span></p>
-            {% elif step2_enabled %}
-              <p>Approve the Devils to Devils bot so we can add you to the server and grant the verified role automatically.</p>
-            {% else %}
-              <p>Complete Step&nbsp;1 to unlock this step.</p>
-            {% endif %}
-          </div>
-        </div>
-        <div class="card-buttons">
-          {% if discord_login_url and discord_configured %}
-            <div class="card-button" data-testid="card-button">
-              <form method="get" action="{{ discord_login_url }}">
-                <button type="submit" class="btn btn-maroon" {% if not step2_enabled %}disabled aria-disabled="true"{% endif %}>
-                  {% if step2_complete %}Manage Discord link{% else %}Connect Discord{% endif %}
-                </button>
-              </form>
-            </div>
-          {% else %}
-            <div class="card-button" data-testid="card-button">
-              <span class="btn btn-secondary" disabled aria-disabled="true">Discord integration unavailable</span>
-            </div>
-          {% endif %}
-        </div>
-      </div>
-    </div>
-
-
-
-    <div class="card-wrapper">
-      <div class="sc-fqkvVR glpyHd card cards-components" data-testid="card-container">
-        <div class="card-header" data-testid="card-title">
-          <h3 class="card-title">Step 3 · Visit Devil2Devil</h3>
-        </div>
-        <div class="card-body" data-testid="card-body">
-          <div>
-            <p>Head to the Devils to Devils server to meet classmates, find resources, and introduce yourself to the community.</p>
-            {% if step3_enabled %}
-              <p class="mb-0"><span class="badge text-bg-success">Ready to join</span></p>
-            {% endif %}
-          </div>
-        </div>
-        <div class="card-buttons">
-          <div class="card-button" data-testid="card-button">
-            <a class="btn btn-maroon{% if not step3_enabled %} disabled{% endif %}"
-               href="{% if step3_enabled %}https://discord.com/channels/1187144343400751234/1435338904994709626{% else %}#{% endif %}"
-               {% if step3_enabled %}target="_blank" rel="noopener"{% else %}aria-disabled="true"{% endif %}>
-              Visit Devil2Devil
-            </a>
-          </div>
-        </div>
-      </div>
-    </div>
-
-
-
-  
-
-  </div>
-</div>
-    
-</div>
-
-
           </div>
         </div>
       </div>
