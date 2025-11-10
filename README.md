@@ -34,7 +34,7 @@ DATABASE_URL=sqlite:////absolute/path/to/forklift.db
 Optional overrides:
 
 ```
-DISCORD_SCOPE=identify guilds.join
+DISCORD_SCOPE=identify
 DISCORD_SUCCESS_REDIRECT=/verified
 DISCORD_FAILURE_REDIRECT=/verification-error
 SAML_ATTR_ASURITE=uid
@@ -54,8 +54,8 @@ SAML_METADATA_VALIDITY_DAYS=365
    Assertion Consumer Service (`/auth/saml/acs`).
 2. On success the browser continues to `/auth/discord/login` for Discord OAuth2
    consent.
-3. `/auth/discord/callback` exchanges the authorization code, joins the guild,
-   and assigns the verified role.
+3. `/auth/discord/callback` exchanges the authorization code and assigns the
+   verified role to members who are already in the guild.
 4. The combined record is stored in the `users` table and the session is marked
    complete so the landing page shows the verified state.
 
@@ -86,6 +86,8 @@ bot.run(DISCORD_CONFIG.bot_token)
 
 The bot loads a verification cog that exposes `!verify @member` and
 `!unverify @member` commands (requires the `Manage Roles` permission) to assign
-or remove the configured verification role.
+or remove the configured verification role. Use `/setup_verification` (requires
+`Manage Server`) to post the Devils to Devils verification embed and "Verify
+Here" button in the current channel.
 
 [py-cord]: https://pypi.org/project/py-cord/

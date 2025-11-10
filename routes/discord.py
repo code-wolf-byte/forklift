@@ -10,7 +10,6 @@ from asu_discord.api import (
     DiscordAPIError,
     assign_verified_role,
     build_authorize_url,
-    ensure_guild_membership,
     exchange_code_for_token,
     fetch_user_profile,
 )
@@ -119,7 +118,6 @@ def discord_callback():
             user.discord_global_name = profile.get("global_name")
             user.discord_avatar = profile.get("avatar")
 
-            ensure_guild_membership(discord_user_id, access_token)
             assign_verified_role(discord_user_id)
 
             user.verified = True

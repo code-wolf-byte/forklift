@@ -87,32 +87,6 @@ def fetch_user_profile(access_token: str) -> Dict[str, Any]:
     return _safe_json(response)
 
 
-def ensure_guild_membership(user_id: str, access_token: str) -> None:
-    cfg = _config()
-    url = f"{cfg.api_base}/guilds/{cfg.guild_id}/members/{user_id}"
-    headers = {
-        "Authorization": f"Bot {cfg.bot_token}",
-        "Content-Type": "application/json",
-    }
-    json_payload = {"access_token": access_token}
-
-    try:
-        response = requests.put(url, headers=headers, json=json_payload, timeout=DEFAULT_TIMEOUT)
-    except requests.RequestException as exc:
-        logger.error("Discord guild join request failed: %s", exc)
-        raise DiscordAPIError("Unable to add Discord user to guild") from exc
-
-    if response.status_code not in {200, 201, 204}:
-        payload = _safe_json(response)
-        if payload.get("code") == 10004:
-            logger.info(
-                "Discord guild join returned Unknown Guild (code 10004); assuming user is already a member"
-            )
-            return
-        logger.error("Discord guild join failed: %s", payload)
-        raise DiscordAPIError("Failed to add Discord user to guild", status=response.status_code, payload=payload)
-
-
 def assign_verified_role(user_id: str) -> None:
     cfg = _config()
     url = f"{cfg.api_base}/guilds/{cfg.guild_id}/members/{user_id}/roles/{cfg.verified_role_id}"
@@ -152,7 +126,6 @@ __all__ = [
     "DiscordAPIError",
     "assign_verified_role",
     "build_authorize_url",
-    "ensure_guild_membership",
     "exchange_code_for_token",
     "fetch_user_profile",
 ]

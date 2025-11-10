@@ -122,7 +122,7 @@ class DiscordConfig:
     bot_token: str
     guild_id: str
     verified_role_id: str
-    scope: str = "identify guilds.join"
+    scope: str = "identify"
     api_base: str = "https://discord.com/api/v10"
     authorize_base: str = "https://discord.com/oauth2/authorize"
     token_url: str = "https://discord.com/api/oauth2/token"
@@ -147,7 +147,7 @@ class DiscordConfig:
             else:
                 payload[field] = value
 
-        scope = _env_value("DISCORD_SCOPE", default="identify guilds.join")
+        scope = _env_value("DISCORD_SCOPE", default="identify")
 
         if missing:
             missing_vars = ", ".join(missing)

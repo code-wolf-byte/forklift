@@ -6,7 +6,6 @@ from .api import (
     DiscordAPIError,
     assign_verified_role,
     build_authorize_url,
-    ensure_guild_membership,
     exchange_code_for_token,
     fetch_user_profile,
 )
@@ -18,7 +17,6 @@ __all__ = [
     "DiscordAPIError",
     "assign_verified_role",
     "build_authorize_url",
-    "ensure_guild_membership",
     "exchange_code_for_token",
     "fetch_user_profile",
 ]
