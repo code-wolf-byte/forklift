@@ -31,4 +31,4 @@ EXPOSE 8000
 ENV FLASK_APP=main.py \
     PYTHONPATH=/app
 
-CMD ["gunicorn", "-b", "0.0.0.0:8000", "--worker-class", "gthread", "--threads", "4", "--timeout", "60", "main:app"]
+CMD ["gunicorn", "-b", "0.0.0.0:8000", "--worker-class", "gthread", "--threads", "4", "--timeout", "60", "--log-level", "info", "main:app"]
