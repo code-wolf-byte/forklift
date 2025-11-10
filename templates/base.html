@@ -54,20 +54,7 @@
     <main id="main-content" class="py-5">
       {% block content %}{% endblock %}
     </main>
-    <footer class="uds-site-footer bg-asu-maroon text-white py-4 mt-auto">
-      <div class="container">
-        <div class="row gy-3 align-items-center">
-          <div class="col-12 col-md">
-            <p class="mb-0 fw-semibold text-uppercase small tracking-wide">Devils to Devils</p>
-            <p class="mb-0">Arizona State University</p>
-          </div>
-          <div class="col-12 col-md-auto text-md-end">
-            <p class="mb-1 mb-md-0">&copy; {{ current_year }} Arizona State University</p>
-            <p class="mb-0 small">Need help? Contact the Devils to Devils moderators for assistance.</p>
-          </div>
-        </div>
-      </div>
-    </footer>
+    {% include "partials/site-footer.html" %}
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-ENjdO4Dr2bkBIFxQpeoTz1HIcje39Wm4jDKdf19U8gI4ddQ3GyYkG6Y5qO2cx4Ga" crossorigin="anonymous"></script>
     {% block scripts %}{% endblock %}
   </body>

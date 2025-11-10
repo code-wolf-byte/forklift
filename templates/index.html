@@ -1013,21 +1013,9 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
   </h1>
   
       <div class="content hero-cta">
-      {% if discord_complete %}
-        <p class="text-white">
-          Your ASU account{% if verification_state.asurite %} (<strong>{{ verification_state.asurite }}</strong>){% endif %}
-          is linked with Discord. Welcome to Devils to Devils{% if verification_state.discord_username or discord_user.username %}, {{ verification_state.discord_username or discord_user.username }}{% endif %}!
-        </p>
-      {% elif saml_complete %}
-        <p class="text-white">
-          You're signed in with ASU{% if verification_state.asurite %} as <strong>{{ verification_state.asurite }}</strong>{% endif %}
-          {% if verification_state.email %}({{ verification_state.email }}){% endif %}. Connect your Discord account to finish verification.
-        </p>
-      {% else %}
         <p class="text-white">
           Find new friends, join communities and make connections in ASU’s Devil2Devil Discord server for admitted students.
         </p>
-      {% endif %}
       <div class="d-flex flex-wrap gap-3 align-items-center mt-4">
         <a class="btn btn-outline-light" href="#verification-steps">
           View verification steps
@@ -1045,16 +1033,6 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
           </form>
         {% endif %}
       </div>
-      {% if saml_complete and not discord_complete and (not discord_configured or not discord_login_url) %}
-        <div class="badge bg-light text-dark fw-semibold mt-3">
-          Discord integration is not configured yet.
-        </div>
-      {% endif %}
-      {% if verification_error %}
-        <div class="alert alert-warning border-0 fw-semibold text-dark bg-warning-subtle mt-4">
-          Verification issue: {{ verification_error }}
-        </div>
-      {% endif %}
     </div>
 
       </div>
@@ -1067,7 +1045,8 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
 
 
 
-<div class="container">
+<div class="spacing-top-72 spacing-bottom-32 block block-layout-builder block-inline-blocktext-content clearfix default">
+  <div class="container">
     <div class="row g-5 align-items-center">
       <div class="col-lg-4 text-center text-lg-start">
         <img class="img-fluid rounded" src="/static/img/devil2devil-profile.gif" alt="Devil2Devil profile graphic" loading="lazy">
@@ -1081,31 +1060,69 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
       </div>
     </div>
   </div>
+</div>
 
 
 
 
-<!-- Section: Verification -->
+
+
+
+
+
+
+{% set step1_complete = saml_complete %}
+{% set step2_complete = discord_complete %}
+{% set step2_enabled = saml_complete %}
+{% set step3_enabled = discord_complete %}
+
+
+<!-- Updated Section: Verification with Restored Step Logic -->
 <section id="verification-steps" class="py-5 bg-white">
   <style>
-    /* Disable and complete state styles */
     .disabled-card {
-      opacity: 0.5;  /* Dim the card when disabled */
+      opacity: 0.5;
     }
     .disabled-card .btn {
       pointer-events: none;
       cursor: not-allowed;
     }
     .completed-card {
-      border: 2px solid var(--asu-maroon);  /* Highlight completed step (maroon border) */
+      border: 2px solid var(--asu-maroon);
       box-shadow: 0 0.5rem 1rem rgba(140, 29, 64, 0.25);
     }
   </style>
   <div class="container">
-    <!-- Heading and status text -->
     <div class="mb-4">
       <div class="uds-highlighted-heading">
         <h2><span class="highlight-gold">Verify Your Discord Account</span></h2>
+      </div>
+      <div class="mt-3 text-white bg-asu-maroon bg-opacity-75 rounded-3 p-3 verification-status">
+        {% if discord_complete %}
+          <p class="mb-0">
+            Your ASU account{% if verification_state.asurite %} (<strong>{{ verification_state.asurite }}</strong>){% endif %}
+            is linked with Discord. Welcome to Devils to Devils{% if verification_state.discord_username or discord_user.username %}, {{ verification_state.discord_username or discord_user.username }}{% endif %}!
+          </p>
+        {% elif saml_complete %}
+          <p class="mb-0">
+            You're signed in with ASU{% if verification_state.asurite %} as <strong>{{ verification_state.asurite }}</strong>{% endif %}
+            {% if verification_state.email %}({{ verification_state.email }}){% endif %}. Connect your Discord account to finish verification.
+          </p>
+        {% else %}
+          <p class="mb-0">
+            Find new friends, join communities and make connections in ASU’s Devil2Devil Discord server for admitted students.
+          </p>
+        {% endif %}
+        {% if saml_complete and not discord_complete and (not discord_configured or not discord_login_url) %}
+          <div class="badge bg-light text-dark fw-semibold mt-3">
+            Discord integration is not configured yet.
+          </div>
+        {% endif %}
+        {% if verification_error %}
+          <div class="alert alert-warning border-0 fw-semibold text-dark bg-warning-subtle mt-3 mb-0">
+            Verification issue: {{ verification_error }}
+          </div>
+        {% endif %}
       </div>
       <div class="text-muted small mt-2">
         {% if discord_complete %}
@@ -1117,48 +1134,40 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
         {% endif %}
       </div>
     </div>
-    <!-- Card arrangement for steps -->
+
     <div class="uds-card-arrangement">
       <div class="uds-card-arrangement-content-container default"></div>
       <div class="uds-card-arrangement-card-container auto-arrangement four-columns">
-        
-        <!-- Card 1: ASURITE Login (My ASU) -->
+
+        <!-- Step 1: ASURITE Login -->
         <div class="card-wrapper{% if step1_complete %} completed-card{% endif %}" id="card-step1">
           <div class="sc-fqkvVR glpyHd card cards-components">
-            <!-- Icon: Desktop computer -->
-            <svg class="svg-inline--fa fa-desktop fa-2x card-icon-top" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="desktop" viewBox="0 0 576 512">
+            <svg class="svg-inline--fa fa-desktop fa-2x card-icon-top" aria-hidden="true" data-prefix="fas" data-icon="desktop" viewBox="0 0 576 512">
               <path fill="currentColor" d="M64 0C28.7 0 0 28.7 0 64V352c0 35.3 28.7 64 64 64H240l-10.7 32H160c-17.7 0-32 14.3-32 32s14.3 32 32 32H416c17.7 0 32-14.3 32-32s-14.3-32-32-32H346.7L336 416H512c35.3 0 64-28.7 64-64V64c0-35.3-28.7-64-64-64H64zM512 64V288H64V64H512z"></path>
             </svg>
-            <div class="card-header">
-              <h3 class="card-title">My ASU</h3>
-            </div>
+            <div class="card-header"><h3 class="card-title">My ASU</h3></div>
             <div class="card-body">
               <p>Log in to MyASU so we can verify your admission status. You’ll be returned here to link your Discord account.</p>
             </div>
             <div class="card-buttons">
               {% if saml_login_url %}
-                <!-- ASU Login button (enabled always for step1) -->
                 <a class="btn btn-maroon" href="{{ saml_login_url }}">
                   {% if step1_complete %}Reauthenticate with ASU{% else %}My ASU{% endif %}
                 </a>
               {% else %}
-                <!-- Disabled state if login URL not available -->
                 <a class="btn btn-secondary disabled" href="#" aria-disabled="true">ASU login unavailable</a>
               {% endif %}
             </div>
           </div>
-        </div><!-- /.card-wrapper Step1 -->
-        
-        <!-- Card 2: Connect Discord Account -->
+        </div>
+
+        <!-- Step 2: Discord -->
         <div class="card-wrapper{% if not step2_enabled %} disabled-card{% endif %}{% if step2_complete %} completed-card{% endif %}" id="card-step2">
           <div class="sc-fqkvVR glpyHd card cards-components">
-            <!-- Icon: Discord logo -->
-            <svg class="svg-inline--fa fa-discord fa-2x card-icon-top" aria-hidden="true" focusable="false" data-prefix="fab" data-icon="discord" viewBox="0 0 640 512">
-              <path fill="currentColor" d="M524.531 69.836a1.5 1.5 0 0 0-.764-.7A485.065 485.065 0 0 0 404.081 32.03a1.816 1.816 0 0 0-1.923.91 337.461 337.461 0 0 0-14.9 30.6 447.848 447.848 0 0 0-134.426 0 309.541 309.541 0 0 0-15.135-30.6 1.89 1.89 0 0 0-1.924-.91A483.689 483.689 0 0 0 116.085 69.137a1.712 1.712 0 0 0-.788.676C39.068 183.651 18.186 294.69 28.43 404.354a2.016 2.016 0 0 0 .765 1.375 487.666 487.666 0 0 0 147.825 74.189 1.9 1.9 0 0 0 2.063-.676 348.2 348.2 0 0 0 32.1-49.518 1.86 1.86 0 0 0-1.019-2.588 321.173 321.173 0 0 1-45.868-21.853 1.885 1.885 0 0 1-.185-3.126c3.082-2.309 6.166-4.711 9.109-7.137a1.819 1.819 0 0 1 1.9-.256c96.229 43.917 200.41 43.917 295.5 0a1.812 1.812 0 0 1 1.924.233c2.944 2.426 6.027 4.851 9.132 7.16a1.884 1.884 0 0 1-.162 3.126 301.407 301.407 0 0 1-45.89 21.83 1.875 1.875 0 0 0-1 2.611 391.055 391.055 0 0 0 30.014 48.815 1.864 1.864 0 0 0 2.063.7 486.048 486.048 0 0 0 132.636-73.619 1.882 1.882 0 0 0 .765-1.352c16.264-128.135-16.533-238.264-82.935-335.893ZM222.491 337.58c-28.972 0-52.844-26.587-52.844-59.239s23.915-59.239 52.844-59.239c29.665 0 53.306 26.82 52.843 59.239-.001 32.652-23.411 59.239-52.843 59.239Zm195.38 0c-28.971 0-52.843-26.587-52.843-59.239s23.915-59.239 52.843-59.239c29.667 0 53.307 26.82 52.844 59.239-.001 32.652-23.178 59.239-52.844 59.239Z"></path>
+            <svg class="svg-inline--fa fa-discord fa-2x card-icon-top" aria-hidden="true" data-prefix="fab" data-icon="discord" viewBox="0 0 640 512">
+              <path fill="currentColor" d="M524.531 69.836...Z"></path>
             </svg>
-            <div class="card-header">
-              <h3 class="card-title">Discord</h3>
-            </div>
+            <div class="card-header"><h3 class="card-title">Discord</h3></div>
             <div class="card-body">
               <p>
                 {% if step2_complete %}
@@ -1176,349 +1185,51 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
                   {% if step2_complete %}Manage Discord Link{% else %}Connect Discord{% endif %}
                 </a>
               {% else %}
-                <div class="alert alert-secondary small mb-0">
-                  Discord integration is not configured.
-                </div>
+                <div class="alert alert-secondary small mb-0">Discord integration is not configured.</div>
               {% endif %}
             </div>
           </div>
-        </div><!-- /.card-wrapper Step2 -->
-        
-        <!-- Card 3: Visit Devil2Devil (Discord server link) -->
+        </div>
+
+        <!-- Step 3: Devil2Devil Server -->
         <div class="card-wrapper{% if not step3_enabled %} disabled-card{% endif %}{% if discord_complete %} completed-card{% endif %}" id="card-step3">
           <div class="sc-fqkvVR glpyHd card cards-components">
-            <!-- Icon: Chat (comments) -->
-            <svg class="svg-inline--fa fa-comments fa-2x card-icon-top" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="comments" viewBox="0 0 576 512">
-              <path fill="currentColor" d="M416 192c0-88.4-93.1-160-208-160S0 103.6 0 192c0 34.3 14.1 65.9 38 92-13.4 30.2-35.5 54.2-35.8 54.5-2.2 2.3-2.8 5.7-1.5 8.7S4.8 352 8 352c36.6 0 66.9-12.3 88.7-25 32.2 15.7 70.3 25 111.3 25 114.9 0 208-71.6 208-160zm122 220c23.9-26 38-57.7 38-92 0-66.9-53.5-124.2-129.3-148.1.9 6.6 1.3 13.3 1.3 20.1 0 105.9-107.7 192-240 192-10.8 0-21.3-.8-31.7-1.9C207.8 439.6 281.8 480 368 480c41 0 79.1-9.2 111.3-25 21.8 12.7 52.1 25 88.7 25 3.2 0 6.1-1.9 7.3-4.8 1.3-2.9.7-6.3-1.5-8.7-.3-.3-22.4-24.2-35.8-54.5z"></path>
+            <svg class="svg-inline--fa fa-comments fa-2x card-icon-top" aria-hidden="true" data-prefix="fas" data-icon="comments" viewBox="0 0 576 512">
+              <path fill="currentColor" d="M416 192c0-88.4...z"></path>
             </svg>
-            <div class="card-header">
-              <h3 class="card-title">Devil2Devil Server</h3>
-            </div>
+            <div class="card-header"><h3 class="card-title">Devil2Devil Server</h3></div>
             <div class="card-body">
-              <p>Head to the Devils to Devils Discord community and start meeting the Class of 2030! Introduce yourself, find your community, and catch the latest updates.</p>
+              <p>Head to the Devils to Devils Discord community and start meeting the Class of 2030!</p>
             </div>
             <div class="card-buttons">
-              <a class="btn btn-maroon {% if not step3_enabled %}disabled{% endif %}" href="{% if step3_enabled %}https://discord.com/channels/1187144343400751234/1435338904994709626{% else %}#{% endif %}" 
-                 {% if step3_enabled %}target="_blank" rel="noopener"{% else %}aria-disabled="true"{% endif %}>
-                Visit Devil2Devil
-              </a>
+              <a class="btn btn-maroon {% if not step3_enabled %}disabled{% endif %}" href="{% if step3_enabled %}https://discord.com/channels/1187144343400751234/1435338904994709626{% else %}#{% endif %}" {% if not step3_enabled %}aria-disabled="true"{% else %}target="_blank" rel="noopener"{% endif %}>Visit Devil2Devil</a>
             </div>
           </div>
-        </div><!-- /.card-wrapper Step3 -->
-        
-        <!-- Card 4: Instagram (information only) -->
+        </div>
+
+        <!-- Step 4: Instagram -->
         <div class="card-wrapper" id="card-instagram">
           <div class="sc-fqkvVR glpyHd card cards-components">
-            <!-- Icon: Instagram -->
-            <svg class="svg-inline--fa fa-instagram fa-2x card-icon-top" aria-hidden="true" focusable="false" data-prefix="fab" data-icon="instagram" viewBox="0 0 448 512">
-              <path fill="currentColor" d="M224.1 141c-63.6 0-114.9 51.3-114.9 114.9S160.5 370.8 224.1 370.8 339 319.5 339 255.9 287.7 141 224.1 141zm146.4-194.3c0 14.9-12 26.8-26.8 26.8-14.9 0-26.8-12-26.8-26.8s12-26.8 26.8-26.8 26.8 12 26.8 26.8zM398.8 388c-7.8 19.6-22.9 34.7-42.6 42.6-29.5 11.7-99.5 9-132.1 9s-102.7 2.6-132.1-9c-19.6-7.8-34.7-22.9-42.6-42.6-11.7-29.5-9-99.5-9-132.1s-2.6-102.7 9-132.1c7.8-19.6 22.9-34.7 42.6-42.6 29.5-11.7 99.5-9 132.1-9s102.7 2.6 132.1 9c19.6 7.8 34.7 22.9 42.6 42.6 11.7 29.5 9 99.5 9 132.1s2.7 102.7-9 132.1z"></path>
+            <svg class="svg-inline--fa fa-instagram fa-2x card-icon-top" aria-hidden="true" data-prefix="fab" data-icon="instagram" viewBox="0 0 448 512">
+              <path fill="currentColor" d="M224.1 141c-63.6...z"></path>
             </svg>
-            <div class="card-header">
-              <h3 class="card-title">Future Sun Devils Instagram</h3>
-            </div>
+            <div class="card-header"><h3 class="card-title">Future Sun Devils Instagram</h3></div>
             <div class="card-body">
-              <p>Follow <strong>@FutureSunDevils</strong> on Instagram and click the link in our bio to join the server. *Remember:* you must verify your Fall 2025 admission to get full access to the Discord community.</p>
+              <p>Follow <strong>@FutureSunDevils</strong> on Instagram and click the link in our bio to join the server.</p>
             </div>
             <div class="card-buttons">
-              <a class="btn btn-maroon" href="https://www.instagram.com/futuresundevils/" target="_blank" rel="noopener">
-                Instagram
-              </a>
+              <a class="btn btn-maroon" href="https://www.instagram.com/futuresundevils/" target="_blank" rel="noopener">Instagram</a>
             </div>
           </div>
-        </div><!-- /.card-wrapper Instagram -->
-        
-      </div><!-- /.uds-card-arrangement-card-container -->
-    </div><!-- /.uds-card-arrangement -->
-  </div><!-- /.container -->
-</section>
-
-
-
-
-
-
-{% set step1_complete = saml_complete %}
-{% set step2_complete = discord_complete %}
-{% set step2_enabled = saml_complete %}
-{% set step3_enabled = discord_complete %}
-
-
-
-
-<!-- Section: verification-steps -->
-<section id="verification-steps" class="py-5 bg-white">
-  <style>
-    .step-card {
-      border-radius: 1rem;
-      border: 1px solid rgba(0, 0, 0, 0.08);
-      height: 100%;
-      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-    }
-    .step-card:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 1.5rem 3rem rgba(0, 0, 0, 0.08);
-    }
-    .step-card.step-complete {
-      border-color: var(--asu-maroon);
-      box-shadow: 0 0.75rem 2rem rgba(140, 29, 64, 0.18);
-    }
-    .step-card.disabled-card {
-      opacity: 0.55;
-    }
-    .step-card.disabled-card .btn {
-      pointer-events: none;
-      cursor: not-allowed;
-    }
-    .step-card .step-badge {
-      letter-spacing: 0.08em;
-    }
-    .step-card .btn.disabled-link {
-      pointer-events: none;
-      cursor: not-allowed;
-    }
-  </style>
-  <div class="container">
-    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-end gap-3 mb-4">
-      <div>
-        <p class="text-uppercase fw-semibold small tracking-wide text-asu-maroon mb-1">Three quick steps</p>
-        <h2 class="h3 fw-semibold mb-0">Verify and join the Devils to Devils community</h2>
-      </div>
-      <div class="text-muted small">
-        {% if discord_complete %}
-          <span class="badge text-bg-success">All steps complete</span>
-        {% elif saml_complete %}
-          Next up: connect your Discord account.
-        {% else %}
-          Start by signing in with your ASURITE ID.
-        {% endif %}
-      </div>
-    </div>
-    <div class="row g-4">
-      <div class="col-md-4">
-        <div class="card step-card {% if step1_complete %}step-complete{% endif %}">
-          <div class="card-body d-flex flex-column h-100">
-            <span class="badge bg-asu-gold text-dark text-uppercase fw-semibold step-badge">Step 1</span>
-            <h3 class="h4 mt-3">Log in with your ASURITE</h3>
-            <p class="flex-grow-1">
-              Use ASU single sign-on so we can confirm your admission status. You'll come right back here once the login is complete.
-            </p>
-            {% if saml_login_url %}
-              <form method="get" action="{{ saml_login_url }}" class="mt-3">
-                <button type="submit" class="btn {% if step1_complete %}btn-outline-asu-maroon{% else %}btn-asu-gold{% endif %}">
-                  {% if step1_complete %}Reauthenticate with ASU{% else %}Sign in with ASU SSO{% endif %}
-                </button>
-              </form>
-            {% else %}
-              <button type="button" class="btn btn-secondary mt-3" disabled aria-disabled="true">
-                ASU login unavailable
-              </button>
-            {% endif %}
-          </div>
         </div>
-      </div>
-      <div class="col-md-4">
-        <div class="card step-card {% if not step2_enabled %}disabled-card{% endif %} {% if step2_complete %}step-complete{% endif %}">
-          <div class="card-body d-flex flex-column h-100">
-            <span class="badge bg-asu-gold text-dark text-uppercase fw-semibold step-badge">Step 2</span>
-            <h3 class="h4 mt-3">Connect your Discord account</h3>
-            <p class="flex-grow-1">
-              {% if step2_complete %}
-                Discord is already linked{% if verification_state.discord_username or discord_user.username %} as <strong>{{ verification_state.discord_username or discord_user.username }}</strong>{% endif %}. You can reconnect any time to refresh permissions.
-              {% elif step2_enabled %}
-                Approve the Devils to Devils bot so we can add you to the server and grant the verified role automatically.
-              {% else %}
-                Complete Step&nbsp;1 to unlock this step.
-              {% endif %}
-            </p>
-            {% if discord_login_url and discord_configured %}
-              <form method="get" action="{{ discord_login_url }}" class="mt-3">
-                <button type="submit" class="btn {% if step2_complete %}btn-outline-asu-maroon{% else %}btn-asu-gold{% endif %}" {% if not step2_enabled %}disabled aria-disabled="true"{% endif %}>
-                  {% if step2_complete %}Manage Discord link{% else %}Connect Discord{% endif %}
-                </button>
-              </form>
-            {% else %}
-              <div class="alert alert-secondary mt-3 mb-0 small">
-                Discord integration is not configured yet.
-              </div>
-            {% endif %}
-          </div>
-        </div>
-      </div>
-      <div class="col-md-4">
-        <div class="card step-card {% if not step3_enabled %}disabled-card{% endif %} {% if discord_complete %}step-complete{% endif %}">
-          <div class="card-body d-flex flex-column h-100">
-            <span class="badge bg-asu-gold text-dark text-uppercase fw-semibold step-badge">Step 3</span>
-            <h3 class="h4 mt-3">Visit Devil2Devil</h3>
-            <p class="flex-grow-1">
-              Head to the Devils to Devils server and start meeting the class of 2030. Introduce yourself, find your community, and catch the latest updates.
-            </p>
-            <a
-              class="btn btn-asu-gold {% if not step3_enabled %}disabled-link{% endif %} mt-3"
-              href="{% if step3_enabled %}https://discord.com/channels/1187144343400751234/1435338904994709626{% else %}#{% endif %}"
-              {% if step3_enabled %}
-                target="_blank"
-                rel="noopener"
-              {% else %}
-                aria-disabled="true"
-              {% endif %}
-            >
-              Visit Devil2Devil
-            </a>
-          </div>
-        </div>
+
       </div>
     </div>
   </div>
 </section>
 
 
-<!-- Section: devil2devil-fall-2025 -->
-<section id="devil2devil-fall-2025" class="py-5 bg-white">
-  <div class="container">
-    <div class="row g-5 align-items-center">
-      <div class="col-lg-4 text-center text-lg-start">
-        <img class="img-fluid rounded" src="{{ url_for('static', filename='img/devil2devil-profile.gif') }}" alt="Devil2Devil profile graphic" loading="lazy">
-      </div>
-      <div class="col-lg-8">
-        <div class="uds-highlighted-heading">
-          <h2><span class="highlight-gold">Devil2Devil fall 2025</span></h2>
-        </div>
-        <p>Devil2Devil serves as ASU’s vibrant Discord community for admitted students enrolling in the fall 2025 semester. Whether you're an incoming first-year, transfer or master’s-level graduate student, from as close as central Phoenix to as far-flung as Hanoi, Vietnam, you can seamlessly connect with peers on Discord's engaging platform. Upon joining, you’ll be automatically sorted into channels based on your campus location, enabling you to form instant connections within your academic community. It’s a hub for forging friendships, finding potential roommates, engaging with current students about campus life and staying updated on all things ASU, ensuring a smooth transition before you set foot on campus in the fall.</p>
-        <p>Devil2Devil is open for engagement starting in January 2025 and is tailored for students attending in-person degree programs at ASU’s Downtown Phoenix, Polytechnic, Tempe and West Valley campuses, as well as LA Center.</p>
-      </div>
-    </div>
-  </div>
-</section>
 
-
-<!-- Section: devil2devil-invite-link -->
-<section id="devil2devil-invite-link" class="py-5 bg-white">
-  <div class="container">
-    <div class="uds-highlighted-heading mb-4">
-      <h2><span class="highlight-gold">How to find your invite link</span></h2>
-    </div>
-    <div class="row g-4">
-      <div class="col-md-6 col-lg-3">
-        <div class="card h-100 shadow-sm text-center">
-          <div class="card-body d-flex flex-column align-items-center text-center">
-            <svg class="fa-2x mb-3 text-asu-maroon" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="desktop" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path fill="currentColor" d="M64 0C28.7 0 0 28.7 0 64V352c0 35.3 28.7 64 64 64H240l-10.7 32H160c-17.7 0-32 14.3-32 32s14.3 32 32 32H416c17.7 0 32-14.3 32-32s-14.3-32-32-32H346.7L336 416H512c35.3 0 64-28.7 64-64V64c0-35.3-28.7-64-64-64H64zM512 64V288H64V64H512z"></path></svg>
-            <h3 class="h5">My ASU</h3>
-            <p class="flex-grow-1">Log in to My ASU and click on the Devil2Devil banner or check your Priority Tasks.</p>
-          </div>
-          <div class="card-footer bg-transparent border-0 pt-0">
-            <a class="btn btn-maroon w-100" href="https://my.asu.edu/">My ASU</a>
-          </div>
-        </div>
-      </div>
-      <div class="col-md-6 col-lg-3">
-        <div class="card h-100 shadow-sm text-center">
-          <div class="card-body d-flex flex-column align-items-center text-center">
-            <svg class="fa-2x mb-3 text-asu-maroon" aria-hidden="true" focusable="false" data-prefix="far" data-icon="envelope" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path fill="currentColor" d="M64 112c-8.8 0-16 7.2-16 16v22.1L220.5 291.7c20.7 17 50.4 17 71.1 0L464 150.1V128c0-8.8-7.2-16-16-16H64zM48 212.2V384c0 8.8 7.2 16 16 16H448c8.8 0 16-7.2 16-16V212.2L322.7 328.4c-38.4 31.5-93.1 31.5-131.6 0L48 212.2zM0 128C0 92.7 28.7 64 64 64H448c35.3 0 64 28.7 64 64V384c0 35.3-28.7 64-64 64H64c-35.3 0-64-28.7-64-64V128z"></path></svg>
-            <h3 class="h5">Email</h3>
-            <p class="flex-grow-1">All students admitted to ASU for the fall 2025 semester are sent multiple email invitations to join Devil2Devil.</p>
-          </div>
-        </div>
-      </div>
-      <div class="col-md-6 col-lg-3">
-        <div class="card h-100 shadow-sm text-center">
-          <div class="card-body d-flex flex-column align-items-center text-center">
-            <svg class="fa-2x mb-3 text-asu-maroon" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="mobile-screen" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><path fill="currentColor" d="M0 64C0 28.7 28.7 0 64 0H320c35.3 0 64 28.7 64 64V448c0 35.3-28.7 64-64 64H64c-35.3 0-64-28.7-64-64V64zM320 32H64c-17.7 0-32 14.3-32 32V384c0 17.7 14.3 32 32 32H320c17.7 0 32-14.3 32-32V64c0-17.7-14.3-32-32-32zM192 432c-26.5 0-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48s-21.5-48-48-48z"></path></svg>
-            <h3 class="h5">Text message</h3>
-            <p class="flex-grow-1">Domestic students will be texted a link to join Devil2Devil.</p>
-          </div>
-        </div>
-      </div>
-      <div class="col-md-6 col-lg-3">
-        <div class="card h-100 shadow-sm text-center">
-          <div class="card-body d-flex flex-column align-items-center text-center">
-            <svg class="fa-2x mb-3 text-asu-maroon" aria-hidden="true" focusable="false" data-prefix="fab" data-icon="instagram" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><path fill="currentColor" d="M224 32C132.3 32 76 86.4 76 184.6V327.4C76 425.6 132.3 480 224 480s148-54.4 148-152.6V184.6C372 86.4 315.7 32 224 32zm0 46.1c90.1 0 132.2 42.9 132.2 106.5v135.8c0 63.6-42.1 106.5-132.2 106.5S91.8 383.9 91.8 320.3V184.6C91.8 121 133.9 78.1 224 78.1zm0 48.4c-52 0-94.2 42.2-94.2 94.2s42.2 94.2 94.2 94.2 94.2-42.2 94.2-94.2-42.2-94.2-94.2-94.2zm0 144.2c-27.6 0-50.1-22.5-50.1-50.1s22.5-50.1 50.1-50.1 50.1 22.5 50.1 50.1-22.5 50.1-50.1 50.1zM350.5 122c-16.8 0-30.4 13.6-30.4 30.4s13.6 30.4 30.4 30.4 30.4-13.6 30.4-30.4-13.6-30.4-30.4-30.4z"></path></svg>
-            <h3 class="h5">Future Sun Devils Instagram</h3>
-            <p class="flex-grow-1">Follow us on Instagram <strong>@futuresundevils</strong> and click the link in our bio to join the server. Remember, you must verify that you have been admitted to the fall 2025 semester to get full access to the community.</p>
-          </div>
-          <div class="card-footer bg-transparent border-0 pt-0">
-            <a class="btn btn-maroon w-100" href="https://www.instagram.com/futuresundevils/">Instagram</a>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-  <div class="4-4-4 bg-top bg-percent-100 max-size-container center-container clearfix bg-white">
-    <div class="container">
-      <div class="row">
-                  <div class="layout__region layout__region--first col-md-4">
-            
-<div class="block block-layout-builder block-inline-blockvideo">
-    
-
-    
-    
-  
-    
-
-<div class="uds-video-container">
-  <div class="uds-video-player youtube-video">
-      <iframe src="https://www.youtube.com/embed/-HGmXzwDM3U" width="203" height="360" class="media-oembed-content" loading="eager" title="D2D Testimonial 3"></iframe>
-
-
-  </div>
-</div>
-
-
-
-  </div>
-
-          </div>
-                          <div class="layout__region layout__region--second col-md-4">
-            
-<div class="block block-layout-builder block-inline-blockvideo">
-    
-
-    
-    
-  
-    
-
-<div class="uds-video-container">
-  <div class="uds-video-player youtube-video">
-      <iframe src="https://www.youtube.com/embed/uyNWHnnRpLY" width="203" height="360" class="media-oembed-content" loading="eager" title="D2D Testimonial 2"></iframe>
-
-
-  </div>
-</div>
-
-
-
-  </div>
-
-          </div>
-                          <div class="layout__region layout__region--third col-md-4">
-            
-<div class="block block-layout-builder block-inline-blockvideo">
-    
-
-    
-    
-  
-    
-
-<div class="uds-video-container">
-  <div class="uds-video-player youtube-video">
-      <iframe src="https://www.youtube.com/embed/9TFHrxGf-GQ" width="203" height="360" class="media-oembed-content" loading="eager" title="D2D Testimonial 1"></iframe>
-
-
-  </div>
-</div>
-
-
-
-  </div>
-
-          </div>
-              </div>
-    </div>
-  </div>
 
 </div>
         <div class="layout__fixed-width">
@@ -1528,30 +1239,6 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
             <div class="col-12">
               <div class="layout__region layout__region--first">
                 
-<div class="spacing-top-72 block block-layout-builder block-inline-blocktext-content clearfix default">
-    
-
-    
-    
-  
-  <div class="formatted-text">
-      <div class="p-6" style="border:1px solid rgba(0,0,0,.125);"><div class="container"><div class="row"><div class="ckeditor-col-container clearfix row"><div class="grid-5 fivecol first-col col-md-4 col-sm-4 col-xs-4 col-lg-4"><img class="img-fluid" src="{{ url_for('static', filename='img/discord.png') }}" data-entity-uuid="c153bf2d-b5ed-4a6c-9486-e57c631596b8" data-entity-type="file" alt="" width="300" height="300" loading="lazy"></div><div class="grid-7 sevencol last-col col-md-8 col-sm-8 col-xs-8 col-lg-8"><h2>Fostering a community in Discord</h2><p>The Devil2Devil Discord server is integrated into ASU’s Student Hub, which hosts 500+ servers exclusively for ASU students. After joining Devil2Devil, you’ll smoothly transition to using Discord for classes, project teams and club communications once the semester starts.</p><p><a href="https://play.google.com/store/apps/details?id=com.discord&amp;hl=en_US&amp;gl=US&amp;pli=1">Join Discord</a></p></div></div></div></div></div>
-  </div>
-
-</div>
-
-<div class="spacing-top-32 spacing-bottom-24 block block-layout-builder block-inline-blocktext-content clearfix default">
-    
-
-    
-    
-  
-  <div class="formatted-text">
-      <div class="p-6" style="border:1px solid rgba(0,0,0,.125);"><div class="container"><div class="row"><div class="ckeditor-col-container clearfix row"><div class="grid-7 sevencol first-col col-md-8 col-sm-8 col-xs-8 col-lg-8"><h2>Access Devil2Devil from your phone</h2><p>Accessing the Devil2Devil Discord server from the Discord app on your phone is easy. Simply download the app, sign in to your account, click on the invite link you received via email or text message, and complete onboarding. The server will automatically be added to your account after you complete onboarding, and you can access it from the app or desktop at any time. Stay engaged with the ASU community, find roommates and access valuable resources on the go, all from your mobile device.</p><p><a href="https://play.google.com/store/apps/details?id=com.discord&amp;hl=en_US&amp;gl=US&amp;pli=1">Access Devil2Devil&nbsp;Discord</a></p></div><div class="grid-5 fivecol last-col col-md-4 col-sm-4 col-xs-4 col-lg-4"><img class="img-fluid" src="{{ url_for('static', filename='img/google-play-badge.jpeg') }}" data-entity-uuid="f4b5e007-5e94-4594-9dd0-0f347bb911a6" data-entity-type="file" alt="Google Play" width="300" height="99" loading="lazy"><p>&nbsp;</p><img class="img-fluid" src="{{ url_for('static', filename='img/app-store-badge.jpeg') }}" data-entity-uuid="16a03762-5ae4-42e1-9142-35af6596a200" data-entity-type="file" alt="App Store" width="300" height="99" loading="lazy"></div></div></div></div></div><p>&nbsp;</p>
-  </div>
-
-</div>
-
               </div>
             </div>
           </div>
@@ -1560,7 +1247,8 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
       </div>
         <div class="layout__fixed-width">
           <div class="bg gray-2-bg bg-top bg-percent-100 max-size-container center-container">
-        <div class="container">
+        
+            <div class="container">
           <div class="row">
             <div class="col-12">
               <div class="layout__region layout__region--first">
@@ -1628,49 +1316,6 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
             <div class="col-12">
               <div class="layout__region layout__region--first">
                 
-<div class="spacing-top-48 spacing-bottom-48 block block-layout-builder block-inline-blockcard-arrangement">
-    
-
-  
-            <h2>Connect outside of Devil2Devil</h2>
-        
-  
-      <div class="uds-card-arrangement ">
-  <div class="uds-card-arrangement-content-container default">
-        
-    
-
-  </div>
-  <div class="uds-card-arrangement-card-container auto-arrangement four-columns">
-            
-
-    <div class="card-wrapper" id="card-4987cb7f-4226-48da-97f0-edf6169e98fc"><div class="sc-fqkvVR glpyHd card cards-components" data-testid="card-container"><div class="card-header" data-testid="card-title"><h3 class="card-title">Find a roommate</h3></div><div class="card-body" data-testid="card-body"><div><p>Whether you are living on or off campus, finding the right roommate is an important decision. We have some tools to help you get started.</p></div></div><div class="card-buttons"><div class="card-button" data-testid="card-button"><a class="btn btn-gold" href="https://asu.starrezhousing.com/StarRezPortalX/20386890/14/25/Home-Home?UrlToken=AFCA03E6" target="">On-campus living</a></div><div class="card-button" data-testid="card-button"><a class="btn btn-gold btn-md" href="https://offcampushousing.asu.edu/" target="">Off-campus living</a></div></div></div></div>
-
-
-
-
-    <div class="card-wrapper" id="card-30744d29-8a52-4a65-a4da-9b1b023ef38b"><div class="sc-fqkvVR glpyHd card cards-components" data-testid="card-container"><div class="card-header" data-testid="card-title"><h3 class="card-title">Get involved</h3></div><div class="card-body" data-testid="card-body"><div><p>ASU offers hundreds of ways to meet people and make friends. Explore the organizations and clubs you can join as a Sun Devil.</p></div></div><div class="card-buttons"><div class="card-button" data-testid="card-button"><a class="btn btn-gold" href="https://asu.campuslabs.com/engage" target="">Sun Devil Sync</a></div></div></div></div>
-
-
-
-
-    <div class="card-wrapper" id="card-646fd00f-d099-4c73-95f8-0bd9fe71ab2c"><div class="sc-fqkvVR glpyHd card cards-components" data-testid="card-container"><div class="card-header" data-testid="card-title"><h3 class="card-title">Stay social</h3></div><div class="card-body" data-testid="card-body"><div><p>Show us your Sun Devil spirit with the hashtag #FutureSunDevil, and follow us for a glimpse into campus and college life.</p><p>&nbsp;</p><p><a href="https://www.tiktok.com/@arizonastateuniversity">TikTok</a><br><a href="https://www.instagram.com/futuresundevils/"><span>Instagram</span></a><br><a href="https://twitter.com/FutureSunDevils"><span>Twitter</span></a><br><a href="https://www.facebook.com/FutureSunDevils"><span>Facebook</span></a></p></div></div></div></div>
-
-
-
-
-    <div class="card-wrapper" id="card-9cd4f966-7d98-4810-9cb2-432b5ecd90ae"><div class="sc-fqkvVR glpyHd card cards-components" data-testid="card-container"><div class="card-header" data-testid="card-title"><h3 class="card-title">Contact us</h3></div><div class="card-body" data-testid="card-body"><div><p>We’re here to help. Contact your ASU admission representative for enrollment questions and support.</p></div></div><div class="card-buttons"><div class="card-button" data-testid="card-button"><a class="btn btn-gold" href="https://admission.asu.edu/findmyrep" target="">Find my rep</a></div></div></div></div>
-
-
-
-
-  
-
-  </div>
-</div>
-    
-</div>
-
               </div>
             </div>
           </div>
@@ -1692,10 +1337,11 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
   
   </div>
 
+{% include "partials/site-footer.html" %}
     
 <script type="application/json" data-drupal-selector="drupal-settings-json">{"path":{"baseUrl":"\/","pathPrefix":"","currentPath":"node\/1","currentPathIsAdmin":false,"isFront":true,"currentLanguage":"en","themeUrl":"themes\/webspark\/renovation"},"pluralDelimiter":"\u0003","suppressDeprecationErrors":true,"asu":{"components":{"card_arrangement":{"1167207198574083345":{"items":["4987cb7f-4226-48da-97f0-edf6169e98fc","30744d29-8a52-4a65-a4da-9b1b023ef38b","646fd00f-d099-4c73-95f8-0bd9fe71ab2c","9cd4f966-7d98-4810-9cb2-432b5ecd90ae"],"items_display":{"4987cb7f-4226-48da-97f0-edf6169e98fc":"vertical","30744d29-8a52-4a65-a4da-9b1b023ef38b":"vertical","646fd00f-d099-4c73-95f8-0bd9fe71ab2c":"vertical","9cd4f966-7d98-4810-9cb2-432b5ecd90ae":"vertical"}},"3692197620022812545":{"items":["cbfa2277-0c8c-400e-bce5-af7e7430c1b5","f0990222-fe5e-4204-8c48-7679583d963b","612a4299-0c2b-4db6-b6bc-e05efd9dae02","cb1f27c3-4fb5-443d-a07d-f2bf8c7e46a5"],"items_display":{"cbfa2277-0c8c-400e-bce5-af7e7430c1b5":"vertical","f0990222-fe5e-4204-8c48-7679583d963b":"vertical","612a4299-0c2b-4db6-b6bc-e05efd9dae02":"vertical","cb1f27c3-4fb5-443d-a07d-f2bf8c7e46a5":"vertical"}}},"card":{"9cd4f966-7d98-4810-9cb2-432b5ecd90ae":{"id":"9cd4f966-7d98-4810-9cb2-432b5ecd90ae","cardType":"default","title":"Contact us","content":"\u003Cp\u003EWe\u2019re here to help. Contact your ASU admission representative for enrollment questions and support.\u003C\/p\u003E","buttons":[{"label":"Find my rep","href":"https:\/\/admission.asu.edu\/findmyrep","target":"","color":"gold","size":"default"}],"clickable":false,"showBorders":true},"646fd00f-d099-4c73-95f8-0bd9fe71ab2c":{"id":"646fd00f-d099-4c73-95f8-0bd9fe71ab2c","cardType":"default","title":"Stay social","content":"\u003Cp\u003EShow us your Sun Devil spirit with the hashtag #FutureSunDevil, and follow us for a glimpse into campus and college life.\u003C\/p\u003E\u003Cp\u003E\u0026nbsp;\u003C\/p\u003E\u003Cp\u003E\u003Ca href=\u0022https:\/\/www.tiktok.com\/@arizonastateuniversity\u0022\u003ETikTok\u003C\/a\u003E\u003Cbr\u003E\u003Ca href=\u0022https:\/\/www.instagram.com\/futuresundevils\/\u0022\u003E\u003Cspan\u003EInstagram\u003C\/span\u003E\u003C\/a\u003E\u003Cbr\u003E\u003Ca href=\u0022https:\/\/twitter.com\/FutureSunDevils\u0022\u003E\u003Cspan\u003ETwitter\u003C\/span\u003E\u003C\/a\u003E\u003Cbr\u003E\u003Ca href=\u0022https:\/\/www.facebook.com\/FutureSunDevils\u0022\u003E\u003Cspan\u003EFacebook\u003C\/span\u003E\u003C\/a\u003E\u003C\/p\u003E","clickable":false,"showBorders":true},"30744d29-8a52-4a65-a4da-9b1b023ef38b":{"id":"30744d29-8a52-4a65-a4da-9b1b023ef38b","cardType":"default","title":"Get involved","content":"\u003Cp\u003EASU offers hundreds of ways to meet people and make friends. Explore the organizations and clubs you can join as a Sun Devil.\u003C\/p\u003E","buttons":[{"label":"Sun Devil Sync","href":"https:\/\/asu.campuslabs.com\/engage","target":"","color":"gold","size":"default"}],"clickable":false,"showBorders":true},"4987cb7f-4226-48da-97f0-edf6169e98fc":{"id":"4987cb7f-4226-48da-97f0-edf6169e98fc","cardType":"default","title":"Find a roommate","content":"\u003Cp\u003EWhether you are living on or off campus, finding the right roommate is an important decision. We have some tools to help you get started.\u003C\/p\u003E","buttons":[{"label":"On-campus living","href":"https:\/\/asu.starrezhousing.com\/StarRezPortalX\/20386890\/14\/25\/Home-Home?UrlToken=AFCA03E6","target":"","color":"gold","size":"default"},{"label":"Off-campus living","href":"https:\/\/offcampushousing.asu.edu\/","target":"","color":"gold","size":"small"}],"clickable":false,"showBorders":true},"cb1f27c3-4fb5-443d-a07d-f2bf8c7e46a5":{"id":"cb1f27c3-4fb5-443d-a07d-f2bf8c7e46a5","cardType":"default","title":"Future Sun Devils Instagram","content":"\u003Cp dir=\u0022ltr\u0022\u003EFollow us on Instagram \u003Cstrong\u003E@futuresundevils\u003C\/strong\u003E and click the link in our bio to join the server. Remember, you must verify that you have been admitted to the fall 2025 semester to get full access to the community.\u0026nbsp;\u003C\/p\u003E","buttons":[{"label":"Instagram","href":"https:\/\/www.google.com\/url?q=https:\/\/www.instagram.com\/futuresundevils\/\u0026sa=D\u0026source=docs\u0026ust=1736881611295272\u0026usg=AOvVaw3KCvI2Hi6wbvjJZH7iQYxA","target":"","color":"maroon","size":"default"}],"icon":["fa-brands","instagram",{"masking":{"mask":"","style":""},"power_transforms":{"scale":{"type":"","value":""},"position_y":{"type":"","value":""},"position_x":{"type":"","value":""}}}],"clickable":false,"showBorders":true},"612a4299-0c2b-4db6-b6bc-e05efd9dae02":{"id":"612a4299-0c2b-4db6-b6bc-e05efd9dae02","cardType":"default","title":"Text message","content":"\u003Cp\u003EDomestic students will be texted a link to join Devil2Devil.\u003C\/p\u003E","icon":["fa-solid","mobile-screen",{"masking":{"mask":"","style":""},"power_transforms":{"scale":{"type":"","value":""},"position_y":{"type":"","value":""},"position_x":{"type":"","value":""}}}],"clickable":false,"showBorders":true},"f0990222-fe5e-4204-8c48-7679583d963b":{"id":"f0990222-fe5e-4204-8c48-7679583d963b","cardType":"default","title":"Email ","content":"\u003Cp\u003EAll students admitted to ASU for the fall 2025 semester are sent multiple email invitations to join Devil2Devil.\u003C\/p\u003E","icon":["fa-regular","envelope",{"masking":{"mask":"","style":""},"power_transforms":{"scale":{"type":"","value":""},"position_y":{"type":"","value":""},"position_x":{"type":"","value":""}}}],"clickable":false,"showBorders":true},"cbfa2277-0c8c-400e-bce5-af7e7430c1b5":{"id":"cbfa2277-0c8c-400e-bce5-af7e7430c1b5","cardType":"default","title":"My ASU","content":"\u003Cp\u003ELog in to My ASU and click on the Devil2Devil banner or check your Priority Tasks.\u003C\/p\u003E","buttons":[{"label":"My ASU","href":"https:\/\/my.asu.edu\/","target":"","color":"maroon","size":"default"}],"icon":["fa-solid","desktop",{"masking":{"mask":"","style":""},"power_transforms":{"scale":{"type":"","value":""},"position_y":{"type":"","value":""},"position_x":{"type":"","value":""}}}],"clickable":false,"showBorders":true}}}},"asu_brand":{"props":{"baseUrl":"https:\/\/devil2devil.asu.edu\/","title":"Devil 2 Devil","parentOrg":"","parentOrgUrl":"","expandOnHover":0,"loginLink":"\/caslogin","logoutLink":"\/caslogout","loggedIn":false,"userName":"","navTree":[{"href":"\/","text":"Home","items":"","buttons":"","type":"icon-home","class":"home"}],"logo":{"alt":"Arizona State University logo","title":"ASU homepage","src":"{{ url_for('static', filename='img/asu-logo-vertical.png') }}","mobileSrc":"{{ url_for('static', filename='img/asu-logo-horizontal.png') }}","brandLink":"https:\/\/www.asu.edu"},"searchUrl":"https:\/\/search.asu.edu\/search"}},"is_admin":false,"user":{"uid":0,"permissionsHash":"4a92ad24f745a5d049ea46a184102927f666418c5dd835ccea961444788136b6"}}</script>
 <script src="{{ url_for('static', filename='js/devil2devil-scripts.js') }}"></script>
 
   
 
-<div id="bettercanvas-reminders" style="display: flex;"></div><div id="hl-aria-live-message-container" aria-live="polite" class="visually-hidden"></div><div id="hl-aria-live-alert-container" role="alert" aria-live="assertive" class="visually-hidden"></div></body></html>
+</body></html>
