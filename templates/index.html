@@ -978,7 +978,7 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
 
   <div class="block block--mainpagecontent block--system-main">
 
-  
+
     
 
             
@@ -1065,10 +1065,185 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
     </div>
   </div>
 
+
+
+<div class="container">
+    <div class="row g-5 align-items-center">
+      <div class="col-lg-4 text-center text-lg-start">
+        <img class="img-fluid rounded" src="/static/img/devil2devil-profile.gif" alt="Devil2Devil profile graphic" loading="lazy">
+      </div>
+      <div class="col-lg-8">
+        <div class="uds-highlighted-heading">
+          <h2><span class="highlight-gold">Devil2Devil fall 2025</span></h2>
+        </div>
+        <p>Devil2Devil serves as ASU’s vibrant Discord community for admitted students enrolling in the fall 2025 semester. Whether you're an incoming first-year, transfer or master’s-level graduate student, from as close as central Phoenix to as far-flung as Hanoi, Vietnam, you can seamlessly connect with peers on Discord's engaging platform. Upon joining, you’ll be automatically sorted into channels based on your campus location, enabling you to form instant connections within your academic community. It’s a hub for forging friendships, finding potential roommates, engaging with current students about campus life and staying updated on all things ASU, ensuring a smooth transition before you set foot on campus in the fall.</p>
+        <p>Devil2Devil is open for engagement starting in January 2025 and is tailored for students attending in-person degree programs at ASU’s Downtown Phoenix, Polytechnic, Tempe and West Valley campuses, as well as LA Center.</p>
+      </div>
+    </div>
+  </div>
+
+
+
+
+<!-- Section: Verification -->
+<section id="verification-steps" class="py-5 bg-white">
+  <style>
+    /* Disable and complete state styles */
+    .disabled-card {
+      opacity: 0.5;  /* Dim the card when disabled */
+    }
+    .disabled-card .btn {
+      pointer-events: none;
+      cursor: not-allowed;
+    }
+    .completed-card {
+      border: 2px solid var(--asu-maroon);  /* Highlight completed step (maroon border) */
+      box-shadow: 0 0.5rem 1rem rgba(140, 29, 64, 0.25);
+    }
+  </style>
+  <div class="container">
+    <!-- Heading and status text -->
+    <div class="mb-4">
+      <div class="uds-highlighted-heading">
+        <h2><span class="highlight-gold">Verify Your Discord Account</span></h2>
+      </div>
+      <div class="text-muted small mt-2">
+        {% if discord_complete %}
+          <span class="badge text-bg-success">All steps complete</span>
+        {% elif saml_complete %}
+          Next up: connect your Discord account.
+        {% else %}
+          Start by signing in with your ASURITE ID.
+        {% endif %}
+      </div>
+    </div>
+    <!-- Card arrangement for steps -->
+    <div class="uds-card-arrangement">
+      <div class="uds-card-arrangement-content-container default"></div>
+      <div class="uds-card-arrangement-card-container auto-arrangement four-columns">
+        
+        <!-- Card 1: ASURITE Login (My ASU) -->
+        <div class="card-wrapper{% if step1_complete %} completed-card{% endif %}" id="card-step1">
+          <div class="sc-fqkvVR glpyHd card cards-components">
+            <!-- Icon: Desktop computer -->
+            <svg class="svg-inline--fa fa-desktop fa-2x card-icon-top" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="desktop" viewBox="0 0 576 512">
+              <path fill="currentColor" d="M64 0C28.7 0 0 28.7 0 64V352c0 35.3 28.7 64 64 64H240l-10.7 32H160c-17.7 0-32 14.3-32 32s14.3 32 32 32H416c17.7 0 32-14.3 32-32s-14.3-32-32-32H346.7L336 416H512c35.3 0 64-28.7 64-64V64c0-35.3-28.7-64-64-64H64zM512 64V288H64V64H512z"></path>
+            </svg>
+            <div class="card-header">
+              <h3 class="card-title">My ASU</h3>
+            </div>
+            <div class="card-body">
+              <p>Log in to MyASU so we can verify your admission status. You’ll be returned here to link your Discord account.</p>
+            </div>
+            <div class="card-buttons">
+              {% if saml_login_url %}
+                <!-- ASU Login button (enabled always for step1) -->
+                <a class="btn btn-maroon" href="{{ saml_login_url }}">
+                  {% if step1_complete %}Reauthenticate with ASU{% else %}My ASU{% endif %}
+                </a>
+              {% else %}
+                <!-- Disabled state if login URL not available -->
+                <a class="btn btn-secondary disabled" href="#" aria-disabled="true">ASU login unavailable</a>
+              {% endif %}
+            </div>
+          </div>
+        </div><!-- /.card-wrapper Step1 -->
+        
+        <!-- Card 2: Connect Discord Account -->
+        <div class="card-wrapper{% if not step2_enabled %} disabled-card{% endif %}{% if step2_complete %} completed-card{% endif %}" id="card-step2">
+          <div class="sc-fqkvVR glpyHd card cards-components">
+            <!-- Icon: Discord logo -->
+            <svg class="svg-inline--fa fa-discord fa-2x card-icon-top" aria-hidden="true" focusable="false" data-prefix="fab" data-icon="discord" viewBox="0 0 640 512">
+              <path fill="currentColor" d="M524.531 69.836a1.5 1.5 0 0 0-.764-.7A485.065 485.065 0 0 0 404.081 32.03a1.816 1.816 0 0 0-1.923.91 337.461 337.461 0 0 0-14.9 30.6 447.848 447.848 0 0 0-134.426 0 309.541 309.541 0 0 0-15.135-30.6 1.89 1.89 0 0 0-1.924-.91A483.689 483.689 0 0 0 116.085 69.137a1.712 1.712 0 0 0-.788.676C39.068 183.651 18.186 294.69 28.43 404.354a2.016 2.016 0 0 0 .765 1.375 487.666 487.666 0 0 0 147.825 74.189 1.9 1.9 0 0 0 2.063-.676 348.2 348.2 0 0 0 32.1-49.518 1.86 1.86 0 0 0-1.019-2.588 321.173 321.173 0 0 1-45.868-21.853 1.885 1.885 0 0 1-.185-3.126c3.082-2.309 6.166-4.711 9.109-7.137a1.819 1.819 0 0 1 1.9-.256c96.229 43.917 200.41 43.917 295.5 0a1.812 1.812 0 0 1 1.924.233c2.944 2.426 6.027 4.851 9.132 7.16a1.884 1.884 0 0 1-.162 3.126 301.407 301.407 0 0 1-45.89 21.83 1.875 1.875 0 0 0-1 2.611 391.055 391.055 0 0 0 30.014 48.815 1.864 1.864 0 0 0 2.063.7 486.048 486.048 0 0 0 132.636-73.619 1.882 1.882 0 0 0 .765-1.352c16.264-128.135-16.533-238.264-82.935-335.893ZM222.491 337.58c-28.972 0-52.844-26.587-52.844-59.239s23.915-59.239 52.844-59.239c29.665 0 53.306 26.82 52.843 59.239-.001 32.652-23.411 59.239-52.843 59.239Zm195.38 0c-28.971 0-52.843-26.587-52.843-59.239s23.915-59.239 52.843-59.239c29.667 0 53.307 26.82 52.844 59.239-.001 32.652-23.178 59.239-52.844 59.239Z"></path>
+            </svg>
+            <div class="card-header">
+              <h3 class="card-title">Discord</h3>
+            </div>
+            <div class="card-body">
+              <p>
+                {% if step2_complete %}
+                  Discord is linked{% if verification_state.discord_username or discord_user.username %} as <strong>{{ verification_state.discord_username or discord_user.username }}</strong>{% endif %}. You can reconnect to refresh permissions.
+                {% elif step2_enabled %}
+                  Approve the Devils to Devils bot to add you to the server and grant your verified role automatically.
+                {% else %}
+                  Complete Step&nbsp;1 to unlock this step.
+                {% endif %}
+              </p>
+            </div>
+            <div class="card-buttons">
+              {% if discord_login_url and discord_configured %}
+                <a class="btn btn-maroon {% if not step2_enabled %}disabled{% endif %}" href="{{ discord_login_url }}" {% if not step2_enabled %}aria-disabled="true"{% endif %}>
+                  {% if step2_complete %}Manage Discord Link{% else %}Connect Discord{% endif %}
+                </a>
+              {% else %}
+                <div class="alert alert-secondary small mb-0">
+                  Discord integration is not configured.
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        </div><!-- /.card-wrapper Step2 -->
+        
+        <!-- Card 3: Visit Devil2Devil (Discord server link) -->
+        <div class="card-wrapper{% if not step3_enabled %} disabled-card{% endif %}{% if discord_complete %} completed-card{% endif %}" id="card-step3">
+          <div class="sc-fqkvVR glpyHd card cards-components">
+            <!-- Icon: Chat (comments) -->
+            <svg class="svg-inline--fa fa-comments fa-2x card-icon-top" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="comments" viewBox="0 0 576 512">
+              <path fill="currentColor" d="M416 192c0-88.4-93.1-160-208-160S0 103.6 0 192c0 34.3 14.1 65.9 38 92-13.4 30.2-35.5 54.2-35.8 54.5-2.2 2.3-2.8 5.7-1.5 8.7S4.8 352 8 352c36.6 0 66.9-12.3 88.7-25 32.2 15.7 70.3 25 111.3 25 114.9 0 208-71.6 208-160zm122 220c23.9-26 38-57.7 38-92 0-66.9-53.5-124.2-129.3-148.1.9 6.6 1.3 13.3 1.3 20.1 0 105.9-107.7 192-240 192-10.8 0-21.3-.8-31.7-1.9C207.8 439.6 281.8 480 368 480c41 0 79.1-9.2 111.3-25 21.8 12.7 52.1 25 88.7 25 3.2 0 6.1-1.9 7.3-4.8 1.3-2.9.7-6.3-1.5-8.7-.3-.3-22.4-24.2-35.8-54.5z"></path>
+            </svg>
+            <div class="card-header">
+              <h3 class="card-title">Devil2Devil Server</h3>
+            </div>
+            <div class="card-body">
+              <p>Head to the Devils to Devils Discord community and start meeting the Class of 2030! Introduce yourself, find your community, and catch the latest updates.</p>
+            </div>
+            <div class="card-buttons">
+              <a class="btn btn-maroon {% if not step3_enabled %}disabled{% endif %}" href="{% if step3_enabled %}https://discord.com/channels/1187144343400751234/1435338904994709626{% else %}#{% endif %}" 
+                 {% if step3_enabled %}target="_blank" rel="noopener"{% else %}aria-disabled="true"{% endif %}>
+                Visit Devil2Devil
+              </a>
+            </div>
+          </div>
+        </div><!-- /.card-wrapper Step3 -->
+        
+        <!-- Card 4: Instagram (information only) -->
+        <div class="card-wrapper" id="card-instagram">
+          <div class="sc-fqkvVR glpyHd card cards-components">
+            <!-- Icon: Instagram -->
+            <svg class="svg-inline--fa fa-instagram fa-2x card-icon-top" aria-hidden="true" focusable="false" data-prefix="fab" data-icon="instagram" viewBox="0 0 448 512">
+              <path fill="currentColor" d="M224.1 141c-63.6 0-114.9 51.3-114.9 114.9S160.5 370.8 224.1 370.8 339 319.5 339 255.9 287.7 141 224.1 141zm146.4-194.3c0 14.9-12 26.8-26.8 26.8-14.9 0-26.8-12-26.8-26.8s12-26.8 26.8-26.8 26.8 12 26.8 26.8zM398.8 388c-7.8 19.6-22.9 34.7-42.6 42.6-29.5 11.7-99.5 9-132.1 9s-102.7 2.6-132.1-9c-19.6-7.8-34.7-22.9-42.6-42.6-11.7-29.5-9-99.5-9-132.1s-2.6-102.7 9-132.1c7.8-19.6 22.9-34.7 42.6-42.6 29.5-11.7 99.5-9 132.1-9s102.7 2.6 132.1 9c19.6 7.8 34.7 22.9 42.6 42.6 11.7 29.5 9 99.5 9 132.1s2.7 102.7-9 132.1z"></path>
+            </svg>
+            <div class="card-header">
+              <h3 class="card-title">Future Sun Devils Instagram</h3>
+            </div>
+            <div class="card-body">
+              <p>Follow <strong>@FutureSunDevils</strong> on Instagram and click the link in our bio to join the server. *Remember:* you must verify your Fall 2025 admission to get full access to the Discord community.</p>
+            </div>
+            <div class="card-buttons">
+              <a class="btn btn-maroon" href="https://www.instagram.com/futuresundevils/" target="_blank" rel="noopener">
+                Instagram
+              </a>
+            </div>
+          </div>
+        </div><!-- /.card-wrapper Instagram -->
+        
+      </div><!-- /.uds-card-arrangement-card-container -->
+    </div><!-- /.uds-card-arrangement -->
+  </div><!-- /.container -->
+</section>
+
+
+
+
+
+
 {% set step1_complete = saml_complete %}
 {% set step2_complete = discord_complete %}
 {% set step2_enabled = saml_complete %}
 {% set step3_enabled = discord_complete %}
+
+
+
 
 <!-- Section: verification-steps -->
 <section id="verification-steps" class="py-5 bg-white">
@@ -1514,60 +1689,7 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
           </div>
   </div>
 </main>
-  <footer class="page__footer" id="asu-footer" role="contentinfo" data-once="asu-footer">
-      
-  <div class="block block--asufooter">
-
   
-    
-
-            
-
-<div class="wrapper" id="wrapper-footer-innovation">
-  <div class="container" id="footer-innovation">
-    <div class="row">
-      <div class="col">
-        <div class="d-flex footer-innovation-links">
-          <nav class="nav" aria-label="University Services">
-            <a class="nav-link" href="https://www.asu.edu/about/locations-maps" data-ga-footer-type="internal link" data-ga-footer-section="secondary footer" data-ga-footer="maps and locations" data-ga-footer-component="">Maps and Locations</a>
-            <a class="nav-link" href="https://cfo.asu.edu/applicant" data-ga-footer-type="internal link" data-ga-footer-section="secondary footer" data-ga-footer="jobs" data-ga-footer-component="">Jobs</a>
-            <a class="nav-link" href="https://search.asu.edu/?search-tabs=web_dir_faculty_staff" data-ga-footer-type="internal link" data-ga-footer-section="secondary footer" data-ga-footer="directory" data-ga-footer-component="">Directory</a>
-            <a class="nav-link" href="https://www.asu.edu/about/contact" data-ga-footer-type="internal link" data-ga-footer-section="secondary footer" data-ga-footer="contact asu" data-ga-footer-component="">Contact ASU</a>
-            <a class="nav-link" href="https://my.asu.edu/" data-ga-footer-type="internal link" data-ga-footer-section="secondary footer" data-ga-footer="my asu" data-ga-footer-component="">My ASU</a>
-          </nav>
-          <a class="img-link" href="https://www.asu.edu/rankings" data-ga-footer-type="internal link" data-ga-footer-section="secondary footer" data-ga-footer="#1 in the u.s. for innovation" data-ga-footer-component="">
-            <img src="{{ url_for('static', filename='img/footer-rank.png') }}" loading="lazy" height="105" width="640" alt="Repeatedly ranked #1 on 30+ lists in the last 3 years">
-          </a>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="wrapper" id="wrapper-footer-colophon">
-  <div class="container" id="footer-colophon">
-    <div class="row">
-      <div class="col">
-        <div class="footer-legal-links">
-          <nav class="nav colophon" aria-label="University Legal and Compliance">
-            <a class="nav-link" href="https://www.asu.edu/about/copyright-trademark" data-ga-footer-type="internal link" data-ga-footer-section="tertiary footer" data-ga-footer="copyright and trademark" data-ga-footer-component="">Copyright and Trademark</a>
-            <a class="nav-link" href="https://accessibility.asu.edu/report" data-ga-footer-type="internal link" data-ga-footer-section="tertiary footer" data-ga-footer="accessibility" data-ga-footer-component="">Accessibility</a>
-            <a class="nav-link" href="https://www.asu.edu/about/privacy" data-ga-footer-type="internal link" data-ga-footer-section="tertiary footer" data-ga-footer="privacy" data-ga-footer-component="">Privacy</a>
-            <a class="nav-link" href="https://www.asu.edu/about/terms-of-use" data-ga-footer-type="internal link" data-ga-footer-section="tertiary footer" data-ga-footer="terms of use" data-ga-footer-component="">Terms of Use</a>
-            <a class="nav-link" href="https://www.asu.edu/emergency" data-ga-footer-type="internal link" data-ga-footer-section="tertiary footer" data-ga-footer="emergency" data-ga-footer-component="">Emergency</a>
-          </nav>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-      
-  </div>
-
-
-  </footer>
-
   </div>
 
     
