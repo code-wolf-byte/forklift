@@ -1,4 +1,7 @@
+import asyncio
+import logging
 import os
+import threading
 from datetime import datetime
 
 from flask import Flask, redirect, render_template, session, url_for
@@ -19,11 +22,50 @@ def _should_start_metadata_scheduler() -> bool:
     return flag is None or flag == "true"
 
 
+_discord_bot_thread: threading.Thread | None = None
+logger = logging.getLogger(__name__)
+
+
+def _should_start_discord_bot() -> bool:
+    if not CONFIG.DISCORD_BOT_AUTOSTART:
+        return False
+    return _should_start_metadata_scheduler()
+
+
+def _start_discord_bot_thread() -> None:
+    global _discord_bot_thread
+
+    if DISCORD_CONFIG is None:
+        logger.warning("Discord bot autostart skipped: DISCORD_CONFIG is not set")
+        return
+    if _discord_bot_thread and _discord_bot_thread.is_alive():
+        return
+
+    def _run_bot() -> None:
+        from asu_discord import create_bot
+
+        bot = create_bot()
+
+        async def _runner():
+            await bot.start(DISCORD_CONFIG.bot_token)  # type: ignore[arg-type]
+
+        try:
+            asyncio.run(_runner())
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Discord bot thread exited unexpectedly")
+
+    _discord_bot_thread = threading.Thread(target=_run_bot, name="discord-bot", daemon=True)
+    _discord_bot_thread.start()
+    logger.info("Started Discord bot background thread for guild %s", DISCORD_CONFIG.guild_id)
+
+
 if CONFIG.SAML_ENABLED:
     ensure_metadata_on_startup()
 init_db()
 if CONFIG.SAML_ENABLED and _should_start_metadata_scheduler():
     start_metadata_scheduler()
+if _should_start_discord_bot():
+    _start_discord_bot_thread()
 
 app = Flask(__name__)
 app.secret_key = CONFIG.SECRET_KEY

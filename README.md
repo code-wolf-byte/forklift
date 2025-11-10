@@ -34,6 +34,7 @@ DATABASE_URL=sqlite:////absolute/path/to/forklift.db
 Optional overrides:
 
 ```
+FORKLIFT_ENABLE_DISCORD_BOT=true
 DISCORD_SCOPE=identify
 DISCORD_TEST_GUILD_IDS=1082823852322725888
 DISCORD_SUCCESS_REDIRECT=/verified
@@ -91,6 +92,7 @@ or remove the configured verification role. Use `/setup_verification` (requires
 `Manage Server`) to post the Devils to Devils verification embed and "Verify
 Here" button in the current channel. Populate `DISCORD_TEST_GUILD_IDS` (comma-
 separated) to register the slash command as a guild command for those IDs so it
-appears immediately while testing.
+appears immediately while testing. Set `FORKLIFT_ENABLE_DISCORD_BOT=true` to run
+the bot inside the Flask container; disable it if you prefer a separate process.
 
 [py-cord]: https://pypi.org/project/py-cord/

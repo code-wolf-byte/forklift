@@ -37,6 +37,7 @@ class AppConfig:
 
     BASE_DIR: Path = Path(__file__).resolve().parent.parent
     DEV_MODE: bool = _env_bool("FORKLIFT_DEV_MODE", default=False)
+    DISCORD_BOT_AUTOSTART: bool = _env_bool("FORKLIFT_ENABLE_DISCORD_BOT", default=False)
     DATABASE_URL: str = field(init=False)
     SECRET_KEY: str = os.getenv("FLASK_SECRET_KEY", os.getenv("SECRET_KEY", "change-me"))
     SESSION_COOKIE_NAME: str = os.getenv("SESSION_COOKIE_NAME", "forklift_session")
