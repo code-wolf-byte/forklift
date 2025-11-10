@@ -15,6 +15,8 @@ from saml2 import BINDING_HTTP_POST, BINDING_HTTP_REDIRECT, config as saml2_conf
 from saml2.metadata import create_metadata_string
 from saml2.sigver import SignatureError
 
+from utils.settings import CONFIG
+
 
 logger = logging.getLogger(__name__)
 
@@ -330,6 +332,9 @@ def _metadata_refresh_loop() -> None:
 
 def start_metadata_scheduler() -> None:
     """Start the background scheduler that keeps metadata fresh."""
+    if CONFIG.DEV_MODE:
+        logger.info("FORKLIFT_DEV_MODE enabled; skipping metadata refresh scheduler")
+        return
     global _REFRESH_THREAD
     if _REFRESH_THREAD and _REFRESH_THREAD.is_alive():
         return
@@ -345,6 +350,8 @@ def start_metadata_scheduler() -> None:
 
 def stop_metadata_scheduler() -> None:
     """Stop the background metadata scheduler."""
+    if CONFIG.DEV_MODE:
+        return
     global _REFRESH_THREAD
     if not _REFRESH_THREAD:
         return
@@ -356,6 +363,9 @@ def stop_metadata_scheduler() -> None:
 def ensure_metadata_on_startup(*, unsigned: bool = False) -> Path:
     """Ensure metadata exists and is current, returning the active metadata path."""
     global _SCHEDULER_UNSIGNED
+    if CONFIG.DEV_MODE:
+        logger.info("FORKLIFT_DEV_MODE enabled; skipping SAML metadata generation")
+        return METADATA_CONFIG.METADATA_PATH
     _SCHEDULER_UNSIGNED = unsigned
     METADATA_GENERATOR.ensure_metadata(
         metadata_path=METADATA_CONFIG.METADATA_PATH,

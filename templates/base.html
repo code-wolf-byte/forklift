@@ -11,6 +11,7 @@
   </head>
   <body class="{% block body_class %}bg-gray-1 text-body{% endblock %}">
     <a class="skip-link" href="#main-content">Skip to main content</a>
+    <!-- ASU Global Header + Navigation -->
     <header class="uds-site-header border-bottom shadow-sm">
       <div class="bg-asu-maroon text-white">
         <div class="container py-2 d-flex align-items-center justify-content-between gap-3 flex-wrap">
@@ -25,6 +26,7 @@
           </div>
         </div>
       </div>
+      <!-- Primary navigation bar -->
       <div class="bg-asu-gold text-dark">
         <nav class="navbar navbar-expand-lg navbar-light container px-0" aria-label="Devils to Devils site navigation">
           <a class="navbar-brand fw-semibold text-dark text-decoration-none" href="{{ url_for('hello_world') }}">
@@ -49,6 +51,7 @@
         </nav>
       </div>
     </header>
+    <!-- /ASU Global Header + Navigation -->
     <main id="main-content" class="py-5">
       {% block content %}{% endblock %}
     </main>

@@ -31,6 +31,9 @@ def _oauth_failure(message: str, status_code: int = 400):
 
 @discord_bp.route("/auth/discord/login")
 def discord_login():
+    if not CONFIG.SAML_ENABLED:
+        logger.info("Discord login requested while SAML is disabled")
+        return _oauth_failure("ASU single sign-on is disabled in this environment", 503)
     if DISCORD_CONFIG is None:
         logger.error("Discord login attempted without configuration")
         return _oauth_failure("Discord integration is not configured", 503)
@@ -49,6 +52,9 @@ def discord_login():
 
 @discord_bp.route("/auth/discord/callback")
 def discord_callback():
+    if not CONFIG.SAML_ENABLED:
+        logger.error("Discord callback invoked while SAML is disabled")
+        return _oauth_failure("SAML verification is disabled in this environment", 503)
     if DISCORD_CONFIG is None:
         logger.error("Discord callback invoked without configuration")
         return _oauth_failure("Discord integration is not configured", 503)

@@ -36,10 +36,8 @@ class AppConfig:
     """Expose high-level application configuration."""
 
     BASE_DIR: Path = Path(__file__).resolve().parent.parent
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        f"sqlite:///{(Path(__file__).resolve().parent.parent / 'forklift.db').as_posix()}",
-    )
+    DEV_MODE: bool = _env_bool("FORKLIFT_DEV_MODE", default=False)
+    DATABASE_URL: str = field(init=False)
     SECRET_KEY: str = os.getenv("FLASK_SECRET_KEY", os.getenv("SECRET_KEY", "change-me"))
     SESSION_COOKIE_NAME: str = os.getenv("SESSION_COOKIE_NAME", "forklift_session")
     SESSION_COOKIE_SECURE: bool = _env_bool("SESSION_COOKIE_SECURE", default=False)
@@ -47,8 +45,36 @@ class AppConfig:
     DISCORD_SUCCESS_REDIRECT: str | None = _env_value("DISCORD_SUCCESS_REDIRECT")
     DISCORD_FAILURE_REDIRECT: str | None = _env_value("DISCORD_FAILURE_REDIRECT")
     SAML_ATTRIBUTE_MAP: Dict[str, List[str]] = field(init=False)
+    SAML_ENABLED: bool = field(init=False)
 
     def __post_init__(self) -> None:
+        default_db_path = self.BASE_DIR / "forklift.db"
+        default_db_url = f"sqlite:///{default_db_path.as_posix()}"
+        env_db_url = os.getenv("DATABASE_URL")
+        db_url = env_db_url.strip() if env_db_url else default_db_url
+
+        if not db_url:
+            db_url = default_db_url
+
+        if self.DEV_MODE and db_url.startswith("sqlite") and "/app/" in db_url:
+            db_url = default_db_url
+
+        sqlite_prefix = "sqlite:///"
+        if db_url.startswith(sqlite_prefix):
+            sqlite_path = db_url[len(sqlite_prefix) :]
+            if sqlite_path:
+                file_path = Path(sqlite_path)
+                try:
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    if self.DEV_MODE:
+                        db_url = default_db_url
+                        file_path = default_db_path
+                        file_path.parent.mkdir(parents=True, exist_ok=True)
+                    else:
+                        raise
+
+        self.DATABASE_URL = db_url
         if not self.SECRET_KEY or self.SECRET_KEY == "change-me":
             self.SECRET_KEY = "change-me"
         default_asurite = [
@@ -85,6 +111,7 @@ class AppConfig:
             "last_name": _env_list("SAML_ATTR_LAST_NAME", default=default_last_name),
             "affiliations": _env_list("SAML_ATTR_AFFILIATIONS", default=default_affiliations),
         }
+        self.SAML_ENABLED = not self.DEV_MODE
 
 
 @dataclass(slots=True)

@@ -3,10 +3,15 @@ from datetime import datetime
 
 from flask import Flask, redirect, render_template, session, url_for
 
-from routes import discord_bp, saml_bp
+from routes.discord import discord_bp
 from utils.database import init_db
 from utils.metadata import ensure_metadata_on_startup, start_metadata_scheduler
 from utils.settings import CONFIG, DISCORD_CONFIG
+
+if CONFIG.SAML_ENABLED:
+    from routes.saml import saml_bp
+else:  # pragma: no cover - SAML disabled
+    saml_bp = None  # type: ignore[assignment]
 
 
 def _should_start_metadata_scheduler() -> bool:
@@ -14,9 +19,10 @@ def _should_start_metadata_scheduler() -> bool:
     return flag is None or flag == "true"
 
 
-ensure_metadata_on_startup()
+if CONFIG.SAML_ENABLED:
+    ensure_metadata_on_startup()
 init_db()
-if _should_start_metadata_scheduler():
+if CONFIG.SAML_ENABLED and _should_start_metadata_scheduler():
     start_metadata_scheduler()
 
 app = Flask(__name__)
@@ -25,7 +31,8 @@ app.config["SESSION_COOKIE_NAME"] = CONFIG.SESSION_COOKIE_NAME
 app.config["SESSION_COOKIE_SECURE"] = CONFIG.SESSION_COOKIE_SECURE
 app.config["SESSION_COOKIE_SAMESITE"] = CONFIG.SESSION_COOKIE_SAMESITE
 
-app.register_blueprint(saml_bp)
+if CONFIG.SAML_ENABLED and saml_bp is not None:
+    app.register_blueprint(saml_bp)
 app.register_blueprint(discord_bp)
 
 @app.context_processor
@@ -69,6 +76,7 @@ def _verification_context() -> dict:
         "verification_error": verification_error,
         "discord_configured": DISCORD_CONFIG is not None,
         "logout_url": logout_url,
+        "saml_enabled": CONFIG.SAML_ENABLED,
     }
     return context
 
