@@ -122,6 +122,7 @@ class DiscordConfig:
     bot_token: str
     guild_id: str
     verified_role_id: str
+    test_guild_ids: tuple[int, ...] = ()
     scope: str = "identify"
     api_base: str = "https://discord.com/api/v10"
     authorize_base: str = "https://discord.com/oauth2/authorize"
@@ -148,12 +149,19 @@ class DiscordConfig:
                 payload[field] = value
 
         scope = _env_value("DISCORD_SCOPE", default="identify")
+        test_guild_ids_raw = _env_list("DISCORD_TEST_GUILD_IDS")
+        test_guild_ids: List[int] = []
+        for raw_id in test_guild_ids_raw:
+            try:
+                test_guild_ids.append(int(raw_id))
+            except ValueError as exc:
+                raise RuntimeError(f"Invalid guild id in DISCORD_TEST_GUILD_IDS: {raw_id}") from exc
 
         if missing:
             missing_vars = ", ".join(missing)
             raise RuntimeError(f"Missing Discord environment variables: {missing_vars}")
 
-        return cls(scope=scope, **payload)
+        return cls(scope=scope, test_guild_ids=tuple(test_guild_ids), **payload)
 
 
 CONFIG = AppConfig()

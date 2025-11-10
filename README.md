@@ -35,6 +35,7 @@ Optional overrides:
 
 ```
 DISCORD_SCOPE=identify
+DISCORD_TEST_GUILD_IDS=1082823852322725888
 DISCORD_SUCCESS_REDIRECT=/verified
 DISCORD_FAILURE_REDIRECT=/verification-error
 SAML_ATTR_ASURITE=uid
@@ -88,6 +89,8 @@ The bot loads a verification cog that exposes `!verify @member` and
 `!unverify @member` commands (requires the `Manage Roles` permission) to assign
 or remove the configured verification role. Use `/setup_verification` (requires
 `Manage Server`) to post the Devils to Devils verification embed and "Verify
-Here" button in the current channel.
+Here" button in the current channel. Populate `DISCORD_TEST_GUILD_IDS` (comma-
+separated) to register the slash command as a guild command for those IDs so it
+appears immediately while testing.
 
 [py-cord]: https://pypi.org/project/py-cord/

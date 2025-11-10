@@ -7,7 +7,22 @@ import discord
 from discord.ext import commands
 from discord.commands import slash_command
 
+from utils.settings import DISCORD_CONFIG
+
 logger = logging.getLogger(__name__)
+
+TEST_GUILD_IDS: list[int] = []
+if DISCORD_CONFIG and DISCORD_CONFIG.test_guild_ids:
+    TEST_GUILD_IDS = [int(gid) for gid in DISCORD_CONFIG.test_guild_ids]
+
+SLASH_COMMAND_KWARGS = {
+    "name": "setup_verification",
+    "description": "Post the Devils to Devils verification instructions.",
+    "dm_permission": False,
+    "default_member_permissions": discord.Permissions(manage_guild=True),
+}
+if TEST_GUILD_IDS:
+    SLASH_COMMAND_KWARGS["guild_ids"] = TEST_GUILD_IDS
 
 
 class VerificationCog(commands.Cog):
@@ -89,12 +104,7 @@ class VerificationCog(commands.Cog):
         view.add_item(discord.ui.Button(label="Verify Here", url=self.VERIFICATION_URL))
         return view
 
-    @slash_command(
-        name="setup_verification",
-        description="Post the Devils to Devils verification instructions.",
-        dm_permission=False,
-        default_member_permissions=discord.Permissions(manage_guild=True),
-    )
+    @slash_command(**SLASH_COMMAND_KWARGS)
     async def setup_verification(self, ctx: discord.ApplicationContext) -> None:
         """Slash command to seed the verification prompt embed in-channel."""
         if ctx.guild_id != self.guild_id:
