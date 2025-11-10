@@ -29,18 +29,31 @@ class ForkliftBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         """Load bot cogs once the bot is ready."""
+        logger.info("ForkliftBot setup hook starting")
         if DISCORD_CONFIG is None:
             logger.warning("Discord bot started without DISCORD_CONFIG; skipping verification cog")
             return
 
-        self.add_cog(
-            VerificationCog(
-                self,
-                guild_id=int(DISCORD_CONFIG.guild_id),
-                verified_role_id=int(DISCORD_CONFIG.verified_role_id),
+        try:
+            self.add_cog(
+                VerificationCog(
+                    self,
+                    guild_id=int(DISCORD_CONFIG.guild_id),
+                    verified_role_id=int(DISCORD_CONFIG.verified_role_id),
+                )
             )
-        )
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to load VerificationCog")
+            raise
+
         logger.info("Loaded VerificationCog for guild %s", DISCORD_CONFIG.guild_id)
+
+        try:
+            await self.sync_commands()
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to sync application commands with Discord")
+            raise
+        logger.info("Synced application commands")
 
 
 def create_bot(*, command_prefix: str = "!", intents: Optional[discord.Intents] = None) -> ForkliftBot:
