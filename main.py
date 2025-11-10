@@ -11,6 +11,8 @@ from utils.database import init_db
 from utils.metadata import ensure_metadata_on_startup, start_metadata_scheduler
 from utils.settings import CONFIG, DISCORD_CONFIG
 
+logging.basicConfig(level=logging.INFO)
+
 if CONFIG.SAML_ENABLED:
     from routes.saml import saml_bp
 else:  # pragma: no cover - SAML disabled
