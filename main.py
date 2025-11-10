@@ -46,15 +46,20 @@ def _start_discord_bot_thread() -> None:
     def _run_bot() -> None:
         from asu_discord import create_bot
 
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
         bot = create_bot()
 
         async def _runner():
             await bot.start(DISCORD_CONFIG.bot_token)  # type: ignore[arg-type]
 
         try:
-            asyncio.run(_runner())
+            loop.run_until_complete(_runner())
         except Exception:  # pragma: no cover - defensive
             logger.exception("Discord bot thread exited unexpectedly")
+        finally:
+            loop.close()
 
     _discord_bot_thread = threading.Thread(target=_run_bot, name="discord-bot", daemon=True)
     _discord_bot_thread.start()
