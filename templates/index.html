@@ -1016,21 +1016,14 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
         <p class="text-white">
           Find new friends, join communities and make connections in ASU’s Devil2Devil Discord server for admitted students.
         </p>
-      <div class="d-flex flex-wrap gap-3 align-items-center mt-4">
-        <a class="btn btn-outline-light" href="#verification-steps">
-          View verification steps
+      <div class="d-flex flex-wrap gap-3 align-items-center mt-4 hero-cta-buttons">
+        <a class="btn btn-maroon text-white" href="https://devil2devil.asu.edu/" target="_blank" rel="noopener">
+          Learn more
         </a>
         {% if discord_complete %}
           <a class="btn-default btn-maroon btn" href="https://discord.com/channels/1187144343400751234/1435338904994709626" target="_blank" rel="noopener">
             Visit Devil2Devil
           </a>
-        {% endif %}
-        {% if (saml_complete or discord_complete) and logout_url %}
-          <form method="post" action="{{ logout_url }}">
-            <button type="submit" class="btn btn-outline-light">
-              Log out
-            </button>
-          </form>
         {% endif %}
       </div>
     </div>
@@ -1091,38 +1084,20 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
       border: 2px solid var(--asu-maroon);
       box-shadow: 0 0.5rem 1rem rgba(140, 29, 64, 0.25);
     }
+    .card-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 0.75rem;
+      text-align: center;
+    }
+    .card-buttons .btn {
+      white-space: normal;
+    }
   </style>
   <div class="container">
     <div class="mb-4">
       <div class="uds-highlighted-heading">
         <h2><span class="highlight-gold">Verify Your Discord Account</span></h2>
-      </div>
-      <div class="mt-3 text-white bg-asu-maroon bg-opacity-75 rounded-3 p-3 verification-status">
-        {% if discord_complete %}
-          <p class="mb-0">
-            Your ASU account{% if verification_state.asurite %} (<strong>{{ verification_state.asurite }}</strong>){% endif %}
-            is linked with Discord. Welcome to Devils to Devils{% if verification_state.discord_username or discord_user.username %}, {{ verification_state.discord_username or discord_user.username }}{% endif %}!
-          </p>
-        {% elif saml_complete %}
-          <p class="mb-0">
-            You're signed in with ASU{% if verification_state.asurite %} as <strong>{{ verification_state.asurite }}</strong>{% endif %}
-            {% if verification_state.email %}({{ verification_state.email }}){% endif %}. Connect your Discord account to finish verification.
-          </p>
-        {% else %}
-          <p class="mb-0">
-            Find new friends, join communities and make connections in ASU’s Devil2Devil Discord server for admitted students.
-          </p>
-        {% endif %}
-        {% if saml_complete and not discord_complete and (not discord_configured or not discord_login_url) %}
-          <div class="badge bg-light text-dark fw-semibold mt-3">
-            Discord integration is not configured yet.
-          </div>
-        {% endif %}
-        {% if verification_error %}
-          <div class="alert alert-warning border-0 fw-semibold text-dark bg-warning-subtle mt-3 mb-0">
-            Verification issue: {{ verification_error }}
-          </div>
-        {% endif %}
       </div>
       <div class="text-muted small mt-2">
         {% if discord_complete %}
@@ -1133,6 +1108,31 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
           Start by signing in with your ASURITE ID.
         {% endif %}
       </div>
+      {% if discord_complete or saml_complete or verification_error %}
+        <div class="mt-3 verification-status text-black">
+          {% if discord_complete %}
+            <p class="mb-0">
+              Your ASU account{% if verification_state.asurite %} (<strong>{{ verification_state.asurite }}</strong>){% endif %}
+              is linked with Discord. Welcome to Devils to Devils{% if verification_state.discord_username or discord_user.username %}, {{ verification_state.discord_username or discord_user.username }}{% endif %}!
+            </p>
+          {% elif saml_complete %}
+            <p class="mb-0">
+              You're signed in with ASU{% if verification_state.asurite %} as <strong>{{ verification_state.asurite }}</strong>{% endif %}
+              {% if verification_state.email %}({{ verification_state.email }}){% endif %}. Connect your Discord account to finish verification.
+            </p>
+            {% if not discord_complete and (not discord_configured or not discord_login_url) %}
+              <div class="badge bg-light text-dark fw-semibold mt-3">
+                Discord integration is not configured yet.
+              </div>
+            {% endif %}
+          {% endif %}
+          {% if verification_error %}
+            <div class="alert alert-warning border-0 fw-semibold text-dark bg-warning-subtle mt-3 mb-0">
+              Verification issue: {{ verification_error }}
+            </div>
+          {% endif %}
+        </div>
+      {% endif %}
     </div>
 
     <div class="uds-card-arrangement">
