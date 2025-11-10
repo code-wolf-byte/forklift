@@ -33,7 +33,7 @@ class ForkliftBot(commands.Bot):
             logger.warning("Discord bot started without DISCORD_CONFIG; skipping verification cog")
             return
 
-        await self.add_cog(
+        self.add_cog(
             VerificationCog(
                 self,
                 guild_id=int(DISCORD_CONFIG.guild_id),
