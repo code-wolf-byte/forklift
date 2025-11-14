@@ -42,6 +42,59 @@ class User(Base):
         nullable=False,
     )
 
+    def _has_affiliation(self, target: str) -> bool:
+        if not self.affiliations:
+            return False
+        normalized_target = target.lower()
+        return any(
+            normalized_target == affiliation.strip().lower()
+            for affiliation in self.affiliations.split(",")
+            if affiliation
+        )
+
+    @property
+    def is_member(self) -> bool:
+        return self._has_affiliation("member@asu.edu")
+
+    @property
+    def is_student(self) -> bool:
+        return self._has_affiliation("student@asu.edu")
+
+    @property
+    def is_employee(self) -> bool:
+        return self._has_affiliation("employee@asu.edu")
+
+
+class QnaPost(Base):
+    __tablename__ = "qna_posts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(String(64), nullable=True)
+    channel_id = Column(String(64), nullable=False)
+    thread_id = Column(String(64), unique=True, index=True, nullable=False)
+    owner_id = Column(String(64), nullable=True)
+    title = Column(String(255), nullable=True)
+    assistant_message_id = Column(String(64), nullable=True)
+    question = Column(Text, nullable=True)
+    answer = Column(Text, nullable=True)
+    status = Column(String(32), default="pending", nullable=False)
+    last_feedback_user_id = Column(String(64), nullable=True)
+    last_feedback_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class QnaModule(Base):
+    __tablename__ = "qna_modules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(String(64), unique=True, nullable=False)
+    enabled = Column(Boolean, default=False, nullable=False)
+    commands = Column(Text, nullable=True)
+    config = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
 
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)

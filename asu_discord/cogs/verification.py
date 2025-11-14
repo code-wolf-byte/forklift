@@ -1,11 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 import discord
 from discord.ext import commands
-from discord.commands import slash_command
+from discord.commands import Option, slash_command
 
 from utils.settings import DISCORD_CONFIG
 
@@ -23,6 +23,18 @@ SLASH_COMMAND_KWARGS = {
 }
 if TEST_GUILD_IDS:
     SLASH_COMMAND_KWARGS["guild_ids"] = TEST_GUILD_IDS
+
+
+def _moderation_command_kwargs(name: str, description: str) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "name": name,
+        "description": description,
+        "dm_permission": False,
+        "default_member_permissions": discord.Permissions(manage_roles=True),
+    }
+    if TEST_GUILD_IDS:
+        kwargs["guild_ids"] = TEST_GUILD_IDS
+    return kwargs
 
 
 class VerificationCog(commands.Cog):
@@ -53,39 +65,51 @@ class VerificationCog(commands.Cog):
         else:
             logger.info("VerificationCog ready in guild %s (%s)", guild.id, guild.name)
 
-    @commands.command(name="verify")
-    @commands.guild_only()
-    @commands.has_permissions(manage_roles=True)
-    async def verify_member(self, ctx: commands.Context, member: discord.Member) -> None:
+    @slash_command(**_moderation_command_kwargs("verify", "Assign the verification role to a member."))
+    async def verify_member(
+        self,
+        ctx: discord.ApplicationContext,
+        member: Option(discord.Member, "Member to verify"),
+    ) -> None:
         """Assign the verification role to a member."""
+        if ctx.guild_id != self.guild_id or ctx.guild is None:
+            await ctx.respond("This command is only available in the Devils to Devils server.", ephemeral=True)
+            return
+
         role = self._get_verified_role(ctx.guild)
         if role is None:
-            await ctx.send("Unable to locate the configured verification role for this server.")
+            await ctx.respond("Unable to locate the configured verification role for this server.")
             return
 
         if role in member.roles:
-            await ctx.send(f"{member.mention} already has the verification role.")
+            await ctx.respond(f"{member.mention} already has the verification role.")
             return
 
         await member.add_roles(role, reason=f"Manual verification by {ctx.author}")
-        await ctx.send(f"{member.mention} has been marked as verified. ✅")
+        await ctx.respond(f"{member.mention} has been marked as verified. ✅")
 
-    @commands.command(name="unverify")
-    @commands.guild_only()
-    @commands.has_permissions(manage_roles=True)
-    async def unverify_member(self, ctx: commands.Context, member: discord.Member) -> None:
+    @slash_command(**_moderation_command_kwargs("unverify", "Remove the verification role from a member."))
+    async def unverify_member(
+        self,
+        ctx: discord.ApplicationContext,
+        member: Option(discord.Member, "Member to unverify"),
+    ) -> None:
         """Remove the verification role from a member."""
+        if ctx.guild_id != self.guild_id or ctx.guild is None:
+            await ctx.respond("This command is only available in the Devils to Devils server.", ephemeral=True)
+            return
+
         role = self._get_verified_role(ctx.guild)
         if role is None:
-            await ctx.send("Unable to locate the configured verification role for this server.")
+            await ctx.respond("Unable to locate the configured verification role for this server.")
             return
 
         if role not in member.roles:
-            await ctx.send(f"{member.mention} is not currently verified.")
+            await ctx.respond(f"{member.mention} is not currently verified.")
             return
 
         await member.remove_roles(role, reason=f"Manual unverification by {ctx.author}")
-        await ctx.send(f"{member.mention} no longer has the verification role.")
+        await ctx.respond(f"{member.mention} no longer has the verification role.")
 
     def _build_verification_embed(self) -> discord.Embed:
         embed = discord.Embed(

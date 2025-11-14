@@ -8,6 +8,7 @@ from discord.ext import commands
 
 from utils.settings import DISCORD_CONFIG
 from .cogs.verification import VerificationCog
+from .cogs.qna import QnACog 
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,15 @@ class ForkliftBot(commands.Bot):
             raise
 
         logger.info("Loaded VerificationCog for guild %s", DISCORD_CONFIG.guild_id)
+    def _load_qna_cog(self) -> None:
+        """Attach the Q&A cog."""
+        try:
+            self.add_cog(QnACog(self))
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to load QnACog")
+            raise
 
+        logger.info("Loaded QnACog")
     async def setup_hook(self) -> None:
         """Run after the bot connects to Discord."""
         logger.info("ForkliftBot setup hook starting")

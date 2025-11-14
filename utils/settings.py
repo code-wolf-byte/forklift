@@ -45,6 +45,11 @@ class AppConfig:
     SESSION_COOKIE_SAMESITE: str = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
     DISCORD_SUCCESS_REDIRECT: str | None = _env_value("DISCORD_SUCCESS_REDIRECT")
     DISCORD_FAILURE_REDIRECT: str | None = _env_value("DISCORD_FAILURE_REDIRECT")
+    QNA_FORUM_CHANNEL_ID: str | None = _env_value("QNA_FORUM_CHANNEL_ID")
+    QNA_KNOWLEDGE_BASE_ID: str | None = _env_value("QNA_KNOWLEDGE_BASE_ID")
+    QNA_MODEL_ARN: str | None = _env_value("QNA_MODEL_ARN")
+    QNA_AWS_REGION: str | None = _env_value("QNA_AWS_REGION")
+    QNA_HELPER_ROLE_ID: str | None = _env_value("QNA_HELPER_ROLE_ID")
     SAML_ATTRIBUTE_MAP: Dict[str, List[str]] = field(init=False)
     SAML_ENABLED: bool = field(init=False)
 
@@ -113,6 +118,8 @@ class AppConfig:
             "affiliations": _env_list("SAML_ATTR_AFFILIATIONS", default=default_affiliations),
         }
         self.SAML_ENABLED = not self.DEV_MODE
+        if not self.QNA_MODEL_ARN:
+            self.QNA_MODEL_ARN = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
 
 
 @dataclass(slots=True)
