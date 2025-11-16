@@ -141,6 +141,14 @@ def health():
     return {"status": "healthy"}
 
 
+@app.route("/verification-error")
+def verification_error():
+    context = _verification_context()
+    if not context.get("verification_error"):
+        return redirect(url_for("hello_world"))
+    return render_template("index.html", **context), 400
+
+
 @app.route("/verified")
 def verified():
     context = _verification_context()
