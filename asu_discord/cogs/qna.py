@@ -430,7 +430,7 @@ class QnAFeedbackView(discord.ui.View):
     @discord.ui.button(
         label="I still need help...",
         style=discord.ButtonStyle.danger,
-        emoji="\N{SOS SYMBOL}",
+        emoji="\N{SQUARED SOS}",
         custom_id=ASSISTANCE_CUSTOM_ID,
     )
     async def handle_assistance(  # type: ignore[override]
