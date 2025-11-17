@@ -133,9 +133,8 @@ def get_student_profile(asurite: str) -> Dict[str, Any]:
     if primary_opp is not None:
         college_program_code = primary_opp.get("collegeProgramCode")
         enrollment_deposit_paid = (
-            (primary_opp.get("enrollmentDepositStatus") or "").strip().lower()
-            == "paid"
-        )
+            primary_opp.get("enrollmentDepositStatus") or ""
+        ).strip().lower() == "paid"
         is_international = _parse_bool(primary_opp.get("internationalStudent"))
         admit_type = primary_opp.get("type")
         career = primary_opp.get("career")
@@ -168,7 +167,6 @@ def get_student_profile(asurite: str) -> Dict[str, Any]:
         profile["error"] = "No opportunities found"
 
     return profile
-
 
 
 # --------------------

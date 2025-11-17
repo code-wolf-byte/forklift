@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-import asu_discord
+import discord
 from discord.ext import commands
 from discord.commands import Option, slash_command
 
@@ -20,7 +20,7 @@ SLASH_COMMAND_KWARGS = {
     "name": "setup_verification",
     "description": "Post the Devil2Devil verification instructions.",
     "dm_permission": False,
-    "default_member_permissions": asu_discord.Permissions(manage_guild=True),
+    "default_member_permissions": discord.Permissions(manage_guild=True),
 }
 if TEST_GUILD_IDS:
     SLASH_COMMAND_KWARGS["guild_ids"] = TEST_GUILD_IDS
@@ -31,7 +31,7 @@ def _moderation_command_kwargs(name: str, description: str) -> dict[str, Any]:
         "name": name,
         "description": description,
         "dm_permission": False,
-        "default_member_permissions": asu_discord.Permissions(manage_roles=True),
+        "default_member_permissions": discord.Permissions(manage_roles=True),
     }
     if TEST_GUILD_IDS:
         kwargs["guild_ids"] = TEST_GUILD_IDS
@@ -99,9 +99,7 @@ def _college_role_from_name(college_name: Any) -> str | None:
 
 
 def _campus_role_from_opportunity(opp: dict[str, Any]) -> str | None:
-    location = _normalize_str(
-        opp.get("currentLocation") or opp.get("locationName")
-    )
+    location = _normalize_str(opp.get("currentLocation") or opp.get("locationName"))
     if not location:
         return None
 
@@ -155,8 +153,7 @@ def role_names_from_student_profile(student_profile: dict[str, Any]) -> set[str]
 
     # 2. Upperclassmen: enrolled/admitted in any non-target term as undergraduate
     has_level_role = any(
-        r in roles
-        for r in ("Graduate Student", "First Year", "Transfer Student")
+        r in roles for r in ("Graduate Student", "First Year", "Transfer Student")
     )
     if not has_level_role:
         for opp in enrolled_opps:
@@ -197,7 +194,7 @@ class VerificationCog(commands.Cog):
 
     VERIFICATION_URL = "https://verify.devil2devil.asu.edu"
     ASU_LOGO_URL = "https://verify.devil2devil.asu.edu/static/img/asu-logo-vertical.png"
-    EMBED_COLOR = asu_discord.Color.from_rgb(140, 29, 64)
+    EMBED_COLOR = discord.Color.from_rgb(140, 29, 64)
 
     def __init__(
         self,
@@ -213,8 +210,8 @@ class VerificationCog(commands.Cog):
         self.unverified_role_id = unverified_role_id
 
     def _get_verified_role(
-        self, guild: Optional[asu_discord.Guild]
-    ) -> Optional[asu_discord.Role]:
+        self, guild: Optional[discord.Guild]
+    ) -> Optional[discord.Role]:
         if guild is None:
             return None
         if guild.id != self.guild_id:
@@ -227,8 +224,8 @@ class VerificationCog(commands.Cog):
         return guild.get_role(self.verified_role_id)
 
     def _get_unverified_role(
-        self, guild: Optional[asu_discord.Guild]
-    ) -> Optional[asu_discord.Role]:
+        self, guild: Optional[discord.Guild]
+    ) -> Optional[discord.Role]:
         if guild is None:
             return None
         if guild.id != self.guild_id:
@@ -259,8 +256,8 @@ class VerificationCog(commands.Cog):
     )
     async def verify_member(
         self,
-        ctx: asu_discord.ApplicationContext,
-        member: Option(asu_discord.Member, "Member to verify"),
+        ctx: discord.ApplicationContext,
+        member: Option(discord.Member, "Member to verify"),
     ) -> None:
         """Assign the verification role to a member."""
         if ctx.guild_id != self.guild_id or ctx.guild is None:
@@ -301,7 +298,7 @@ class VerificationCog(commands.Cog):
         if guild is None:
             try:
                 guild = await self.bot.fetch_guild(self.guild_id)
-            except asu_discord.HTTPException as exc:  # pragma: no cover - network failure
+            except discord.HTTPException as exc:  # pragma: no cover - network failure
                 raise RuntimeError(
                     "Unable to load the Discord guild for verification"
                 ) from exc
@@ -317,11 +314,11 @@ class VerificationCog(commands.Cog):
         if member is None:
             try:
                 member = await guild.fetch_member(user_id)
-            except asu_discord.NotFound as exc:
+            except discord.NotFound as exc:
                 raise RuntimeError(
                     f"Discord user {user_id} is not a member of the guild"
                 ) from exc
-            except asu_discord.HTTPException as exc:  # pragma: no cover - network failure
+            except discord.HTTPException as exc:  # pragma: no cover - network failure
                 raise RuntimeError("Unable to load Discord member information") from exc
 
         if role in member.roles:
@@ -354,7 +351,7 @@ class VerificationCog(commands.Cog):
         if guild is None:
             try:
                 guild = await self.bot.fetch_guild(self.guild_id)
-            except asu_discord.HTTPException as exc:  # pragma: no cover - network failure
+            except discord.HTTPException as exc:  # pragma: no cover - network failure
                 raise RuntimeError(
                     "Unable to load the Discord guild for role assignment"
                 ) from exc
@@ -366,11 +363,11 @@ class VerificationCog(commands.Cog):
         if member is None:
             try:
                 member = await guild.fetch_member(user_id)
-            except asu_discord.NotFound as exc:
+            except discord.NotFound as exc:
                 raise RuntimeError(
                     f"Discord user {user_id} is not a member of the guild"
                 ) from exc
-            except asu_discord.HTTPException as exc:  # pragma: no cover - network failure
+            except discord.HTTPException as exc:  # pragma: no cover - network failure
                 raise RuntimeError("Unable to load Discord member information") from exc
 
         logical_role_names = role_names_from_student_profile(student_profile)
@@ -381,7 +378,7 @@ class VerificationCog(commands.Cog):
             )
             return
 
-        roles_to_add: list[asu_discord.Role] = []
+        roles_to_add: list[discord.Role] = []
         for logical_name in sorted(logical_role_names):
             role_id = ROLE_ID_MAP.get(logical_name)
             if role_id is None:
@@ -427,8 +424,8 @@ class VerificationCog(commands.Cog):
     )
     async def unverify_member(
         self,
-        ctx: asu_discord.ApplicationContext,
-        member: Option(asu_discord.Member, "Member to unverify"),
+        ctx: discord.ApplicationContext,
+        member: Option(discord.Member, "Member to unverify"),
     ) -> None:
         """Remove the verification role from a member."""
         if ctx.guild_id != self.guild_id or ctx.guild is None:
@@ -452,8 +449,8 @@ class VerificationCog(commands.Cog):
         await member.remove_roles(role, reason=f"Manual unverification by {ctx.author}")
         await ctx.respond(f"{member.mention} no longer has the verification role.")
 
-    def _build_verification_embed(self) -> asu_discord.Embed:
-        embed = asu_discord.Embed(
+    def _build_verification_embed(self) -> discord.Embed:
+        embed = discord.Embed(
             title="Verification",
             description=(
                 "This Discord is for students admitted to Arizona State University. "
@@ -464,13 +461,13 @@ class VerificationCog(commands.Cog):
         embed.set_image(url=self.ASU_LOGO_URL)
         return embed
 
-    def _build_verification_view(self) -> asu_discord.ui.View:
-        view = asu_discord.ui.View()
-        view.add_item(asu_discord.ui.Button(label="Verify Here", url=self.VERIFICATION_URL))
+    def _build_verification_view(self) -> discord.ui.View:
+        view = discord.ui.View()
+        view.add_item(discord.ui.Button(label="Verify Here", url=self.VERIFICATION_URL))
         return view
 
     @slash_command(**SLASH_COMMAND_KWARGS)
-    async def setup_verification(self, ctx: asu_discord.ApplicationContext) -> None:
+    async def setup_verification(self, ctx: discord.ApplicationContext) -> None:
         """Slash command to seed the verification prompt embed in-channel."""
         if ctx.guild_id != self.guild_id:
             await ctx.respond(

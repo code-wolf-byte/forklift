@@ -155,7 +155,9 @@ def discord_callback():
         try:
             student_profile = get_student_profile(asurite)
         except Exception:  # pragma: no cover - defensive
-            logger.exception("Failed to fetch Salesforce student profile for %s", asurite)
+            logger.exception(
+                "Failed to fetch Salesforce student profile for %s", asurite
+            )
     verification_state.update(
         {
             "discord_user_id": discord_user_id,

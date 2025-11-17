@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-import asu_discord
+import discord
 from discord.ext import commands
 
 from utils.settings import DISCORD_CONFIG
@@ -21,10 +21,10 @@ class ForkliftBot(commands.Bot):
         self,
         *,
         command_prefix: str = "!",
-        intents: Optional[asu_discord.Intents] = None,
+        intents: Optional[discord.Intents] = None,
     ) -> None:
         if intents is None:
-            intents = asu_discord.Intents.default()
+            intents = discord.Intents.default()
             intents.members = True
             intents.guilds = True
         super().__init__(command_prefix=command_prefix, intents=intents)
@@ -87,7 +87,7 @@ class ForkliftBot(commands.Bot):
 
 
 def create_bot(
-    *, command_prefix: str = "!", intents: Optional[asu_discord.Intents] = None
+    *, command_prefix: str = "!", intents: Optional[discord.Intents] = None
 ) -> ForkliftBot:
     """Factory for the Forklift Discord bot."""
     bot = ForkliftBot(command_prefix=command_prefix, intents=intents)

@@ -5,7 +5,7 @@ import json
 import logging
 from typing import Optional
 
-import asu_discord
+import discord
 from discord.commands import slash_command
 from discord.ext import commands
 
@@ -48,7 +48,7 @@ def _moderation_command_kwargs(name: str, description: str) -> dict[str, object]
         "name": name,
         "description": description,
         "dm_permission": False,
-        "default_member_permissions": asu_discord.Permissions(manage_guild=True),
+        "default_member_permissions": discord.Permissions(manage_guild=True),
     }
     if TEST_GUILD_IDS:
         kwargs["guild_ids"] = TEST_GUILD_IDS
@@ -117,7 +117,7 @@ class QnACog(commands.Cog):
             if self.forum_channel_id
             else None
         )
-        if isinstance(forum_channel, asu_discord.ForumChannel):
+        if isinstance(forum_channel, discord.ForumChannel):
             logger.info(
                 "QnACog monitoring Q&A forum channel %s (%s).",
                 forum_channel.id,
@@ -132,7 +132,7 @@ class QnACog(commands.Cog):
     @slash_command(
         **_moderation_command_kwargs("qna-enable", "Enable the AI Q&A assistant")
     )
-    async def qna_enable(self, ctx: asu_discord.ApplicationContext) -> None:
+    async def qna_enable(self, ctx: discord.ApplicationContext) -> None:
         if not ctx.guild_id:
             await ctx.respond(
                 "This command can only be used inside a Discord server.", ephemeral=True
@@ -152,7 +152,7 @@ class QnACog(commands.Cog):
     @slash_command(
         **_moderation_command_kwargs("qna-disable", "Disable the AI Q&A assistant")
     )
-    async def qna_disable(self, ctx: asu_discord.ApplicationContext) -> None:
+    async def qna_disable(self, ctx: discord.ApplicationContext) -> None:
         if not ctx.guild_id:
             await ctx.respond(
                 "This command can only be used inside a Discord server.", ephemeral=True
@@ -166,7 +166,7 @@ class QnACog(commands.Cog):
             await ctx.respond("Q&A assistant is already disabled.", ephemeral=True)
 
     @commands.Cog.listener()
-    async def on_thread_create(self, thread: asu_discord.Thread) -> None:
+    async def on_thread_create(self, thread: discord.Thread) -> None:
         if (
             not self._is_ready()
             or thread.guild is None
@@ -177,7 +177,7 @@ class QnACog(commands.Cog):
 
         await self._handle_new_post(thread)
 
-    async def _handle_new_post(self, thread: asu_discord.Thread) -> None:
+    async def _handle_new_post(self, thread: discord.Thread) -> None:
         starter_message = await self._fetch_starter_message(thread)
         author_id = (
             starter_message.author.id
@@ -191,7 +191,7 @@ class QnACog(commands.Cog):
 
         try:
             response_message = await thread.send(initial_content)
-        except asu_discord.HTTPException:
+        except discord.HTTPException:
             logger.exception(
                 "Failed to send initial QnA acknowledgement to thread %s", thread.id
             )
@@ -218,15 +218,15 @@ class QnACog(commands.Cog):
             return
 
         final_content = self._build_answer_message(initial_content, answer)
-        embed = asu_discord.Embed(
-            description=FEEDBACK_DESCRIPTION, color=asu_discord.Color.from_rgb(0, 200, 83)
+        embed = discord.Embed(
+            description=FEEDBACK_DESCRIPTION, color=discord.Color.from_rgb(0, 200, 83)
         )
         view = QnAFeedbackView(self)
         self._active_views.add(view)
 
         try:
             await response_message.edit(content=final_content, embed=embed, view=view)
-        except asu_discord.HTTPException:
+        except discord.HTTPException:
             logger.exception(
                 "Failed to edit QnA response message for thread %s", thread.id
             )
@@ -246,7 +246,7 @@ class QnACog(commands.Cog):
 
     async def handle_satisfactory_feedback(
         self,
-        interaction: asu_discord.Interaction,
+        interaction: discord.Interaction,
         *,
         view: Optional[QnAFeedbackView] = None,
     ) -> None:
@@ -263,7 +263,7 @@ class QnACog(commands.Cog):
 
     async def handle_assistance_feedback(
         self,
-        interaction: asu_discord.Interaction,
+        interaction: discord.Interaction,
         *,
         view: Optional[QnAFeedbackView] = None,
     ) -> None:
@@ -279,7 +279,7 @@ class QnACog(commands.Cog):
 
     async def _finalize_feedback(
         self,
-        interaction: asu_discord.Interaction,
+        interaction: discord.Interaction,
         *,
         status: str,
         view: Optional[QnAFeedbackView],
@@ -291,7 +291,7 @@ class QnACog(commands.Cog):
 
         try:
             await interaction.message.edit(embed=None, view=None)
-        except asu_discord.HTTPException:
+        except discord.HTTPException:
             logger.warning(
                 "Failed to clear feedback components for message %s",
                 interaction.message.id,
@@ -301,13 +301,13 @@ class QnACog(commands.Cog):
             self._active_views.discard(view)
 
     async def _fetch_starter_message(
-        self, thread: asu_discord.Thread
-    ) -> Optional[asu_discord.Message]:
+        self, thread: discord.Thread
+    ) -> Optional[discord.Message]:
         try:
             return await thread.fetch_message(thread.id)
-        except asu_discord.NotFound:
+        except discord.NotFound:
             logger.debug("Starter message not found for thread %s", thread.id)
-        except asu_discord.HTTPException:
+        except discord.HTTPException:
             logger.warning("Unable to fetch starter message for thread %s", thread.id)
         return None
 
@@ -357,7 +357,7 @@ class QnACog(commands.Cog):
 
     def _persist_post(
         self,
-        thread: asu_discord.Thread,
+        thread: discord.Thread,
         *,
         owner_id: Optional[int],
         question: Optional[str],
@@ -409,7 +409,7 @@ class QnACog(commands.Cog):
             record.status = status
             if user_id:
                 record.last_feedback_user_id = str(user_id)
-            record.last_feedback_at = asu_discord.utils.utcnow()
+            record.last_feedback_at = discord.utils.utcnow()
 
     def _set_enabled(self, guild_id: int, enabled: bool) -> bool:
         changed = False
@@ -465,36 +465,36 @@ class QnACog(commands.Cog):
         return enabled
 
 
-class QnAFeedbackView(asu_discord.ui.View):
+class QnAFeedbackView(discord.ui.View):
     """Reusable feedback view that routes interactions back to the cog."""
 
     def __init__(self, cog: QnACog) -> None:
         super().__init__(timeout=None)
         self.cog = cog
 
-    @asu_discord.ui.button(
+    @discord.ui.button(
         label="It was great!",
-        style=asu_discord.ButtonStyle.success,
+        style=discord.ButtonStyle.success,
         emoji="\N{WHITE HEAVY CHECK MARK}",
         custom_id=SATISFACTORY_CUSTOM_ID,
     )
     async def handle_satisfied(  # type: ignore[override]
         self,
-        _: asu_discord.ui.Button,
-        interaction: asu_discord.Interaction,
+        _: discord.ui.Button,
+        interaction: discord.Interaction,
     ) -> None:
         await self.cog.handle_satisfactory_feedback(interaction, view=self)
 
-    @asu_discord.ui.button(
+    @discord.ui.button(
         label="I still need help...",
-        style=asu_discord.ButtonStyle.danger,
+        style=discord.ButtonStyle.danger,
         emoji="\N{SQUARED SOS}",
         custom_id=ASSISTANCE_CUSTOM_ID,
     )
     async def handle_assistance(  # type: ignore[override]
         self,
-        _: asu_discord.ui.Button,
-        interaction: asu_discord.Interaction,
+        _: discord.ui.Button,
+        interaction: discord.Interaction,
     ) -> None:
         await self.cog.handle_assistance_feedback(interaction, view=self)
 
