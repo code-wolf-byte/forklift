@@ -21,6 +21,7 @@ except ImportError:  # pragma: no cover - optional dependency
     class ClientError(Exception):
         """Fallback boto client error."""
 
+
 from utils.database import QnaModule, QnaPost, session_scope
 from utils.settings import CONFIG, DISCORD_CONFIG
 
@@ -83,7 +84,9 @@ class QnACog(commands.Cog):
             logger.warning("boto3 is not installed; QnA responses will be disabled.")
             return None
         if not self.knowledge_base_id:
-            logger.info("QNA_KNOWLEDGE_BASE_ID missing; Bedrock client will not be created.")
+            logger.info(
+                "QNA_KNOWLEDGE_BASE_ID missing; Bedrock client will not be created."
+            )
             return None
         try:
             kwargs = {"region_name": self.aws_region} if self.aws_region else {}
@@ -93,7 +96,9 @@ class QnACog(commands.Cog):
             return None
 
     def _is_ready(self) -> bool:
-        return bool(self.forum_channel_id and self.knowledge_base_id and self._bedrock_client)
+        return bool(
+            self.forum_channel_id and self.knowledge_base_id and self._bedrock_client
+        )
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
@@ -107,7 +112,11 @@ class QnACog(commands.Cog):
             )
             return
 
-        forum_channel = self.bot.get_channel(self.forum_channel_id) if self.forum_channel_id else None
+        forum_channel = (
+            self.bot.get_channel(self.forum_channel_id)
+            if self.forum_channel_id
+            else None
+        )
         if isinstance(forum_channel, discord.ForumChannel):
             logger.info(
                 "QnACog monitoring Q&A forum channel %s (%s).",
@@ -120,22 +129,34 @@ class QnACog(commands.Cog):
                 self.forum_channel_id,
             )
 
-    @slash_command(**_moderation_command_kwargs("qna-enable", "Enable the AI Q&A assistant"))
+    @slash_command(
+        **_moderation_command_kwargs("qna-enable", "Enable the AI Q&A assistant")
+    )
     async def qna_enable(self, ctx: discord.ApplicationContext) -> None:
         if not ctx.guild_id:
-            await ctx.respond("This command can only be used inside a Discord server.", ephemeral=True)
+            await ctx.respond(
+                "This command can only be used inside a Discord server.", ephemeral=True
+            )
             return
 
         changed = self._set_enabled(ctx.guild_id, True)
-        message = "Q&A assistant enabled for this server." if changed else "Q&A assistant is already enabled."
+        message = (
+            "Q&A assistant enabled for this server."
+            if changed
+            else "Q&A assistant is already enabled."
+        )
         if not self._is_ready():
             message += " (Note: configuration is incomplete, so responses may not be generated yet.)"
         await ctx.respond(message, ephemeral=True)
 
-    @slash_command(**_moderation_command_kwargs("qna-disable", "Disable the AI Q&A assistant"))
+    @slash_command(
+        **_moderation_command_kwargs("qna-disable", "Disable the AI Q&A assistant")
+    )
     async def qna_disable(self, ctx: discord.ApplicationContext) -> None:
         if not ctx.guild_id:
-            await ctx.respond("This command can only be used inside a Discord server.", ephemeral=True)
+            await ctx.respond(
+                "This command can only be used inside a Discord server.", ephemeral=True
+            )
             return
 
         changed = self._set_enabled(ctx.guild_id, False)
@@ -160,7 +181,9 @@ class QnACog(commands.Cog):
         starter_message = await self._fetch_starter_message(thread)
         author_id = (
             starter_message.author.id
-            if starter_message and starter_message.author and not starter_message.author.bot
+            if starter_message
+            and starter_message.author
+            and not starter_message.author.bot
             else thread.owner_id
         )
         initial_content = self._build_initial_message(author_id)
@@ -169,17 +192,19 @@ class QnACog(commands.Cog):
         try:
             response_message = await thread.send(initial_content)
         except discord.HTTPException:
-            logger.exception("Failed to send initial QnA acknowledgement to thread %s", thread.id)
+            logger.exception(
+                "Failed to send initial QnA acknowledgement to thread %s", thread.id
+            )
             return
 
-        question_text = (starter_message.content or "").strip() if starter_message else ""
+        question_text = (
+            (starter_message.content or "").strip() if starter_message else ""
+        )
         query = self._compose_query(thread.name, question_text)
         answer = await self._generate_answer(query)
 
         if not answer:
-            failure = (
-                "Uh oh, I couldn't find an answer to your question. Please try again later or ping a moderator."
-            )
+            failure = "Uh oh, I couldn't find an answer to your question. Please try again later or ping a moderator."
             await response_message.edit(content=failure)
             status = "failed"
             self._persist_post(
@@ -193,14 +218,18 @@ class QnACog(commands.Cog):
             return
 
         final_content = self._build_answer_message(initial_content, answer)
-        embed = discord.Embed(description=FEEDBACK_DESCRIPTION, color=discord.Color.from_rgb(0, 200, 83))
+        embed = discord.Embed(
+            description=FEEDBACK_DESCRIPTION, color=discord.Color.from_rgb(0, 200, 83)
+        )
         view = QnAFeedbackView(self)
         self._active_views.add(view)
 
         try:
             await response_message.edit(content=final_content, embed=embed, view=view)
         except discord.HTTPException:
-            logger.exception("Failed to edit QnA response message for thread %s", thread.id)
+            logger.exception(
+                "Failed to edit QnA response message for thread %s", thread.id
+            )
             view.stop()
             self._active_views.discard(view)
             return
@@ -222,10 +251,14 @@ class QnACog(commands.Cog):
         view: Optional[QnAFeedbackView] = None,
     ) -> None:
         if not self._is_enabled(interaction.guild_id):
-            await interaction.response.send_message("The Q&A assistant is currently disabled.", ephemeral=True)
+            await interaction.response.send_message(
+                "The Q&A assistant is currently disabled.", ephemeral=True
+            )
             return
 
-        await interaction.response.send_message("Thank you for your feedback!", ephemeral=True)
+        await interaction.response.send_message(
+            "Thank you for your feedback!", ephemeral=True
+        )
         await self._finalize_feedback(interaction, status="satisfied", view=view)
 
     async def handle_assistance_feedback(
@@ -235,7 +268,9 @@ class QnACog(commands.Cog):
         view: Optional[QnAFeedbackView] = None,
     ) -> None:
         if not self._is_enabled(interaction.guild_id):
-            await interaction.response.send_message("The Q&A assistant is currently disabled.", ephemeral=True)
+            await interaction.response.send_message(
+                "The Q&A assistant is currently disabled.", ephemeral=True
+            )
             return
 
         ping_message = self._build_helper_ping()
@@ -250,17 +285,24 @@ class QnACog(commands.Cog):
         view: Optional[QnAFeedbackView],
     ) -> None:
         thread_id = str(interaction.channel_id)
-        self._update_feedback_metadata(thread_id, status, interaction.user.id if interaction.user else None)
+        self._update_feedback_metadata(
+            thread_id, status, interaction.user.id if interaction.user else None
+        )
 
         try:
             await interaction.message.edit(embed=None, view=None)
         except discord.HTTPException:
-            logger.warning("Failed to clear feedback components for message %s", interaction.message.id)
+            logger.warning(
+                "Failed to clear feedback components for message %s",
+                interaction.message.id,
+            )
         if view:
             view.stop()
             self._active_views.discard(view)
 
-    async def _fetch_starter_message(self, thread: discord.Thread) -> Optional[discord.Message]:
+    async def _fetch_starter_message(
+        self, thread: discord.Thread
+    ) -> Optional[discord.Message]:
         try:
             return await thread.fetch_message(thread.id)
         except discord.NotFound:
@@ -333,7 +375,9 @@ class QnACog(commands.Cog):
         assistant_message = str(assistant_message_id) if assistant_message_id else None
 
         with session_scope() as db_session:
-            record = db_session.query(QnaPost).filter_by(thread_id=thread_id).one_or_none()
+            record = (
+                db_session.query(QnaPost).filter_by(thread_id=thread_id).one_or_none()
+            )
             if record is None:
                 record = QnaPost(
                     guild_id=guild_id,
@@ -348,11 +392,17 @@ class QnACog(commands.Cog):
             record.answer = answer or record.answer
             record.status = status
             record.owner_id = owner or record.owner_id
-            record.assistant_message_id = assistant_message or record.assistant_message_id
+            record.assistant_message_id = (
+                assistant_message or record.assistant_message_id
+            )
 
-    def _update_feedback_metadata(self, thread_id: str, status: str, user_id: Optional[int]) -> None:
+    def _update_feedback_metadata(
+        self, thread_id: str, status: str, user_id: Optional[int]
+    ) -> None:
         with session_scope() as db_session:
-            record = db_session.query(QnaPost).filter_by(thread_id=thread_id).one_or_none()
+            record = (
+                db_session.query(QnaPost).filter_by(thread_id=thread_id).one_or_none()
+            )
             if record is None:
                 return
 
@@ -365,7 +415,11 @@ class QnACog(commands.Cog):
         changed = False
         commands_json = json.dumps(DEFAULT_COMMAND_STATE)
         with session_scope() as db_session:
-            module = db_session.query(QnaModule).filter_by(guild_id=str(guild_id)).one_or_none()
+            module = (
+                db_session.query(QnaModule)
+                .filter_by(guild_id=str(guild_id))
+                .one_or_none()
+            )
             if module is None:
                 module = QnaModule(
                     guild_id=str(guild_id),
@@ -392,7 +446,11 @@ class QnACog(commands.Cog):
             return cached
 
         with session_scope() as db_session:
-            module = db_session.query(QnaModule).filter_by(guild_id=str(guild_id)).one_or_none()
+            module = (
+                db_session.query(QnaModule)
+                .filter_by(guild_id=str(guild_id))
+                .one_or_none()
+            )
             if module is None:
                 module = QnaModule(
                     guild_id=str(guild_id),

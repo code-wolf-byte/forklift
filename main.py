@@ -63,9 +63,13 @@ def _start_discord_bot_thread() -> None:
         finally:
             loop.close()
 
-    _discord_bot_thread = threading.Thread(target=_run_bot, name="discord-bot", daemon=True)
+    _discord_bot_thread = threading.Thread(
+        target=_run_bot, name="discord-bot", daemon=True
+    )
     _discord_bot_thread.start()
-    logger.info("Started Discord bot background thread for guild %s", DISCORD_CONFIG.guild_id)
+    logger.info(
+        "Started Discord bot background thread for guild %s", DISCORD_CONFIG.guild_id
+    )
 
 
 if CONFIG.SAML_ENABLED:
@@ -85,6 +89,7 @@ app.config["SESSION_COOKIE_SAMESITE"] = CONFIG.SESSION_COOKIE_SAMESITE
 if CONFIG.SAML_ENABLED and saml_bp is not None:
     app.register_blueprint(saml_bp)
 app.register_blueprint(discord_bp)
+
 
 @app.context_processor
 def inject_globals():

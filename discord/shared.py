@@ -12,7 +12,9 @@ _running_bot: "ForkliftBot | None" = None
 _running_loop: asyncio.AbstractEventLoop | None = None
 
 
-def register_bot(bot: "ForkliftBot", *, loop: asyncio.AbstractEventLoop | None = None) -> None:
+def register_bot(
+    bot: "ForkliftBot", *, loop: asyncio.AbstractEventLoop | None = None
+) -> None:
     """Record the active Discord bot and optional loop for cross-thread calls."""
     global _running_bot, _running_loop
     _running_bot = bot

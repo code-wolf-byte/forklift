@@ -32,7 +32,9 @@ def _build_saml_client() -> Saml2Client:
     return Saml2Client(config=cfg)
 
 
-def _first_attribute(attributes: Mapping[str, list[str]], keys: Iterable[str]) -> str | None:
+def _first_attribute(
+    attributes: Mapping[str, list[str]], keys: Iterable[str]
+) -> str | None:
     for key in keys:
         values = attributes.get(key)
         if not values:
@@ -106,7 +108,9 @@ def saml_acs():
     attribute_lists: dict[str, list[str]] = {}
     for key, value in raw_attributes.items():
         if isinstance(value, (list, tuple, set)):
-            attribute_lists[key] = [str(item) for item in value if item not in (None, "")]
+            attribute_lists[key] = [
+                str(item) for item in value if item not in (None, "")
+            ]
         elif value not in (None, ""):
             attribute_lists[key] = [str(value)]
         else:
@@ -151,12 +155,16 @@ def saml_acs():
     try:
         session_info = authn_response.session_info() or {}
     except Exception:
-        logger.warning("Unable to extract session info from SAML response", exc_info=True)
+        logger.warning(
+            "Unable to extract session info from SAML response", exc_info=True
+        )
         session_info = {}
 
     session_index = session_info.get("session_index")
     if isinstance(session_index, (list, tuple, set)):
-        session_index = next((item for item in session_index if item not in (None, "")), None)
+        session_index = next(
+            (item for item in session_index if item not in (None, "")), None
+        )
     if session_index and not isinstance(session_index, str):
         session_index = str(session_index)
 
@@ -215,7 +223,9 @@ def saml_acs():
         "attributes": attribute_lists,
     }
 
-    next_step = _safe_redirect(relay_state) or _safe_redirect(verification_state.get("relay_state"))
+    next_step = _safe_redirect(relay_state) or _safe_redirect(
+        verification_state.get("relay_state")
+    )
     if next_step:
         return redirect(next_step)
 

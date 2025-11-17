@@ -9,7 +9,7 @@ from discord.ext import commands
 from utils.settings import DISCORD_CONFIG
 from .cogs.verification import VerificationCog
 from .shared import register_bot
-from .cogs.qna import QnACog 
+from .cogs.qna import QnACog
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,9 @@ class ForkliftBot(commands.Bot):
     def _load_verification_cog(self) -> None:
         """Attach the verification cog immediately after initialization."""
         if DISCORD_CONFIG is None:
-            logger.warning("Discord bot started without DISCORD_CONFIG; skipping verification cog")
+            logger.warning(
+                "Discord bot started without DISCORD_CONFIG; skipping verification cog"
+            )
             return
 
         unverified_role_id: Optional[int] = None
@@ -41,7 +43,10 @@ class ForkliftBot(commands.Bot):
             try:
                 unverified_role_id = int(DISCORD_CONFIG.unverified_role_id)
             except ValueError:
-                logger.warning("Invalid DISCORD_UNVERIFIED_ROLE_ID value: %s", DISCORD_CONFIG.unverified_role_id)
+                logger.warning(
+                    "Invalid DISCORD_UNVERIFIED_ROLE_ID value: %s",
+                    DISCORD_CONFIG.unverified_role_id,
+                )
 
         try:
             self.add_cog(
@@ -57,6 +62,7 @@ class ForkliftBot(commands.Bot):
             raise
 
         logger.info("Loaded VerificationCog for guild %s", DISCORD_CONFIG.guild_id)
+
     def _load_qna_cog(self) -> None:
         """Attach the Q&A cog."""
         try:
@@ -66,6 +72,7 @@ class ForkliftBot(commands.Bot):
             raise
 
         logger.info("Loaded QnACog")
+
     async def setup_hook(self) -> None:
         """Run after the bot connects to Discord."""
         logger.info("ForkliftBot setup hook starting")
@@ -79,7 +86,9 @@ class ForkliftBot(commands.Bot):
         logger.info("Synced application commands")
 
 
-def create_bot(*, command_prefix: str = "!", intents: Optional[discord.Intents] = None) -> ForkliftBot:
+def create_bot(
+    *, command_prefix: str = "!", intents: Optional[discord.Intents] = None
+) -> ForkliftBot:
     """Factory for the Forklift Discord bot."""
     bot = ForkliftBot(command_prefix=command_prefix, intents=intents)
     register_bot(bot)

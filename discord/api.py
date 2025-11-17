@@ -20,7 +20,13 @@ logger = logging.getLogger(__name__)
 class DiscordAPIError(RuntimeError):
     """Raised when Discord API requests fail."""
 
-    def __init__(self, message: str, *, status: int | None = None, payload: Dict[str, Any] | None = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        payload: Dict[str, Any] | None = None,
+    ):
         super().__init__(message)
         self.status = status
         self.payload = payload or {}
@@ -59,7 +65,9 @@ def exchange_code_for_token(code: str) -> Dict[str, Any]:
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     try:
-        response = requests.post(cfg.token_url, data=data, headers=headers, timeout=DEFAULT_TIMEOUT)
+        response = requests.post(
+            cfg.token_url, data=data, headers=headers, timeout=DEFAULT_TIMEOUT
+        )
     except requests.RequestException as exc:
         logger.error("Discord token exchange request failed: %s", exc)
         raise DiscordAPIError("Unable to reach Discord for token exchange") from exc
@@ -67,7 +75,11 @@ def exchange_code_for_token(code: str) -> Dict[str, Any]:
     if response.status_code >= 400:
         payload = _safe_json(response)
         logger.error("Discord token exchange failed: %s", payload)
-        raise DiscordAPIError("Discord token exchange failed", status=response.status_code, payload=payload)
+        raise DiscordAPIError(
+            "Discord token exchange failed",
+            status=response.status_code,
+            payload=payload,
+        )
 
     return _safe_json(response)
 
@@ -85,7 +97,11 @@ def fetch_user_profile(access_token: str) -> Dict[str, Any]:
     if response.status_code >= 400:
         payload = _safe_json(response)
         logger.error("Discord user profile fetch failed: %s", payload)
-        raise DiscordAPIError("Failed to fetch Discord user profile", status=response.status_code, payload=payload)
+        raise DiscordAPIError(
+            "Failed to fetch Discord user profile",
+            status=response.status_code,
+            payload=payload,
+        )
 
     return _safe_json(response)
 
@@ -96,7 +112,9 @@ def assign_verified_role(user_id: str, *, asurite: str | None = None) -> None:
     bot = get_running_bot()
     loop = get_running_loop()
     if bot is None or loop is None or loop.is_closed():
-        raise DiscordAPIError("Discord bot is not running; unable to assign verified role")
+        raise DiscordAPIError(
+            "Discord bot is not running; unable to assign verified role"
+        )
 
     try:
         discord_user_id = int(user_id)

@@ -66,7 +66,11 @@ def discord_callback():
     state = request.args.get("state")
     expected_state = session.pop("discord_oauth_state", None)
     if not state or expected_state is None or state != expected_state:
-        logger.error("Discord OAuth state mismatch: expected=%s received=%s", expected_state, state)
+        logger.error(
+            "Discord OAuth state mismatch: expected=%s received=%s",
+            expected_state,
+            state,
+        )
         return _oauth_failure("Invalid Discord OAuth state", 400)
 
     code = request.args.get("code")
@@ -77,12 +81,16 @@ def discord_callback():
     verification_state = session.get("verification_state") or {}
     if not verification_state.get("saml_complete"):
         logger.error("Discord callback without completed SAML verification")
-        return _oauth_failure("SAML verification must be completed before Discord linking", 400)
+        return _oauth_failure(
+            "SAML verification must be completed before Discord linking", 400
+        )
 
     user_db_id = verification_state.get("user_id")
     if not user_db_id:
         logger.error("Verification session missing user reference")
-        return _oauth_failure("Verification session has expired. Restart verification.", 400)
+        return _oauth_failure(
+            "Verification session has expired. Restart verification.", 400
+        )
 
     try:
         token_data = exchange_code_for_token(code)
@@ -92,7 +100,9 @@ def discord_callback():
 
     access_token = token_data.get("access_token")
     if not access_token:
-        logger.error("Discord token exchange response missing access token: %s", token_data)
+        logger.error(
+            "Discord token exchange response missing access token: %s", token_data
+        )
         return _oauth_failure("Discord token response missing access token", 500)
 
     try:
@@ -110,15 +120,21 @@ def discord_callback():
         with session_scope() as db_session:
             user = db_session.get(User, user_db_id)
             if user is None:
-                logger.error("Database user for verification not found: id=%s", user_db_id)
-                raise DiscordAPIError("Unable to load verification record for Discord linking")
+                logger.error(
+                    "Database user for verification not found: id=%s", user_db_id
+                )
+                raise DiscordAPIError(
+                    "Unable to load verification record for Discord linking"
+                )
 
             user.discord_user_id = discord_user_id
             user.discord_username = profile.get("username")
             user.discord_global_name = profile.get("global_name")
             user.discord_avatar = profile.get("avatar")
 
-            assign_verified_role(discord_user_id, asurite=verification_state.get("asurite"))
+            assign_verified_role(
+                discord_user_id, asurite=verification_state.get("asurite")
+            )
 
             user.verified = True
             user.verified_at = datetime.utcnow()

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 from typing import Any, Optional
@@ -57,19 +57,31 @@ class VerificationCog(commands.Cog):
         self.verified_role_id = verified_role_id
         self.unverified_role_id = unverified_role_id
 
-    def _get_verified_role(self, guild: Optional[discord.Guild]) -> Optional[discord.Role]:
+    def _get_verified_role(
+        self, guild: Optional[discord.Guild]
+    ) -> Optional[discord.Role]:
         if guild is None:
             return None
         if guild.id != self.guild_id:
-            logger.debug("VerificationCog invoked for guild %s (expected %s)", guild.id, self.guild_id)
+            logger.debug(
+                "VerificationCog invoked for guild %s (expected %s)",
+                guild.id,
+                self.guild_id,
+            )
             return None
         return guild.get_role(self.verified_role_id)
 
-    def _get_unverified_role(self, guild: Optional[discord.Guild]) -> Optional[discord.Role]:
+    def _get_unverified_role(
+        self, guild: Optional[discord.Guild]
+    ) -> Optional[discord.Role]:
         if guild is None:
             return None
         if guild.id != self.guild_id:
-            logger.debug("VerificationCog invoked for guild %s (expected %s)", guild.id, self.guild_id)
+            logger.debug(
+                "VerificationCog invoked for guild %s (expected %s)",
+                guild.id,
+                self.guild_id,
+            )
             return None
         if self.unverified_role_id is None:
             return None
@@ -79,11 +91,17 @@ class VerificationCog(commands.Cog):
     async def on_ready(self) -> None:
         guild = self.bot.get_guild(self.guild_id)
         if guild is None:
-            logger.warning("VerificationCog could not locate guild %s yet", self.guild_id)
+            logger.warning(
+                "VerificationCog could not locate guild %s yet", self.guild_id
+            )
         else:
             logger.info("VerificationCog ready in guild %s (%s)", guild.id, guild.name)
 
-    @slash_command(**_moderation_command_kwargs("verify", "Assign the verification role to a member."))
+    @slash_command(
+        **_moderation_command_kwargs(
+            "verify", "Assign the verification role to a member."
+        )
+    )
     async def verify_member(
         self,
         ctx: discord.ApplicationContext,
@@ -91,12 +109,17 @@ class VerificationCog(commands.Cog):
     ) -> None:
         """Assign the verification role to a member."""
         if ctx.guild_id != self.guild_id or ctx.guild is None:
-            await ctx.respond("This command is only available in the Devil2Devil server.", ephemeral=True)
+            await ctx.respond(
+                "This command is only available in the Devil2Devil server.",
+                ephemeral=True,
+            )
             return
 
         role = self._get_verified_role(ctx.guild)
         if role is None:
-            await ctx.respond("Unable to locate the configured verification role for this server.")
+            await ctx.respond(
+                "Unable to locate the configured verification role for this server."
+            )
             return
 
         if role in member.roles:
@@ -107,11 +130,15 @@ class VerificationCog(commands.Cog):
 
         unverified_role = self._get_unverified_role(ctx.guild)
         if unverified_role is not None and unverified_role in member.roles:
-            await member.remove_roles(unverified_role, reason=f"Manual verification by {ctx.author}")
+            await member.remove_roles(
+                unverified_role, reason=f"Manual verification by {ctx.author}"
+            )
 
         await ctx.respond(f"{member.mention} has been marked as verified. ✅")
 
-    async def verify_member_by_id(self, user_id: int, *, asurite: str | None = None) -> None:
+    async def verify_member_by_id(
+        self, user_id: int, *, asurite: str | None = None
+    ) -> None:
         """Assign the verified role to a Discord user identified by ID."""
         await self.bot.wait_until_ready()
 
@@ -120,7 +147,9 @@ class VerificationCog(commands.Cog):
             try:
                 guild = await self.bot.fetch_guild(self.guild_id)
             except discord.HTTPException as exc:  # pragma: no cover - network failure
-                raise RuntimeError("Unable to load the Discord guild for verification") from exc
+                raise RuntimeError(
+                    "Unable to load the Discord guild for verification"
+                ) from exc
 
         if guild is None:
             raise RuntimeError("Discord guild is not available for verification")
@@ -134,7 +163,9 @@ class VerificationCog(commands.Cog):
             try:
                 member = await guild.fetch_member(user_id)
             except discord.NotFound as exc:
-                raise RuntimeError(f"Discord user {user_id} is not a member of the guild") from exc
+                raise RuntimeError(
+                    f"Discord user {user_id} is not a member of the guild"
+                ) from exc
             except discord.HTTPException as exc:  # pragma: no cover - network failure
                 raise RuntimeError("Unable to load Discord member information") from exc
 
@@ -158,7 +189,11 @@ class VerificationCog(commands.Cog):
             asurite,
         )
 
-    @slash_command(**_moderation_command_kwargs("unverify", "Remove the verification role from a member."))
+    @slash_command(
+        **_moderation_command_kwargs(
+            "unverify", "Remove the verification role from a member."
+        )
+    )
     async def unverify_member(
         self,
         ctx: discord.ApplicationContext,
@@ -166,12 +201,17 @@ class VerificationCog(commands.Cog):
     ) -> None:
         """Remove the verification role from a member."""
         if ctx.guild_id != self.guild_id or ctx.guild is None:
-            await ctx.respond("This command is only available in the Devil2Devil server.", ephemeral=True)
+            await ctx.respond(
+                "This command is only available in the Devil2Devil server.",
+                ephemeral=True,
+            )
             return
 
         role = self._get_verified_role(ctx.guild)
         if role is None:
-            await ctx.respond("Unable to locate the configured verification role for this server.")
+            await ctx.respond(
+                "Unable to locate the configured verification role for this server."
+            )
             return
 
         if role not in member.roles:
@@ -202,11 +242,17 @@ class VerificationCog(commands.Cog):
     async def setup_verification(self, ctx: discord.ApplicationContext) -> None:
         """Slash command to seed the verification prompt embed in-channel."""
         if ctx.guild_id != self.guild_id:
-            await ctx.respond("This command is only available in the Devil2Devil server.", ephemeral=True)
+            await ctx.respond(
+                "This command is only available in the Devil2Devil server.",
+                ephemeral=True,
+            )
             return
 
         if ctx.channel is None:
-            await ctx.respond("Unable to determine the target channel for this command.", ephemeral=True)
+            await ctx.respond(
+                "Unable to determine the target channel for this command.",
+                ephemeral=True,
+            )
             return
 
         await ctx.defer(ephemeral=True)
@@ -215,4 +261,6 @@ class VerificationCog(commands.Cog):
         view = self._build_verification_view()
         await ctx.channel.send(embed=embed, view=view)
 
-        await ctx.followup.send("Verification prompt posted with the Verify Here button.", ephemeral=True)
+        await ctx.followup.send(
+            "Verification prompt posted with the Verify Here button.", ephemeral=True
+        )

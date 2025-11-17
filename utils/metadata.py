@@ -32,19 +32,29 @@ class MetadataConfig:
             os.getenv("SAML_METADATA_PATH", project_root / "sp-metadata.xml")
         )
 
-        self.SAML_BASE_URL = os.getenv("SAML_BASE_URL", "https://verify.devil2devil.asu.edu")
-        self.ENTITY_ID = os.getenv("SAML_ENTITY_ID", f"{self.SAML_BASE_URL}/saml/metadata")
+        self.SAML_BASE_URL = os.getenv(
+            "SAML_BASE_URL", "https://verify.devil2devil.asu.edu"
+        )
+        self.ENTITY_ID = os.getenv(
+            "SAML_ENTITY_ID", f"{self.SAML_BASE_URL}/saml/metadata"
+        )
         self.ACS_URL = os.getenv("SAML_ACS_URL", f"{self.SAML_BASE_URL}/auth/saml/acs")
         self.SLS_URL = os.getenv("SAML_SLS_URL", f"{self.SAML_BASE_URL}/auth/saml/slo")
 
-        self.CERT_FILE = Path(os.getenv("SAML_CERT_FILE", project_root / "certs/sp.crt"))
+        self.CERT_FILE = Path(
+            os.getenv("SAML_CERT_FILE", project_root / "certs/sp.crt")
+        )
         self.KEY_FILE = Path(os.getenv("SAML_KEY_FILE", project_root / "certs/sp.key"))
 
         default_idp_metadata = project_root / "idp-metadata.xml"
         idp_metadata_raw = os.getenv("SAML_IDP_METADATA", str(default_idp_metadata))
-        self.IDP_METADATA_FILES = [p.strip() for p in idp_metadata_raw.split(",") if p.strip()]
+        self.IDP_METADATA_FILES = [
+            p.strip() for p in idp_metadata_raw.split(",") if p.strip()
+        ]
 
-        self.METADATA_VALIDITY_DAYS = int(os.getenv("SAML_METADATA_VALIDITY_DAYS", "365"))
+        self.METADATA_VALIDITY_DAYS = int(
+            os.getenv("SAML_METADATA_VALIDITY_DAYS", "365")
+        )
 
         default_xmlsec = project_root / "scripts" / "xmlsec-wrapper.sh"
         self.XMLSEC_BINARY = os.getenv(
@@ -91,7 +101,9 @@ class MetadataConfig:
                             (self.ACS_URL, BINDING_HTTP_POST),
                         ],
                         "single_logout_service": (
-                            [(self.SLS_URL, BINDING_HTTP_REDIRECT)] if self.SLS_URL else []
+                            [(self.SLS_URL, BINDING_HTTP_REDIRECT)]
+                            if self.SLS_URL
+                            else []
                         ),
                     },
                     "authn_requests_signed": True,
@@ -146,11 +158,17 @@ class MetadataGenerator:
             raise ValueError(f"Cannot parse metadata XML: {metadata_path}") from exc
 
         valid_until_raw = next(
-            (elem.attrib.get("validUntil") for elem in root.iter() if "validUntil" in elem.attrib),
+            (
+                elem.attrib.get("validUntil")
+                for elem in root.iter()
+                if "validUntil" in elem.attrib
+            ),
             None,
         )
         if valid_until_raw is None:
-            raise ValueError("Metadata is missing validUntil; cannot determine expiration.")
+            raise ValueError(
+                "Metadata is missing validUntil; cannot determine expiration."
+            )
 
         if valid_until_raw.endswith("Z"):
             valid_until_raw = f"{valid_until_raw[:-1]}+00:00"
@@ -158,7 +176,9 @@ class MetadataGenerator:
         try:
             valid_until = datetime.fromisoformat(valid_until_raw)
         except ValueError as exc:
-            raise ValueError(f"Unexpected validUntil format: {valid_until_raw}") from exc
+            raise ValueError(
+                f"Unexpected validUntil format: {valid_until_raw}"
+            ) from exc
 
         if valid_until.tzinfo is None:
             valid_until = valid_until.replace(tzinfo=timezone.utc)
@@ -185,7 +205,9 @@ class MetadataGenerator:
 
         output_path = Path(output_path or self._config.METADATA_PATH)
         should_sign = not unsigned
-        selected_valid_days = valid_days if valid_days is not None else self._default_valid_days
+        selected_valid_days = (
+            valid_days if valid_days is not None else self._default_valid_days
+        )
 
         # pysaml2 expects the validity window expressed in hours.
         valid_hours = selected_valid_days * 24 if selected_valid_days else None
@@ -296,7 +318,9 @@ def _next_refresh_delay() -> float:
     except FileNotFoundError:
         return 0.0
     except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Unable to read metadata validity; using default interval", exc_info=exc)
+        logger.warning(
+            "Unable to read metadata validity; using default interval", exc_info=exc
+        )
         return float(interval)
 
     now = datetime.now(timezone.utc)
@@ -321,7 +345,9 @@ def _metadata_refresh_loop() -> None:
                 check_time=check_time,
             )
             if refreshed:
-                logger.info("Regenerated SAML metadata at %s", METADATA_CONFIG.METADATA_PATH)
+                logger.info(
+                    "Regenerated SAML metadata at %s", METADATA_CONFIG.METADATA_PATH
+                )
         except Exception:  # pragma: no cover - defensive
             logger.exception("Failed to refresh SAML metadata")
 
@@ -410,7 +436,9 @@ def main() -> None:
         )
         if regenerated:
             signature_state = "unsigned" if args.unsigned else "signed"
-            print(f"Metadata expired; refreshed {signature_state} metadata at {args.output}")
+            print(
+                f"Metadata expired; refreshed {signature_state} metadata at {args.output}"
+            )
         else:
             print(f"Metadata still valid; no action taken for {args.output}")
         return

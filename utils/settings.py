@@ -23,7 +23,9 @@ def _env_value(name: str, *, default: str | None = None) -> str | None:
     return value or None
 
 
-def _env_list(name: str, *, default: Iterable[str] | None = None, separator: str = ",") -> List[str]:
+def _env_list(
+    name: str, *, default: Iterable[str] | None = None, separator: str = ","
+) -> List[str]:
     raw = os.getenv(name)
     if raw is None:
         return list(default) if default is not None else []
@@ -37,9 +39,13 @@ class AppConfig:
 
     BASE_DIR: Path = Path(__file__).resolve().parent.parent
     DEV_MODE: bool = _env_bool("FORKLIFT_DEV_MODE", default=False)
-    DISCORD_BOT_AUTOSTART: bool = _env_bool("FORKLIFT_ENABLE_DISCORD_BOT", default=False)
+    DISCORD_BOT_AUTOSTART: bool = _env_bool(
+        "FORKLIFT_ENABLE_DISCORD_BOT", default=False
+    )
     DATABASE_URL: str = field(init=False)
-    SECRET_KEY: str = os.getenv("FLASK_SECRET_KEY", os.getenv("SECRET_KEY", "change-me"))
+    SECRET_KEY: str = os.getenv(
+        "FLASK_SECRET_KEY", os.getenv("SECRET_KEY", "change-me")
+    )
     SESSION_COOKIE_NAME: str = os.getenv("SESSION_COOKIE_NAME", "forklift_session")
     SESSION_COOKIE_SECURE: bool = _env_bool("SESSION_COOKIE_SECURE", default=False)
     SESSION_COOKIE_SAMESITE: str = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
@@ -115,7 +121,9 @@ class AppConfig:
             "full_name": _env_list("SAML_ATTR_FULL_NAME", default=default_full_name),
             "first_name": _env_list("SAML_ATTR_FIRST_NAME", default=default_first_name),
             "last_name": _env_list("SAML_ATTR_LAST_NAME", default=default_last_name),
-            "affiliations": _env_list("SAML_ATTR_AFFILIATIONS", default=default_affiliations),
+            "affiliations": _env_list(
+                "SAML_ATTR_AFFILIATIONS", default=default_affiliations
+            ),
         }
         self.SAML_ENABLED = not self.DEV_MODE
         if not self.QNA_MODEL_ARN:
@@ -164,7 +172,9 @@ class DiscordConfig:
             try:
                 test_guild_ids.append(int(raw_id))
             except ValueError as exc:
-                raise RuntimeError(f"Invalid guild id in DISCORD_TEST_GUILD_IDS: {raw_id}") from exc
+                raise RuntimeError(
+                    f"Invalid guild id in DISCORD_TEST_GUILD_IDS: {raw_id}"
+                ) from exc
 
         if missing:
             missing_vars = ", ".join(missing)
