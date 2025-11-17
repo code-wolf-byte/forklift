@@ -44,8 +44,8 @@ def _start_discord_bot_thread() -> None:
         return
 
     def _run_bot() -> None:
-        from discord import create_bot
-        from discord.shared import register_bot
+        from asu_discord import create_bot
+        from asu_discord.shared import register_bot
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)

@@ -6,7 +6,7 @@ from datetime import datetime
 
 from flask import Blueprint, redirect, request, session, url_for
 
-from discord.api import (
+from asu_discord.api import (
     DiscordAPIError,
     assign_verified_role,
     assign_roles_from_profile,
@@ -14,7 +14,7 @@ from discord.api import (
     exchange_code_for_token,
     fetch_user_profile,
 )
-from discord.salesforce import get_student_profile
+from asu_discord.salesforce import get_student_profile
 from utils.database import User, session_scope
 from utils.settings import CONFIG, DISCORD_CONFIG
 
