@@ -214,10 +214,12 @@ class VerificationCog(commands.Cog):
         *,
         guild_id: int,
         verified_role_id: int,
+        unverified_role_id: int = 1207441184218161182,
     ) -> None:
         self.bot = bot
         self.guild_id = guild_id
         self.verified_role_id = verified_role_id
+        self.unverified_role_id = unverified_role_id
 
     def _get_verified_role(
         self, guild: Optional[discord.Guild]
@@ -232,6 +234,59 @@ class VerificationCog(commands.Cog):
             )
             return None
         return guild.get_role(self.verified_role_id)
+
+    def _get_unverified_role(
+        self, guild: Optional[discord.Guild]
+    ) -> Optional[discord.Role]:
+        if guild is None:
+            return None
+        if guild.id != self.guild_id:
+            logger.debug(
+                "VerificationCog invoked for guild %s (expected %s)",
+                guild.id,
+                self.guild_id,
+            )
+            return None
+        if self.unverified_role_id is None:
+            return None
+        return guild.get_role(self.unverified_role_id)
+
+    async def _remove_unverified_role(
+        self,
+        guild: Optional[discord.Guild],
+        member: discord.Member,
+        *,
+        reason: str,
+    ) -> bool:
+        role = self._get_unverified_role(guild)
+        if role is None:
+            logger.info(
+                "No configured unverified role available when processing member %s",
+                member.id,
+            )
+            return False
+        if role not in member.roles:
+            logger.info(
+                "Member %s does not currently have the unverified role %s",
+                member.id,
+                role.id,
+            )
+            return False
+        try:
+            await member.remove_roles(role, reason=reason)
+        except discord.HTTPException as exc:  # pragma: no cover - network failure
+            logger.warning(
+                "Failed to remove unverified role %s from member %s: %s",
+                role.id,
+                member.id,
+                exc,
+            )
+            return False
+
+        logger.info(
+            "Removed unverified role %s from member %s", role.id, member.id
+        )
+        return True
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
@@ -272,7 +327,10 @@ class VerificationCog(commands.Cog):
             await ctx.respond(f"{member.mention} already has the verification role.")
             return
 
-        await member.add_roles(role, reason=f"Manual verification by {ctx.author}")
+        reason = f"Manual verification by {ctx.author}"
+        await member.add_roles(role, reason=reason)
+
+        await self._remove_unverified_role(ctx.guild, member, reason=reason)
 
         await ctx.respond(f"{member.mention} has been marked as verified. ✅")
 
@@ -318,6 +376,8 @@ class VerificationCog(commands.Cog):
             reason = f"{reason} for {asurite}"
 
         await member.add_roles(role, reason=reason)
+
+        await self._remove_unverified_role(guild, member, reason=reason)
 
         logger.info(
             "Assigned verification role to Discord user %s (ASURITE: %s)",
