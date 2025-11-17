@@ -151,11 +151,23 @@ def role_names_from_student_profile(student_profile: dict[str, Any]) -> set[str]
             elif "freshman" in opp_type or "first time freshman" in opp_type:
                 roles.add("First Year")
 
-    # 2. Upperclassmen: enrolled/admitted in any non-target term as undergraduate
+    # 2. Fallback level roles if target-term classification did not apply
     has_level_role = any(
         r in roles for r in ("Graduate Student", "First Year", "Transfer Student")
     )
     if not has_level_role:
+        # If the student has any enrolled/admitted graduate opportunity in a
+        # non-target term, still classify them as a graduate student.
+        for opp in enrolled_opps:
+            career = _normalize_str(opp.get("career"))
+            if career == "graduate":
+                roles.add("Graduate Student")
+                has_level_role = True
+                break
+
+    if not has_level_role:
+        # Otherwise, treat any enrolled/admitted undergraduate in a non-target
+        # term as an upperclassman.
         for opp in enrolled_opps:
             term_code = _normalize_str(opp.get("termCode"))
             career = _normalize_str(opp.get("career"))
