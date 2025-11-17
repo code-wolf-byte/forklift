@@ -104,6 +104,9 @@ def _verification_context() -> dict:
     )
     saml_user = session.get("saml_user") or {}
     discord_user = session.get("discord_user") or {}
+    student_profile = session.get("student_profile") or verification_state.get(
+        "student_profile"
+    )
     verification_error = session.pop("verification_error", None)
 
     try:
@@ -133,6 +136,7 @@ def _verification_context() -> dict:
         "discord_configured": DISCORD_CONFIG is not None,
         "logout_url": logout_url,
         "saml_enabled": CONFIG.SAML_ENABLED,
+        "student_profile": student_profile,
     }
     return context
 

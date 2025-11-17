@@ -8,6 +8,7 @@ from discord.ext import commands
 from discord.commands import Option, slash_command
 
 from utils.settings import DISCORD_CONFIG
+from ..roles import ROLE_ID_MAP
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,160 @@ def _moderation_command_kwargs(name: str, description: str) -> dict[str, Any]:
     if TEST_GUILD_IDS:
         kwargs["guild_ids"] = TEST_GUILD_IDS
     return kwargs
+
+
+TARGET_TERM_CODE = "2267"
+
+
+def _is_enrolled_or_admitted(opp: dict[str, Any]) -> bool:
+    stage = (opp.get("stageName") or "").strip().lower()
+    return stage in {"enrolled", "admitted"}
+
+
+def _normalize_str(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+
+
+def _select_enrolled_opps(
+    opportunities: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [opp for opp in opportunities if _is_enrolled_or_admitted(opp)]
+
+
+def _college_role_from_name(college_name: Any) -> str | None:
+    """
+    Map a Salesforce collegeName to one of the configured college roles.
+    Uses simple substring matching on a normalized, lower-cased name.
+    """
+    name = _normalize_str(college_name)
+    if not name:
+        return None
+
+    if "ira a" in name and "fulton" in name:
+        return "Ira A. Fulton Schools of Engineering"
+    if "barrett" in name:
+        return "Barrett The Honors College"
+    if "liberal arts" in name and "sciences" in name:
+        return "College of Liberal Arts and Sciences"
+    if "global futures" in name:
+        return "College of Global Futures"
+    if "nursing" in name and "health" in name:
+        return "Edson College of Nursing and Health Innovation"
+    if "herberger" in name or ("design" in name and "arts" in name):
+        return "Herberger Institute for Design and the Arts"
+    if "thunderbird" in name:
+        return "Thunderbird School of Global Management"
+    if "mary lou fulton" in name or "teachers college" in name:
+        return "Mary Lou Fulton Teachers College"
+    if "new college" in name:
+        return "New College of Interdisciplinary Arts and Sciences"
+    if "integrative sciences and arts" in name:
+        return "College of Integrative Sciences and Arts"
+    if "w.p. carey" in name or ("carey" in name and "business" in name):
+        return "W.P. Carey School of Business"
+    if "cronkite" in name or "journalism" in name:
+        return "Walter Cronkite School of Journalism and Mass Communication"
+    if "watts" in name or "public service" in name:
+        return "Watts College of Public Service and Community Solutions"
+    if "university college" in name:
+        return "University College"
+    return None
+
+
+def _campus_role_from_opportunity(opp: dict[str, Any]) -> str | None:
+    location = _normalize_str(
+        opp.get("currentLocation") or opp.get("locationName")
+    )
+    if not location:
+        return None
+
+    if "tempe" in location:
+        return "Tempe"
+    if "downtown" in location and "phoenix" in location:
+        return "Downtown Phoenix"
+    if "polytechnic" in location:
+        return "Polytechnic"
+    if "la center" in location or "la centre" in location:
+        return "LA Center"
+    return None
+
+
+def role_names_from_student_profile(student_profile: dict[str, Any]) -> set[str]:
+    """
+    Derive logical role names from a Salesforce student profile payload.
+
+    The returned names correspond to keys in ROLE_ID_MAP.
+    """
+    roles: set[str] = set()
+
+    opportunities_raw = student_profile.get("opportunities") or []
+    if not isinstance(opportunities_raw, list):
+        return roles
+
+    opportunities: list[dict[str, Any]] = [
+        opp for opp in opportunities_raw if isinstance(opp, dict)
+    ]
+    if not opportunities:
+        return roles
+
+    enrolled_opps = _select_enrolled_opps(opportunities)
+
+    # 1. Term-specific classification for target term (e.g., 2267)
+    for opp in enrolled_opps:
+        term_code = _normalize_str(opp.get("termCode"))
+        if term_code != TARGET_TERM_CODE:
+            continue
+
+        career = _normalize_str(opp.get("career"))
+        opp_type = _normalize_str(opp.get("type"))
+
+        if career == "graduate":
+            roles.add("Graduate Student")
+        elif career == "undergraduate":
+            if "transfer" in opp_type:
+                roles.add("Transfer Student")
+            elif "freshman" in opp_type or "first time freshman" in opp_type:
+                roles.add("First Year")
+
+    # 2. Upperclassmen: enrolled/admitted in any non-target term as undergraduate
+    has_level_role = any(
+        r in roles
+        for r in ("Graduate Student", "First Year", "Transfer Student")
+    )
+    if not has_level_role:
+        for opp in enrolled_opps:
+            term_code = _normalize_str(opp.get("termCode"))
+            career = _normalize_str(opp.get("career"))
+            if term_code != TARGET_TERM_CODE and career == "undergraduate":
+                roles.add("Upperclassmen")
+                break
+
+    # 3. International / First-generation based on any enrolled/admitted opportunity
+    for opp in enrolled_opps:
+        if opp.get("internationalStudent") is not None:
+            if bool(opp.get("internationalStudent")) or _normalize_str(
+                opp.get("internationalStudent")
+            ) in {"true", "yes", "y", "1"}:
+                roles.add("International Student")
+        if opp.get("firstGeneration") is not None:
+            if bool(opp.get("firstGeneration")) or _normalize_str(
+                opp.get("firstGeneration")
+            ) in {"true", "yes", "y", "1"}:
+                roles.add("First Generation Student")
+
+    # 4. College and campus roles, again using any enrolled/admitted opportunity
+    for opp in enrolled_opps:
+        college_role = _college_role_from_name(opp.get("collegeName"))
+        if college_role:
+            roles.add(college_role)
+
+        campus_role = _campus_role_from_opportunity(opp)
+        if campus_role:
+            roles.add(campus_role)
+
+    return roles
 
 
 class VerificationCog(commands.Cog):
@@ -187,6 +342,82 @@ class VerificationCog(commands.Cog):
             "Assigned verification role to Discord user %s (ASURITE: %s) and removed unverified role",
             user_id,
             asurite,
+        )
+
+    async def assign_roles_from_profile(
+        self, user_id: int, student_profile: dict[str, Any]
+    ) -> None:
+        """Assign additional Discord roles for a user based on Salesforce data."""
+        await self.bot.wait_until_ready()
+
+        guild = self.bot.get_guild(self.guild_id)
+        if guild is None:
+            try:
+                guild = await self.bot.fetch_guild(self.guild_id)
+            except discord.HTTPException as exc:  # pragma: no cover - network failure
+                raise RuntimeError(
+                    "Unable to load the Discord guild for role assignment"
+                ) from exc
+
+        if guild is None:
+            raise RuntimeError("Discord guild is not available for role assignment")
+
+        member = guild.get_member(user_id)
+        if member is None:
+            try:
+                member = await guild.fetch_member(user_id)
+            except discord.NotFound as exc:
+                raise RuntimeError(
+                    f"Discord user {user_id} is not a member of the guild"
+                ) from exc
+            except discord.HTTPException as exc:  # pragma: no cover - network failure
+                raise RuntimeError("Unable to load Discord member information") from exc
+
+        logical_role_names = role_names_from_student_profile(student_profile)
+        if not logical_role_names:
+            logger.info(
+                "No additional roles derived from Salesforce profile for user %s",
+                user_id,
+            )
+            return
+
+        roles_to_add: list[discord.Role] = []
+        for logical_name in sorted(logical_role_names):
+            role_id = ROLE_ID_MAP.get(logical_name)
+            if role_id is None:
+                logger.debug("No configured Discord role id for %s", logical_name)
+                continue
+            role = guild.get_role(role_id)
+            if role is None:
+                logger.warning(
+                    "Configured role id %s for %s not found in guild %s",
+                    role_id,
+                    logical_name,
+                    guild.id,
+                )
+                continue
+            if role in member.roles:
+                continue
+            roles_to_add.append(role)
+
+        if not roles_to_add:
+            logger.info(
+                "No new Discord roles to assign for user %s from Salesforce profile",
+                user_id,
+            )
+            return
+
+        reason = "Automatic Salesforce-based role assignment"
+        asurite = student_profile.get("asurite")
+        if isinstance(asurite, str) and asurite:
+            reason = f"{reason} for {asurite}"
+
+        await member.add_roles(*roles_to_add, reason=reason)
+
+        logger.info(
+            "Assigned Salesforce-based roles %s to Discord user %s",
+            [r.id for r in roles_to_add],
+            user_id,
         )
 
     @slash_command(

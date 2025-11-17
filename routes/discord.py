@@ -9,10 +9,12 @@ from flask import Blueprint, redirect, request, session, url_for
 from discord.api import (
     DiscordAPIError,
     assign_verified_role,
+    assign_roles_from_profile,
     build_authorize_url,
     exchange_code_for_token,
     fetch_user_profile,
 )
+from discord.salesforce import get_student_profile
 from utils.database import User, session_scope
 from utils.settings import CONFIG, DISCORD_CONFIG
 
@@ -145,6 +147,15 @@ def discord_callback():
         logger.exception("Unexpected error linking Discord account")
         return _oauth_failure("Unexpected Discord verification failure", 500)
 
+    # After Discord verification, attempt to look up the student's Salesforce profile.
+    # Any failures here are non-fatal; verification still succeeds.
+    asurite = verification_state.get("asurite")
+    student_profile = None
+    if asurite:
+        try:
+            student_profile = get_student_profile(asurite)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to fetch Salesforce student profile for %s", asurite)
     verification_state.update(
         {
             "discord_user_id": discord_user_id,
@@ -155,6 +166,25 @@ def discord_callback():
     )
     session["verification_state"] = verification_state
     session["discord_user"] = profile
+
+    if student_profile is not None:
+        verification_state["student_profile"] = student_profile
+        session["student_profile"] = student_profile
+
+        # Assign additional Discord roles based on Salesforce profile data.
+        try:
+            assign_roles_from_profile(discord_user_id, student_profile)
+        except DiscordAPIError as exc:
+            logger.error(
+                "Failed to assign Salesforce-based roles for user %s: %s",
+                discord_user_id,
+                exc,
+            )
+        except Exception:  # pragma: no cover - defensive
+            logger.exception(
+                "Unexpected error assigning Salesforce-based roles for user %s",
+                discord_user_id,
+            )
 
     success_redirect = CONFIG.DISCORD_SUCCESS_REDIRECT
     if success_redirect:

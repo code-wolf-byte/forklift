@@ -139,6 +139,46 @@ def assign_verified_role(user_id: str, *, asurite: str | None = None) -> None:
         raise DiscordAPIError(f"Failed to assign Discord verified role: {exc}") from exc
 
 
+def assign_roles_from_profile(user_id: str, student_profile: Dict[str, Any]) -> None:
+    """
+    Assign additional Discord roles to a user based on their Salesforce profile.
+    """
+    _config()  # Ensure Discord configuration is present before attempting role assignment
+
+    bot = get_running_bot()
+    loop = get_running_loop()
+    if bot is None or loop is None or loop.is_closed():
+        raise DiscordAPIError(
+            "Discord bot is not running; unable to assign Salesforce-based roles"
+        )
+
+    try:
+        discord_user_id = int(user_id)
+    except (TypeError, ValueError) as exc:
+        raise DiscordAPIError("Invalid Discord user id for role assignment") from exc
+
+    cog = bot.get_cog("VerificationCog")
+    if not isinstance(cog, VerificationCog):
+        raise DiscordAPIError("Verification cog is not loaded in the Discord bot")
+
+    future = asyncio.run_coroutine_threadsafe(
+        cog.assign_roles_from_profile(discord_user_id, student_profile),
+        loop,
+    )
+
+    try:
+        future.result(timeout=DEFAULT_TIMEOUT)
+    except asyncio.TimeoutError as exc:
+        future.cancel()
+        raise DiscordAPIError(
+            "Timed out assigning Discord roles from Salesforce profile"
+        ) from exc
+    except Exception as exc:
+        raise DiscordAPIError(
+            f"Failed to assign Discord roles from Salesforce profile: {exc}"
+        ) from exc
+
+
 def _safe_json(response: requests.Response) -> Dict[str, Any]:
     try:
         data = response.json()
@@ -152,6 +192,7 @@ def _safe_json(response: requests.Response) -> Dict[str, Any]:
 __all__ = [
     "DiscordAPIError",
     "assign_verified_role",
+    "assign_roles_from_profile",
     "build_authorize_url",
     "exchange_code_for_token",
     "fetch_user_profile",
