@@ -239,17 +239,18 @@ class VerificationCog(commands.Cog):
         self, guild: Optional[discord.Guild]
     ) -> Optional[discord.Role]:
         if guild is None:
+            logger.debug("No guild provided to _get_unverified_role")
             return None
-        if guild.id != self.guild_id:
+        expected_guild_id = 1187144343400751234
+        unverified_role_id = 1207441184218161182
+        if guild.id != expected_guild_id:
             logger.debug(
                 "VerificationCog invoked for guild %s (expected %s)",
                 guild.id,
-                self.guild_id,
+                expected_guild_id,
             )
             return None
-        if self.unverified_role_id is None:
-            return None
-        return guild.get_role(self.unverified_role_id)
+        return guild.get_role(unverified_role_id)
 
     async def _remove_unverified_role(
         self,
