@@ -1,7 +1,7 @@
-## Devils to Devils Verification
+## Forklift
 
 This Flask app links an ASU SSO session with a Discord account so admitted or
-current students can join the Devils to Devils community with the verified role.
+current students can join the Devil2Devil community with the verified role.
 The HTML template mirrors the public ASU site while exposing states for new,
 ASU-authenticated, and fully verified users.
 
@@ -89,7 +89,7 @@ bot.run(DISCORD_CONFIG.bot_token)
 The bot loads a verification cog that exposes `!verify @member` and
 `!unverify @member` commands (requires the `Manage Roles` permission) to assign
 or remove the configured verification role. Use `/setup_verification` (requires
-`Manage Server`) to post the Devils to Devils verification embed and "Verify
+`Manage Server`) to post the Devil2Devil verification embed and "Verify
 Here" button in the current channel. Populate `DISCORD_TEST_GUILD_IDS` (comma-
 separated) to register the slash command as a guild command for those IDs so it
 appears immediately while testing. Set `FORKLIFT_ENABLE_DISCORD_BOT=true` to run

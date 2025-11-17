@@ -6,7 +6,7 @@ from datetime import datetime
 
 from flask import Blueprint, redirect, request, session, url_for
 
-from asu_discord.api import (
+from discord.api import (
     DiscordAPIError,
     assign_verified_role,
     build_authorize_url,
@@ -118,7 +118,7 @@ def discord_callback():
             user.discord_global_name = profile.get("global_name")
             user.discord_avatar = profile.get("avatar")
 
-            assign_verified_role(discord_user_id)
+            assign_verified_role(discord_user_id, asurite=verification_state.get("asurite"))
 
             user.verified = True
             user.verified_at = datetime.utcnow()

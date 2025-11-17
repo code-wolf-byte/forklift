@@ -8,13 +8,14 @@ from discord.ext import commands
 
 from utils.settings import DISCORD_CONFIG
 from .cogs.verification import VerificationCog
+from .shared import register_bot
 from .cogs.qna import QnACog 
 
 logger = logging.getLogger(__name__)
 
 
 class ForkliftBot(commands.Bot):
-    """Discord bot for Devils to Devils server management."""
+    """Discord bot for Devil2Devil server management."""
 
     def __init__(
         self,
@@ -35,12 +36,20 @@ class ForkliftBot(commands.Bot):
             logger.warning("Discord bot started without DISCORD_CONFIG; skipping verification cog")
             return
 
+        unverified_role_id: Optional[int] = None
+        if DISCORD_CONFIG.unverified_role_id:
+            try:
+                unverified_role_id = int(DISCORD_CONFIG.unverified_role_id)
+            except ValueError:
+                logger.warning("Invalid DISCORD_UNVERIFIED_ROLE_ID value: %s", DISCORD_CONFIG.unverified_role_id)
+
         try:
             self.add_cog(
                 VerificationCog(
                     self,
                     guild_id=int(DISCORD_CONFIG.guild_id),
                     verified_role_id=int(DISCORD_CONFIG.verified_role_id),
+                    unverified_role_id=unverified_role_id,
                 )
             )
         except Exception:  # pragma: no cover - defensive
@@ -72,4 +81,6 @@ class ForkliftBot(commands.Bot):
 
 def create_bot(*, command_prefix: str = "!", intents: Optional[discord.Intents] = None) -> ForkliftBot:
     """Factory for the Forklift Discord bot."""
-    return ForkliftBot(command_prefix=command_prefix, intents=intents)
+    bot = ForkliftBot(command_prefix=command_prefix, intents=intents)
+    register_bot(bot)
+    return bot

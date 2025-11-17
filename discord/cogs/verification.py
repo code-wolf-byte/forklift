@@ -17,7 +17,7 @@ if DISCORD_CONFIG and DISCORD_CONFIG.test_guild_ids:
 
 SLASH_COMMAND_KWARGS = {
     "name": "setup_verification",
-    "description": "Post the Devils to Devils verification instructions.",
+    "description": "Post the Devil2Devil verification instructions.",
     "dm_permission": False,
     "default_member_permissions": discord.Permissions(manage_guild=True),
 }
@@ -38,16 +38,24 @@ def _moderation_command_kwargs(name: str, description: str) -> dict[str, Any]:
 
 
 class VerificationCog(commands.Cog):
-    """Cog responsible for managing the Devils to Devils verification role."""
+    """Cog responsible for managing the Devil2Devil verification role."""
 
     VERIFICATION_URL = "https://verify.devil2devil.asu.edu"
     ASU_LOGO_URL = "https://verify.devil2devil.asu.edu/static/img/asu-logo-vertical.png"
     EMBED_COLOR = discord.Color.from_rgb(140, 29, 64)
 
-    def __init__(self, bot: commands.Bot, *, guild_id: int, verified_role_id: int) -> None:
+    def __init__(
+        self,
+        bot: commands.Bot,
+        *,
+        guild_id: int,
+        verified_role_id: int,
+        unverified_role_id: int | None = None,
+    ) -> None:
         self.bot = bot
         self.guild_id = guild_id
         self.verified_role_id = verified_role_id
+        self.unverified_role_id = unverified_role_id
 
     def _get_verified_role(self, guild: Optional[discord.Guild]) -> Optional[discord.Role]:
         if guild is None:
@@ -56,6 +64,16 @@ class VerificationCog(commands.Cog):
             logger.debug("VerificationCog invoked for guild %s (expected %s)", guild.id, self.guild_id)
             return None
         return guild.get_role(self.verified_role_id)
+
+    def _get_unverified_role(self, guild: Optional[discord.Guild]) -> Optional[discord.Role]:
+        if guild is None:
+            return None
+        if guild.id != self.guild_id:
+            logger.debug("VerificationCog invoked for guild %s (expected %s)", guild.id, self.guild_id)
+            return None
+        if self.unverified_role_id is None:
+            return None
+        return guild.get_role(self.unverified_role_id)
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
@@ -73,7 +91,7 @@ class VerificationCog(commands.Cog):
     ) -> None:
         """Assign the verification role to a member."""
         if ctx.guild_id != self.guild_id or ctx.guild is None:
-            await ctx.respond("This command is only available in the Devils to Devils server.", ephemeral=True)
+            await ctx.respond("This command is only available in the Devil2Devil server.", ephemeral=True)
             return
 
         role = self._get_verified_role(ctx.guild)
@@ -86,7 +104,59 @@ class VerificationCog(commands.Cog):
             return
 
         await member.add_roles(role, reason=f"Manual verification by {ctx.author}")
+
+        unverified_role = self._get_unverified_role(ctx.guild)
+        if unverified_role is not None and unverified_role in member.roles:
+            await member.remove_roles(unverified_role, reason=f"Manual verification by {ctx.author}")
+
         await ctx.respond(f"{member.mention} has been marked as verified. ✅")
+
+    async def verify_member_by_id(self, user_id: int, *, asurite: str | None = None) -> None:
+        """Assign the verified role to a Discord user identified by ID."""
+        await self.bot.wait_until_ready()
+
+        guild = self.bot.get_guild(self.guild_id)
+        if guild is None:
+            try:
+                guild = await self.bot.fetch_guild(self.guild_id)
+            except discord.HTTPException as exc:  # pragma: no cover - network failure
+                raise RuntimeError("Unable to load the Discord guild for verification") from exc
+
+        if guild is None:
+            raise RuntimeError("Discord guild is not available for verification")
+
+        role = self._get_verified_role(guild)
+        if role is None:
+            raise RuntimeError("Configured verification role could not be found")
+
+        member = guild.get_member(user_id)
+        if member is None:
+            try:
+                member = await guild.fetch_member(user_id)
+            except discord.NotFound as exc:
+                raise RuntimeError(f"Discord user {user_id} is not a member of the guild") from exc
+            except discord.HTTPException as exc:  # pragma: no cover - network failure
+                raise RuntimeError("Unable to load Discord member information") from exc
+
+        if role in member.roles:
+            logger.info("Member %s already has the verification role", user_id)
+            return
+
+        reason = "Automatic verification"
+        if asurite:
+            reason = f"{reason} for {asurite}"
+
+        await member.add_roles(role, reason=reason)
+
+        unverified_role = self._get_unverified_role(guild)
+        if unverified_role is not None and unverified_role in member.roles:
+            await member.remove_roles(unverified_role, reason=reason)
+
+        logger.info(
+            "Assigned verification role to Discord user %s (ASURITE: %s) and removed unverified role",
+            user_id,
+            asurite,
+        )
 
     @slash_command(**_moderation_command_kwargs("unverify", "Remove the verification role from a member."))
     async def unverify_member(
@@ -96,7 +166,7 @@ class VerificationCog(commands.Cog):
     ) -> None:
         """Remove the verification role from a member."""
         if ctx.guild_id != self.guild_id or ctx.guild is None:
-            await ctx.respond("This command is only available in the Devils to Devils server.", ephemeral=True)
+            await ctx.respond("This command is only available in the Devil2Devil server.", ephemeral=True)
             return
 
         role = self._get_verified_role(ctx.guild)
@@ -132,7 +202,7 @@ class VerificationCog(commands.Cog):
     async def setup_verification(self, ctx: discord.ApplicationContext) -> None:
         """Slash command to seed the verification prompt embed in-channel."""
         if ctx.guild_id != self.guild_id:
-            await ctx.respond("This command is only available in the Devils to Devils server.", ephemeral=True)
+            await ctx.respond("This command is only available in the Devil2Devil server.", ephemeral=True)
             return
 
         if ctx.channel is None:

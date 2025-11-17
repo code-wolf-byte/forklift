@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict
 from urllib.parse import urlencode
@@ -9,6 +10,8 @@ from urllib.parse import urlencode
 import requests
 
 from utils.settings import DISCORD_CONFIG, DiscordConfig
+from .cogs.verification import VerificationCog
+from .shared import get_running_bot, get_running_loop
 
 DEFAULT_TIMEOUT = 10
 logger = logging.getLogger(__name__)
@@ -87,29 +90,35 @@ def fetch_user_profile(access_token: str) -> Dict[str, Any]:
     return _safe_json(response)
 
 
-def assign_verified_role(user_id: str) -> None:
-    cfg = _config()
-    url = f"{cfg.api_base}/guilds/{cfg.guild_id}/members/{user_id}/roles/{cfg.verified_role_id}"
-    headers = {
-        "Authorization": f"Bot {cfg.bot_token}",
-        "Content-Type": "application/json",
-    }
+def assign_verified_role(user_id: str, *, asurite: str | None = None) -> None:
+    _config()  # Ensure Discord configuration is present before attempting role assignment
+
+    bot = get_running_bot()
+    loop = get_running_loop()
+    if bot is None or loop is None or loop.is_closed():
+        raise DiscordAPIError("Discord bot is not running; unable to assign verified role")
 
     try:
-        response = requests.put(url, headers=headers, timeout=DEFAULT_TIMEOUT)
-    except requests.RequestException as exc:
-        logger.error("Discord role assignment request failed: %s", exc)
-        raise DiscordAPIError("Unable to assign verified role in Discord") from exc
+        discord_user_id = int(user_id)
+    except (TypeError, ValueError) as exc:
+        raise DiscordAPIError("Invalid Discord user id for role assignment") from exc
 
-    if response.status_code not in {204, 201}:
-        payload = _safe_json(response)
-        if payload.get("code") == 10004:
-            logger.info(
-                "Discord role assignment returned Unknown Guild (code 10004); assuming role already applied"
-            )
-            return
-        logger.error("Discord role assignment failed: %s", payload)
-        raise DiscordAPIError("Failed to assign Discord verified role", status=response.status_code, payload=payload)
+    cog = bot.get_cog("VerificationCog")
+    if not isinstance(cog, VerificationCog):
+        raise DiscordAPIError("Verification cog is not loaded in the Discord bot")
+
+    future = asyncio.run_coroutine_threadsafe(
+        cog.verify_member_by_id(discord_user_id, asurite=asurite),
+        loop,
+    )
+
+    try:
+        future.result(timeout=DEFAULT_TIMEOUT)
+    except asyncio.TimeoutError as exc:
+        future.cancel()
+        raise DiscordAPIError("Timed out assigning Discord verified role") from exc
+    except Exception as exc:
+        raise DiscordAPIError(f"Failed to assign Discord verified role: {exc}") from exc
 
 
 def _safe_json(response: requests.Response) -> Dict[str, Any]:
