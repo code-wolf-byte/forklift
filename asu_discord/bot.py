@@ -38,23 +38,12 @@ class ForkliftBot(commands.Bot):
             )
             return
 
-        unverified_role_id: Optional[int] = None
-        if DISCORD_CONFIG.unverified_role_id:
-            try:
-                unverified_role_id = int(DISCORD_CONFIG.unverified_role_id)
-            except ValueError:
-                logger.warning(
-                    "Invalid DISCORD_UNVERIFIED_ROLE_ID value: %s",
-                    DISCORD_CONFIG.unverified_role_id,
-                )
-
         try:
             self.add_cog(
                 VerificationCog(
                     self,
                     guild_id=int(DISCORD_CONFIG.guild_id),
                     verified_role_id=int(DISCORD_CONFIG.verified_role_id),
-                    unverified_role_id=unverified_role_id,
                 )
             )
         except Exception:  # pragma: no cover - defensive

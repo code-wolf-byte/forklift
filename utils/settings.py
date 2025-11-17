@@ -138,7 +138,6 @@ class DiscordConfig:
     bot_token: str
     guild_id: str
     verified_role_id: str
-    unverified_role_id: str | None = None
     test_guild_ids: tuple[int, ...] = ()
     scope: str = "identify"
     api_base: str = "https://discord.com/api/v10"
@@ -180,12 +179,9 @@ class DiscordConfig:
             missing_vars = ", ".join(missing)
             raise RuntimeError(f"Missing Discord environment variables: {missing_vars}")
 
-        unverified_role_id = _env_value("DISCORD_UNVERIFIED_ROLE_ID")
-
         return cls(
             scope=scope,
             test_guild_ids=tuple(test_guild_ids),
-            unverified_role_id=unverified_role_id,
             **payload,
         )
 

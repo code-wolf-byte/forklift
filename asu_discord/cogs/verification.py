@@ -214,12 +214,10 @@ class VerificationCog(commands.Cog):
         *,
         guild_id: int,
         verified_role_id: int,
-        unverified_role_id: int | None = None,
     ) -> None:
         self.bot = bot
         self.guild_id = guild_id
         self.verified_role_id = verified_role_id
-        self.unverified_role_id = unverified_role_id
 
     def _get_verified_role(
         self, guild: Optional[discord.Guild]
@@ -234,22 +232,6 @@ class VerificationCog(commands.Cog):
             )
             return None
         return guild.get_role(self.verified_role_id)
-
-    def _get_unverified_role(
-        self, guild: Optional[discord.Guild]
-    ) -> Optional[discord.Role]:
-        if guild is None:
-            return None
-        if guild.id != self.guild_id:
-            logger.debug(
-                "VerificationCog invoked for guild %s (expected %s)",
-                guild.id,
-                self.guild_id,
-            )
-            return None
-        if self.unverified_role_id is None:
-            return None
-        return guild.get_role(self.unverified_role_id)
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
@@ -291,12 +273,6 @@ class VerificationCog(commands.Cog):
             return
 
         await member.add_roles(role, reason=f"Manual verification by {ctx.author}")
-
-        unverified_role = self._get_unverified_role(ctx.guild)
-        if unverified_role is not None and unverified_role in member.roles:
-            await member.remove_roles(
-                unverified_role, reason=f"Manual verification by {ctx.author}"
-            )
 
         await ctx.respond(f"{member.mention} has been marked as verified. ✅")
 
@@ -343,12 +319,8 @@ class VerificationCog(commands.Cog):
 
         await member.add_roles(role, reason=reason)
 
-        unverified_role = self._get_unverified_role(guild)
-        if unverified_role is not None and unverified_role in member.roles:
-            await member.remove_roles(unverified_role, reason=reason)
-
         logger.info(
-            "Assigned verification role to Discord user %s (ASURITE: %s) and removed unverified role",
+            "Assigned verification role to Discord user %s (ASURITE: %s)",
             user_id,
             asurite,
         )
