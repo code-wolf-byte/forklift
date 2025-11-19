@@ -26,6 +26,11 @@ class ForkmanQNA:
         """
         self.knowledge_base_id = knowledge_base_id
         self.model_arn = model_arn
+        self.region_name = region_name
+        self.aws_access_key_id = aws_access_key_id
+        self.aws_secret_access_key = aws_secret_access_key
+        self.aws_session_token = aws_session_token
+
         self.client = boto3.client(
             "bedrock-agent-runtime",
             region_name=region_name,
@@ -87,6 +92,15 @@ class ForkmanQNA:
                     "knowledgeBaseConfiguration": kb_config,
                 },
             )
+            self.client = None
+            self.client = boto3.client(
+                "bedrock-agent-runtime",
+                region_name=self.region_name,
+                aws_access_key_id=self.aws_access_key_id,
+                aws_secret_access_key=self.aws_secret_access_key,
+                aws_session_token=self.aws_session_token,
+            )
+
             logger.debug(
                 "Bedrock retrieve_and_generate succeeded (kb=%s, model=%s)",
                 self.knowledge_base_id,
@@ -149,26 +163,3 @@ class ForkmanQNA:
             "raw_response": response,
         }
 
-
-def _load_from_env() -> ForkmanQNA:
-    """
-    Helper to construct ForkmanQNA from environment variables:
-      FORKMAN_KB_ID       - Knowledge base ID
-      FORKMAN_MODEL_ARN   - Model ARN
-      AWS_REGION          - (optional) AWS region
-    """
-    kb_id = os.environ["FORKMAN_KB_ID"]
-    model_arn = os.environ["FORKMAN_MODEL_ARN"]
-    region = os.environ.get("AWS_REGION")
-    logger.debug(
-        "Initializing ForkmanQNA from env (kb=%s, model=%s, region=%s)",
-        kb_id,
-        model_arn,
-        region,
-    )
-
-    return ForkmanQNA(
-        knowledge_base_id=kb_id,
-        model_arn=model_arn,
-        region_name=region,
-    )
