@@ -325,10 +325,16 @@ class QnACog(commands.Cog):
         question_text: str,
         author_id: Optional[int],
     ) -> Optional[dict[str, Any]]:
-        qna = self._build_forkman_kwargs()
+        qna = ForkmanQNA(
+            region_name=self.aws_region,
+            knowledge_base_id=self.knowledge_base_id,
+            model_arn=self.model_arn,
+            aws_access_key_id=self.aws_access_key_id,
+            aws_secret_access_key=self.aws_secret_access_key,
+        )
         if not qna:
             return None
-        answer= qna.answer_question(
+        answer = qna.get_answer(
             thread_title=thread_title,
             message_content=question_text,
             user_id=str(author_id) if author_id else None,

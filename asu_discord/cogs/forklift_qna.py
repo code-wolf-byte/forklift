@@ -68,19 +68,6 @@ class ForkmanQNA:
        if self.model_arn:
            kb_config["modelArn"] = self.model_arn
 
-
-       if user_id:
-           greeting = (
-               f"Hi <@{user_id}>, I'm Forkman, your friendly support bot. "
-               "I'm looking through our knowledge base to see if I can answer your question. 👋"
-           )
-       else:
-           greeting = (
-               "Hi, I'm Forkman, your friendly support bot. "
-               "I'm looking through our knowledge base to see if I can answer your question. 👋"
-           )
-
-
        try:
            response = self.client.retrieve_and_generate(
                input={"text": query},
@@ -100,7 +87,6 @@ class ForkmanQNA:
            return {
                "ok": False,
                "full_message": error_msg,
-               "greeting": greeting,
                "answer": None,
                "rating_prompt": None,
                "raw_response": None,
@@ -116,14 +102,13 @@ class ForkmanQNA:
            return {
                "ok": False,
                "full_message": error_msg,
-               "greeting": greeting,
                "answer": None,
                "rating_prompt": None,
                "raw_response": response,
            }
 
 
-       full_message = greeting + "\n----------------------\n" + answer_text
+       full_message =  "\n----------------------\n" + answer_text
        rating_prompt = (
            "We're still improving our answers! Please rate the quality of the answer."
        )
@@ -132,7 +117,6 @@ class ForkmanQNA:
        return {
            "ok": True,
            "full_message": full_message,
-           "greeting": greeting,
            "answer": answer_text,
            "rating_prompt": rating_prompt,
            "raw_response": response,
