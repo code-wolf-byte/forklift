@@ -347,7 +347,7 @@ class QnACog(commands.Cog):
                 author_id,
             )
             del qna
-            return response["answer"]
+            return response
         else:
             logger.warning(
                 "Failed to generate answer for thread '%s' (author: %s): %s",
