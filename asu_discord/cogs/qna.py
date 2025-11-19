@@ -64,7 +64,15 @@ def _normalize_id(raw: Optional[str]) -> Optional[int]:
         logger.warning("Invalid Discord snowflake configured: %s", raw)
         return None
 
+class FeedbackButtons(discord.ui.View):
+    
+    @discord.ui.button(label="It was great!", style=discord.ButtonStyle.success, emoji="👍")
+    async def satisfied_button(self, button: discord.ui.Button, interaction: discord.Interaction):
+        await interaction.response.send_message("Thank you for your feedback!")
 
+    @discord.ui.button(label="I still need help...", style=discord.ButtonStyle.danger, emoji="👎")
+    async def needs_help_button(self, button: discord.ui.Button, interaction: discord.Interaction):
+        await interaction.response.send_message("<@1213199035968528434> Assistance requested.")
 class QnACog(commands.Cog):
     """Cog that mirrors Forkman Q&A functionality with Bedrock knowledge base responses."""
 
@@ -139,7 +147,31 @@ class QnACog(commands.Cog):
             )
             return
 
-        changed = self._set_enabled(ctx.guild_id, True)
+        guild_id = ctx.guild_id
+        enabled = True
+        changed = False
+        commands_json = json.dumps(DEFAULT_COMMAND_STATE)
+        with session_scope() as db_session:
+            module = (
+                db_session.query(QnaModule)
+                .filter_by(guild_id=str(guild_id))
+                .one_or_none()
+            )
+            if module is None:
+                module = QnaModule(
+                    guild_id=str(guild_id),
+                    enabled=enabled,
+                    commands=commands_json,
+                    config="{}",
+                )
+                db_session.add(module)
+                changed = True
+            else:
+                changed = module.enabled != enabled
+                module.enabled = enabled
+                if not module.commands:
+                    module.commands = commands_json
+        self._enabled_cache[guild_id] = enabled
         message = (
             "Q&A assistant enabled for this server."
             if changed
@@ -159,7 +191,31 @@ class QnACog(commands.Cog):
             )
             return
 
-        changed = self._set_enabled(ctx.guild_id, False)
+        guild_id = ctx.guild_id
+        enabled = False
+        changed = False
+        commands_json = json.dumps(DEFAULT_COMMAND_STATE)
+        with session_scope() as db_session:
+            module = (
+                db_session.query(QnaModule)
+                .filter_by(guild_id=str(guild_id))
+                .one_or_none()
+            )
+            if module is None:
+                module = QnaModule(
+                    guild_id=str(guild_id),
+                    enabled=enabled,
+                    commands=commands_json,
+                    config="{}",
+                )
+                db_session.add(module)
+                changed = True
+            else:
+                changed = module.enabled != enabled
+                module.enabled = enabled
+                if not module.commands:
+                    module.commands = commands_json
+        self._enabled_cache[guild_id] = enabled
         if changed:
             await ctx.respond("Q&A assistant disabled for this server.", ephemeral=True)
         else:
@@ -174,81 +230,32 @@ class QnACog(commands.Cog):
             or thread.parent_id != self.forum_channel_id
         ):
             return
-
-        await self._handle_new_post(thread)
-
-    async def _handle_new_post(self, thread: discord.Thread) -> None:
         starter_message = await self._fetch_starter_message(thread)
-        author_id = (
-            starter_message.author.id
-            if starter_message
-            and starter_message.author
-            and not starter_message.author.bot
-            else thread.owner_id
-        )
-        initial_content = self._build_initial_message(author_id)
-        status = "pending"
-
-        try:
-            response_message = await thread.send(initial_content)
-        except discord.HTTPException:
-            logger.exception(
-                "Failed to send initial QnA acknowledgement to thread %s", thread.id
-            )
-            return
-
-        question_text = (
-            (starter_message.content or "").strip() if starter_message else ""
-        )
-        query = self._compose_query(thread.name, question_text)
+        author_id = starter_message.author.id if starter_message else None
+        if author_id is not None and starter_message and starter_message.author:
+            if starter_message.author.bot:
+                return
+            
+        message = f"Hi <@{author_id}>, I'm Forkman, your friendly support bot. I'm looking through our knowledge base to see if I can answer your question. :wave:"
+        await thread.send(message)
+        thread_title = thread.name.strip()
+        question_text = ((starter_message.content or "").strip() if starter_message else "")
+        query = f"{thread_title}\n{question_text}".strip()
         answer = await self._generate_answer(query)
-
         if not answer:
             failure = "Uh oh, I couldn't find an answer to your question. Please try again later or ping a moderator."
-            await response_message.edit(content=failure)
-            status = "failed"
-            self._persist_post(
-                thread,
-                owner_id=author_id,
-                question=question_text,
-                answer=None,
-                assistant_message_id=response_message.id,
-                status=status,
-            )
-            return
+            await thread.send(failure)
+        else:
+            await thread.send(answer, view=QnAFeedbackView(self))
 
-        final_content = self._build_answer_message(initial_content, answer)
-        embed = discord.Embed(
-            description=FEEDBACK_DESCRIPTION, color=discord.Color.from_rgb(0, 200, 83)
-        )
-        view = QnAFeedbackView(self)
-        self._active_views.add(view)
-
-        try:
-            await response_message.edit(content=final_content, embed=embed, view=view)
-        except discord.HTTPException:
-            logger.exception(
-                "Failed to edit QnA response message for thread %s", thread.id
-            )
-            view.stop()
-            self._active_views.discard(view)
-            return
-
-        status = "answered"
-        self._persist_post(
-            thread,
-            owner_id=author_id,
-            question=question_text,
-            answer=answer,
-            assistant_message_id=response_message.id,
-            status=status,
-        )
-
-    async def handle_satisfactory_feedback(
+        
+    async def handle_feedback(
         self,
         interaction: discord.Interaction,
         *,
+        status: str,
         view: Optional[QnAFeedbackView] = None,
+        ping_helper: bool = False,
     ) -> None:
         if not self._is_enabled(interaction.guild_id):
             await interaction.response.send_message(
@@ -256,26 +263,18 @@ class QnACog(commands.Cog):
             )
             return
 
-        await interaction.response.send_message(
-            "Thank you for your feedback!", ephemeral=True
-        )
-        await self._finalize_feedback(interaction, status="satisfied", view=view)
-
-    async def handle_assistance_feedback(
-        self,
-        interaction: discord.Interaction,
-        *,
-        view: Optional[QnAFeedbackView] = None,
-    ) -> None:
-        if not self._is_enabled(interaction.guild_id):
+        if ping_helper:
+            if self.helper_role_id:
+                message = f"<@&{self.helper_role_id}> Assistance requested."
+            else:
+                message = ""
+            await interaction.response.send_message(message)
+        else:
             await interaction.response.send_message(
-                "The Q&A assistant is currently disabled.", ephemeral=True
+                "Thank you for your feedback!", ephemeral=True
             )
-            return
 
-        ping_message = self._build_helper_ping()
-        await interaction.response.send_message(ping_message)
-        await self._finalize_feedback(interaction, status="needs_help", view=view)
+        await self._finalize_feedback(interaction, status=status, view=view)
 
     async def _finalize_feedback(
         self,
@@ -285,9 +284,17 @@ class QnACog(commands.Cog):
         view: Optional[QnAFeedbackView],
     ) -> None:
         thread_id = str(interaction.channel_id)
-        self._update_feedback_metadata(
-            thread_id, status, interaction.user.id if interaction.user else None
-        )
+        user_id = interaction.user.id if interaction.user else None
+
+        with session_scope() as db_session:
+            record = (
+                db_session.query(QnaPost).filter_by(thread_id=thread_id).one_or_none()
+            )
+            if record is not None:
+                record.status = status
+                if user_id:
+                    record.last_feedback_user_id = str(user_id)
+                record.last_feedback_at = discord.utils.utcnow()
 
         try:
             await interaction.message.edit(embed=None, view=None)
@@ -310,23 +317,6 @@ class QnACog(commands.Cog):
         except discord.HTTPException:
             logger.warning("Unable to fetch starter message for thread %s", thread.id)
         return None
-
-    def _compose_query(self, title: str, body: str) -> str:
-        title = title.strip()
-        body = body.strip()
-        return f"{title}\n{body}".strip()
-
-    def _build_initial_message(self, author_id: Optional[int]) -> str:
-        mention = f"<@{author_id}>" if author_id else "there"
-        return INITIAL_GREETING.format(user=mention)
-
-    def _build_answer_message(self, initial: str, answer: str) -> str:
-        return f"{initial}\n----------------------\n{answer.strip()}"
-
-    def _build_helper_ping(self) -> str:
-        if self.helper_role_id:
-            return f"<@&{self.helper_role_id}> Assistance requested."
-        return "A helper has been requested in this thread."
 
     async def _generate_answer(self, query: str) -> Optional[str]:
         if not query or not self._bedrock_client or not self.knowledge_base_id:
@@ -354,88 +344,6 @@ class QnACog(commands.Cog):
             return output.get("text")
 
         return await asyncio.to_thread(_call_bedrock)
-
-    def _persist_post(
-        self,
-        thread: discord.Thread,
-        *,
-        owner_id: Optional[int],
-        question: Optional[str],
-        answer: Optional[str],
-        assistant_message_id: Optional[int],
-        status: str,
-    ) -> None:
-        channel = thread.parent
-        if channel is None:
-            return
-
-        guild_id = str(thread.guild.id) if thread.guild else None
-        thread_id = str(thread.id)
-        owner = str(owner_id) if owner_id else None
-        assistant_message = str(assistant_message_id) if assistant_message_id else None
-
-        with session_scope() as db_session:
-            record = (
-                db_session.query(QnaPost).filter_by(thread_id=thread_id).one_or_none()
-            )
-            if record is None:
-                record = QnaPost(
-                    guild_id=guild_id,
-                    channel_id=str(channel.id),
-                    thread_id=thread_id,
-                    owner_id=owner,
-                    title=thread.name,
-                )
-                db_session.add(record)
-
-            record.question = question
-            record.answer = answer or record.answer
-            record.status = status
-            record.owner_id = owner or record.owner_id
-            record.assistant_message_id = (
-                assistant_message or record.assistant_message_id
-            )
-
-    def _update_feedback_metadata(
-        self, thread_id: str, status: str, user_id: Optional[int]
-    ) -> None:
-        with session_scope() as db_session:
-            record = (
-                db_session.query(QnaPost).filter_by(thread_id=thread_id).one_or_none()
-            )
-            if record is None:
-                return
-
-            record.status = status
-            if user_id:
-                record.last_feedback_user_id = str(user_id)
-            record.last_feedback_at = discord.utils.utcnow()
-
-    def _set_enabled(self, guild_id: int, enabled: bool) -> bool:
-        changed = False
-        commands_json = json.dumps(DEFAULT_COMMAND_STATE)
-        with session_scope() as db_session:
-            module = (
-                db_session.query(QnaModule)
-                .filter_by(guild_id=str(guild_id))
-                .one_or_none()
-            )
-            if module is None:
-                module = QnaModule(
-                    guild_id=str(guild_id),
-                    enabled=enabled,
-                    commands=commands_json,
-                    config="{}",
-                )
-                db_session.add(module)
-                changed = True
-            else:
-                changed = module.enabled != enabled
-                module.enabled = enabled
-                if not module.commands:
-                    module.commands = commands_json
-        self._enabled_cache[guild_id] = enabled
-        return changed
 
     def _is_enabled(self, guild_id: Optional[int]) -> bool:
         if guild_id is None:
@@ -483,7 +391,11 @@ class QnAFeedbackView(discord.ui.View):
         _: discord.ui.Button,
         interaction: discord.Interaction,
     ) -> None:
-        await self.cog.handle_satisfactory_feedback(interaction, view=self)
+        await self.cog.handle_feedback(
+            interaction,
+            status="satisfied",
+            view=self,
+        )
 
     @discord.ui.button(
         label="I still need help...",
@@ -496,7 +408,12 @@ class QnAFeedbackView(discord.ui.View):
         _: discord.ui.Button,
         interaction: discord.Interaction,
     ) -> None:
-        await self.cog.handle_assistance_feedback(interaction, view=self)
+        await self.cog.handle_feedback(
+            interaction,
+            status="needs_help",
+            view=self,
+            ping_helper=True,
+        )
 
 
 async def setup(bot: commands.Bot) -> None:
