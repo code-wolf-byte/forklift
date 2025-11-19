@@ -242,7 +242,7 @@ class QnACog(commands.Cog):
         thread_title = thread.name.strip()
         question_text = ((starter_message.content or "").strip() if starter_message else "")
         query = f"{thread_title}\n{question_text}".strip()
-        answer = await self.answer_question(thread_title=thread_title, question_text=question_text)
+        answer = self.answer_question(thread_title=thread_title, question_text=question_text)
         if not answer:
             failure = "Uh oh, I couldn't find an answer to your question. Please try again later or ping a moderator."
             await thread.send(failure)
