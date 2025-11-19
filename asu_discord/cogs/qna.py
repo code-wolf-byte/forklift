@@ -85,7 +85,8 @@ class QnACog(commands.Cog):
         self.aws_region = CONFIG.QNA_AWS_REGION
         self._enabled_cache: dict[int, bool] = {}
         self._active_views: set[QnAFeedbackView] = set()
-        self._bedrock_client = self._build_bedrock_client()
+        self._bedrock_client = boto3.client("bedrock-agent-runtime", region_name=self.aws_region, aws_access_key_id=CONFIG.AWS_ACCESS_KEY_ID, aws_secret_access_key=CONFIG.AWS_SECRET_ACCESS_KEY)
+                                            
 
     def _build_bedrock_client(self):
         if boto3 is None:
@@ -241,14 +242,32 @@ class QnACog(commands.Cog):
         thread_title = thread.name.strip()
         question_text = ((starter_message.content or "").strip() if starter_message else "")
         query = f"{thread_title}\n{question_text}".strip()
-        answer = await self._generate_answer(query)
+        answer = await self.answer_question(thread_title=thread_title, question_text=question_text)
         if not answer:
             failure = "Uh oh, I couldn't find an answer to your question. Please try again later or ping a moderator."
             await thread.send(failure)
         else:
             await thread.send(answer, view=QnAFeedbackView(self))
 
+    def answer_question(self, thread_title: str, question_text: str) -> Optional[str]:
+        query = f"{thread_title}\n{question_text}".strip()
         
+        try:
+            response = self._bedrock_client.retrieve_and_generate(
+                input={"text": query},
+                retrieveAndGenerateConfiguration={
+                    "type": "KNOWLEDGE_BASE",
+                    "knowledgeBaseConfiguration": {
+                        "modelArn": self.model_arn,
+                        "knowledgeBaseId": self.knowledge_base_id,
+                    },
+                },
+            )
+            return response.get("output", {}).get("text")
+        except Exception as e:
+            logger.error("Error generating answer: %s", e)
+            return None
+
     async def handle_feedback(
         self,
         interaction: discord.Interaction,
