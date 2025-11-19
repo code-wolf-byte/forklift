@@ -340,7 +340,7 @@ class QnACog(commands.Cog):
             user_id=str(author_id) if author_id else None,
         )
 
-        return answer["response"] if answer["ok"] else None
+        return answer["answer"] if answer["ok"] else None
 
 
     def _is_enabled(self, guild_id: Optional[int]) -> bool:
