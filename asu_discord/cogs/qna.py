@@ -334,14 +334,29 @@ class QnACog(commands.Cog):
         )
         if not qna:
             return None
-        answer = qna.get_answer(
+        response = qna.get_answer(
             thread_title=thread_title,
             message_content=question_text,
             user_id=str(author_id) if author_id else None,
         )
-        logger.info(f"Answer from ForkmanQNA: {answer}")
-        return answer["answer"] if answer["ok"] else None
-
+        logger.info(f"Answer from ForkmanQNA: {response}")
+        if response["ok"]:
+            logger.info(
+                "Generated answer for thread '%s' (author: %s)",
+                thread_title,
+                author_id,
+            )
+            del qna
+            return response["answer"]
+        else:
+            logger.warning(
+                "Failed to generate answer for thread '%s' (author: %s): %s",
+                thread_title,
+                author_id,
+                response.get("full_message"),
+            )
+            del qna
+            return response
 
     def _is_enabled(self, guild_id: Optional[int]) -> bool:
         if guild_id is None:
