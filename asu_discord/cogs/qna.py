@@ -311,7 +311,7 @@ class QnACog(commands.Cog):
 
     def _build_forkman_kwargs(self) -> Optional[dict[str, Any]]:
         return ForkmanQNA(
-            aws_region=self.aws_region,
+            region_name=self.aws_region,
             knowledge_base_id=self.knowledge_base_id,
             model_arn=self.model_arn,
             aws_access_key_id=self.aws_access_key_id,
