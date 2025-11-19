@@ -29,6 +29,7 @@ class ForkliftBot(commands.Bot):
             intents.guilds = True
         super().__init__(command_prefix=command_prefix, intents=intents)
         self._load_verification_cog()
+        self._load_qna_cog()
 
     def _load_verification_cog(self) -> None:
         """Attach the verification cog immediately after initialization."""
