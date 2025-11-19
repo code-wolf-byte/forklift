@@ -129,7 +129,7 @@ class AppConfig:
         }
         self.SAML_ENABLED = not self.DEV_MODE
         if not self.QNA_MODEL_ARN:
-            self.QNA_MODEL_ARN = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+            self.QNA_MODEL_ARN = "anthropic.claude-3-5-sonnet-20241022-v2:0"
 
 
 @dataclass(slots=True)
