@@ -3,23 +3,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 import discord
 from discord.commands import slash_command
 from discord.ext import commands
 
 try:  # pragma: no cover - optional dependency
-    import boto3
-    from botocore.exceptions import BotoCoreError, ClientError
+    from .forklift_qna import ForkmanQNA
 except ImportError:  # pragma: no cover - optional dependency
-    boto3 = None  # type: ignore[assignment]
-
-    class BotoCoreError(Exception):
-        """Fallback boto core error."""
-
-    class ClientError(Exception):
-        """Fallback boto client error."""
+    ForkmanQNA = None  # type: ignore[assignment]
 
 
 from utils.database import QnaModule, QnaPost, session_scope
@@ -30,14 +23,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_COMMAND_STATE = {"qna-enable": True, "qna-disable": True}
 SATISFACTORY_CUSTOM_ID = "qna:satisfied"
 ASSISTANCE_CUSTOM_ID = "qna:assist"
-INITIAL_GREETING = (
-    "Hi {user}, I'm Forklift, your friendly support bot. "
-    "I'm looking through our knowledge base to see if I can answer your question. :wave:"
-)
-FEEDBACK_DESCRIPTION = (
-    "We're still improving our answers! Please rate the quality of the answer below."
-)
-
 TEST_GUILD_IDS: list[int] = []
 if DISCORD_CONFIG and DISCORD_CONFIG.test_guild_ids:
     TEST_GUILD_IDS = list(DISCORD_CONFIG.test_guild_ids)
@@ -63,16 +48,6 @@ def _normalize_id(raw: Optional[str]) -> Optional[int]:
     except (TypeError, ValueError):
         logger.warning("Invalid Discord snowflake configured: %s", raw)
         return None
-
-class FeedbackButtons(discord.ui.View):
-    
-    @discord.ui.button(label="It was great!", style=discord.ButtonStyle.success, emoji="👍")
-    async def satisfied_button(self, button: discord.ui.Button, interaction: discord.Interaction):
-        await interaction.response.send_message("Thank you for your feedback!")
-
-    @discord.ui.button(label="I still need help...", style=discord.ButtonStyle.danger, emoji="👎")
-    async def needs_help_button(self, button: discord.ui.Button, interaction: discord.Interaction):
-        await interaction.response.send_message("<@1213199035968528434> Assistance requested.")
 class QnACog(commands.Cog):
     """Cog that mirrors Forkman Q&A functionality with Bedrock knowledge base responses."""
 
@@ -83,30 +58,17 @@ class QnACog(commands.Cog):
         self.knowledge_base_id = CONFIG.QNA_KNOWLEDGE_BASE_ID
         self.model_arn = CONFIG.QNA_MODEL_ARN
         self.aws_region = CONFIG.QNA_AWS_REGION
+        self.aws_access_key_id = CONFIG.AWS_ACCESS_KEY_ID
+        self.aws_secret_access_key = CONFIG.AWS_SECRET_ACCESS_KEY
         self._enabled_cache: dict[int, bool] = {}
         self._active_views: set[QnAFeedbackView] = set()
-        self._bedrock_client = boto3.client("bedrock-agent-runtime", region_name=self.aws_region, aws_access_key_id=CONFIG.AWS_ACCESS_KEY_ID, aws_secret_access_key=CONFIG.AWS_SECRET_ACCESS_KEY)
-                                            
-
-    def _build_bedrock_client(self):
-        if boto3 is None:
-            logger.warning("boto3 is not installed; QnA responses will be disabled.")
-            return None
-        if not self.knowledge_base_id:
-            logger.info(
-                "QNA_KNOWLEDGE_BASE_ID missing; Bedrock client will not be created."
-            )
-            return None
-        try:
-            kwargs = {"region_name": self.aws_region} if self.aws_region else {}
-            return boto3.client("bedrock-agent-runtime", **kwargs)
-        except Exception:  # pragma: no cover - defensive
-            logger.exception("Failed to create Bedrock Agent Runtime client.")
-            return None
 
     def _is_ready(self) -> bool:
         return bool(
-            self.forum_channel_id and self.knowledge_base_id and self._bedrock_client
+            self.forum_channel_id
+            and self.knowledge_base_id
+            and self.model_arn
+            and ForkmanQNA
         )
 
     @commands.Cog.listener()
@@ -114,10 +76,11 @@ class QnACog(commands.Cog):
         if not self._is_ready():
             logger.info(
                 "QnACog loaded but incomplete configuration prevents automation "
-                "(channel: %s, knowledge_base: %s, client_ready: %s)",
+                "(channel: %s, knowledge_base: %s, model: %s, forkman_available: %s)",
                 self.forum_channel_id,
                 bool(self.knowledge_base_id),
-                bool(self._bedrock_client),
+                bool(self.model_arn),
+                bool(ForkmanQNA),
             )
             return
 
@@ -236,37 +199,46 @@ class QnACog(commands.Cog):
         if author_id is not None and starter_message and starter_message.author:
             if starter_message.author.bot:
                 return
-            
-        message = f"Hi <@{author_id}>, I'm Forkman, your friendly support bot. I'm looking through our knowledge base to see if I can answer your question. :wave:"
+        message = (
+            f"Hi <@{author_id}>, I'm Forkman, your friendly support bot. "
+            "I'm looking through our knowledge base to see if I can answer your question. :wave:"
+        )
         await thread.send(message)
         thread_title = thread.name.strip()
-        question_text = ((starter_message.content or "").strip() if starter_message else "")
-        query = f"{thread_title}\n{question_text}".strip()
-        answer = self.answer_question(thread_title=thread_title, question_text=question_text)
-        if not answer:
-            failure = "Uh oh, I couldn't find an answer to your question. Please try again later or ping a moderator."
-            await thread.send(failure)
-        else:
-            await thread.send(answer, view=QnAFeedbackView(self))
-
-    def answer_question(self, thread_title: str, question_text: str) -> Optional[str]:
-        query = f"{thread_title}\n{question_text}".strip()
-        
-        try:
-            response = self._bedrock_client.retrieve_and_generate(
-                input={"text": query},
-                retrieveAndGenerateConfiguration={
-                    "type": "KNOWLEDGE_BASE",
-                    "knowledgeBaseConfiguration": {
-                        "modelArn": self.model_arn,
-                        "knowledgeBaseId": self.knowledge_base_id,
-                    },
-                },
+        question_text = (
+            (starter_message.content or "").strip() if starter_message else ""
+        )
+        result = await self._generate_answer(
+            thread_title=thread_title,
+            question_text=question_text,
+            author_id=author_id,
+        )
+        if not result:
+            failure = (
+                "Uh oh, I couldn't find an answer to your question. "
+                "Please try again later or ping a moderator."
             )
-            return response.get("output", {}).get("text")
-        except Exception as e:
-            logger.error("Error generating answer: %s", e)
-            return None
+            await thread.send(failure)
+            return
+
+        if not result.get("ok"):
+            await thread.send(
+                result.get(
+                    "full_message",
+                    "Uh oh, I couldn't find an answer to your question. Please try again later.",
+                )
+            )
+            return
+
+        answer_text = result.get("answer") or result.get("full_message")
+        if not answer_text:
+            answer_text = (
+                "I wasn't able to craft a response, please try again or ping a moderator."
+            )
+        rating_prompt = result.get("rating_prompt")
+        if rating_prompt:
+            answer_text = f"{answer_text}\n\n{rating_prompt}"
+        await thread.send(answer_text, view=QnAFeedbackView(self))
 
     async def handle_feedback(
         self,
@@ -337,32 +309,33 @@ class QnACog(commands.Cog):
             logger.warning("Unable to fetch starter message for thread %s", thread.id)
         return None
 
-    async def _generate_answer(self, query: str) -> Optional[str]:
-        if not query or not self._bedrock_client or not self.knowledge_base_id:
+    def _build_forkman_kwargs(self) -> Optional[dict[str, Any]]:
+        return ForkmanQNA(
+            aws_region=self.aws_region,
+            knowledge_base_id=self.knowledge_base_id,
+            model_arn=self.model_arn,
+            aws_access_key_id=self.aws_access_key_id,
+            aws_secret_access_key=self.aws_secret_access_key,
+        )
+
+    async def _generate_answer(
+        self,
+        *,
+        thread_title: str,
+        question_text: str,
+        author_id: Optional[int],
+    ) -> Optional[dict[str, Any]]:
+        qna = self._build_forkman_kwargs()
+        if not qna:
             return None
+        answer= qna.answer_question(
+            thread_title=thread_title,
+            message_content=question_text,
+            user_id=str(author_id) if author_id else None,
+        )
 
-        def _call_bedrock() -> Optional[str]:
-            try:
-                response = self._bedrock_client.retrieve_and_generate(
-                    input={"text": query},
-                    retrieveAndGenerateConfiguration={
-                        "type": "KNOWLEDGE_BASE",
-                        "knowledgeBaseConfiguration": {
-                            "modelArn": self.model_arn,
-                            "knowledgeBaseId": self.knowledge_base_id,
-                        },
-                    },
-                )
-            except (BotoCoreError, ClientError) as exc:
-                logger.error("Bedrock retrieve_and_generate failed: %s", exc)
-                return None
+        return answer["response"] if answer["ok"] else None
 
-            output = response.get("output") if isinstance(response, dict) else None
-            if not output:
-                return None
-            return output.get("text")
-
-        return await asyncio.to_thread(_call_bedrock)
 
     def _is_enabled(self, guild_id: Optional[int]) -> bool:
         if guild_id is None:
