@@ -339,7 +339,7 @@ class QnACog(commands.Cog):
             message_content=question_text,
             user_id=str(author_id) if author_id else None,
         )
-
+        logger.info("Answer from ForkmanQNA:", answer)
         return answer["answer"] if answer["ok"] else None
 
 
