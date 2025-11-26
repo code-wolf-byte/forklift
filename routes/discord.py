@@ -20,6 +20,7 @@ from utils.settings import CONFIG, DISCORD_CONFIG
 
 discord_bp = Blueprint("discord", __name__)
 logger = logging.getLogger(__name__)
+BANNED_VERIFICATION_MESSAGE = "This ASURITE is banned from verification."
 
 
 def _oauth_failure(message: str, status_code: int = 400):
@@ -43,6 +44,14 @@ def discord_login():
     if not verification_state or not verification_state.get("saml_complete"):
         logger.info("Discord login requested without SAML completion")
         return redirect(url_for("saml.saml_login"))
+
+    user_id = verification_state.get("user_id")
+    if user_id:
+        with session_scope() as db_session:
+            user = db_session.get(User, user_id)
+            if user is not None and user.banned:
+                session["verification_error"] = BANNED_VERIFICATION_MESSAGE
+                return _oauth_failure(BANNED_VERIFICATION_MESSAGE, 403)
 
     state_token = secrets.token_urlsafe(32)
     session["discord_oauth_state"] = state_token
@@ -94,6 +103,12 @@ def discord_callback():
             "Verification session has expired. Restart verification.", 400
         )
 
+    with session_scope() as db_session:
+        user = db_session.get(User, user_db_id)
+        if user is not None and user.banned:
+            session["verification_error"] = BANNED_VERIFICATION_MESSAGE
+            return _oauth_failure(BANNED_VERIFICATION_MESSAGE, 403)
+
     try:
         token_data = exchange_code_for_token(code)
     except DiscordAPIError as exc:
@@ -128,6 +143,9 @@ def discord_callback():
                 raise DiscordAPIError(
                     "Unable to load verification record for Discord linking"
                 )
+            if user.banned:
+                session["verification_error"] = BANNED_VERIFICATION_MESSAGE
+                return _oauth_failure(BANNED_VERIFICATION_MESSAGE, 403)
 
             user.discord_user_id = discord_user_id
             user.discord_username = profile.get("username")

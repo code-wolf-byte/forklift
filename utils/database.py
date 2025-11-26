@@ -4,7 +4,17 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Iterator
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, create_engine
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Integer,
+    String,
+    Text,
+    create_engine,
+    inspect,
+    text,
+)
 from sqlalchemy.orm import Session, declarative_base, scoped_session, sessionmaker
 
 from utils.settings import CONFIG
@@ -34,6 +44,7 @@ class User(Base):
     discord_avatar = Column(String(255), nullable=True)
     verified = Column(Boolean, default=False, nullable=False)
     verified_at = Column(DateTime, nullable=True)
+    banned = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,
@@ -102,6 +113,24 @@ class QnaModule(Base):
 
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
+    _ensure_banned_column()
+
+
+def _ensure_banned_column() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table(User.__tablename__):
+        return
+
+    columns = {col["name"] for col in inspector.get_columns(User.__tablename__)}
+    if "banned" in columns:
+        return
+
+    ddl = "ALTER TABLE users ADD COLUMN banned BOOLEAN NOT NULL DEFAULT 0"
+    if engine.dialect.name == "postgresql":
+        ddl = "ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN NOT NULL DEFAULT FALSE"
+
+    with engine.begin() as conn:
+        conn.execute(text(ddl))
 
 
 def get_session() -> Session:

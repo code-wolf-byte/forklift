@@ -181,29 +181,41 @@ def saml_acs():
         name_id = str(name_id)
 
     user_record_id: int | None = None
+    is_banned = False
     with session_scope() as db_session:
         stmt = select(User).where(User.asurite_id == asurite)
         user = db_session.execute(stmt).scalar_one_or_none()
 
-        if user is None:
-            user = User(asurite_id=asurite, email=email)
-            db_session.add(user)
+        if user is not None and user.banned:
+            logger.warning("Banned ASURITE attempted verification: %s", asurite)
+            is_banned = True
+        else:
+            if user is None:
+                user = User(asurite_id=asurite, email=email)
+                db_session.add(user)
 
-        user.email = email
-        if full_name:
-            user.full_name = full_name
-        if first_name:
-            user.first_name = first_name
-        if last_name:
-            user.last_name = last_name
-        if affiliations_values:
-            user.affiliations = ",".join(sorted(set(affiliations_values)))
+            user.email = email
+            if full_name:
+                user.full_name = full_name
+            if first_name:
+                user.first_name = first_name
+            if last_name:
+                user.last_name = last_name
+            if affiliations_values:
+                user.affiliations = ",".join(sorted(set(affiliations_values)))
 
-        user.saml_session_index = session_index
-        user.saml_attributes = json.dumps(attribute_lists)
+            user.saml_session_index = session_index
+            user.saml_attributes = json.dumps(attribute_lists)
 
-        db_session.flush()
-        user_record_id = user.id
+            db_session.flush()
+            user_record_id = user.id
+
+    if is_banned:
+        session["verification_error"] = "This ASURITE is banned from verification."
+        try:
+            return redirect(url_for("verification_error"))
+        except Exception:
+            return "Verification is not available for this ASURITE", 403
 
     verification_state = session.get("verification_state", {})
     verification_state.update(

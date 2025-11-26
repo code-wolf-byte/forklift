@@ -6,8 +6,10 @@ from typing import Any, Optional
 import discord
 from discord.ext import commands
 from discord.commands import Option, slash_command
+from sqlalchemy import func, select
 
 from utils.settings import DISCORD_CONFIG
+from utils.database import User, session_scope
 from ..roles import ROLE_ID_MAP
 
 logger = logging.getLogger(__name__)
@@ -252,6 +254,41 @@ class VerificationCog(commands.Cog):
             return None
         return guild.get_role(unverified_role_id)
 
+    async def _remove_verified_role(
+        self,
+        guild: Optional[discord.Guild],
+        member: discord.Member,
+        *,
+        reason: str,
+    ) -> bool:
+        role = self._get_verified_role(guild)
+        if role is None:
+            logger.info(
+                "No configured verified role available when processing member %s",
+                member.id,
+            )
+            return False
+        if role not in member.roles:
+            logger.info(
+                "Member %s does not currently have the verified role %s",
+                member.id,
+                role.id,
+            )
+            return False
+        try:
+            await member.remove_roles(role, reason=reason)
+        except discord.HTTPException as exc:  # pragma: no cover - network failure
+            logger.warning(
+                "Failed to remove verified role %s from member %s: %s",
+                role.id,
+                member.id,
+                exc,
+            )
+            return False
+
+        logger.info("Removed verified role %s from member %s", role.id, member.id)
+        return True
+
     async def _remove_unverified_role(
         self,
         guild: Optional[discord.Guild],
@@ -493,6 +530,118 @@ class VerificationCog(commands.Cog):
 
         await member.remove_roles(role, reason=f"Manual unverification by {ctx.author}")
         await ctx.respond(f"{member.mention} no longer has the verification role.")
+
+    @slash_command(
+        **_moderation_command_kwargs(
+            "ban",
+            "Ban an ASURITE from verification and remove their verification role.",
+        )
+    )
+    async def ban_asurite(
+        self,
+        ctx: discord.ApplicationContext,
+        asurite: Option(str, "ASURITE ID to ban"),
+    ) -> None:
+        """Ban an ASURITE from verification and revoke their Discord access."""
+        if ctx.guild_id != self.guild_id or ctx.guild is None:
+            await ctx.respond(
+                "This command is only available in the Devil2Devil server.",
+                ephemeral=True,
+            )
+            return
+
+        target = (asurite or "").strip()
+        if not target:
+            await ctx.respond("Please provide an ASURITE to ban.", ephemeral=True)
+            return
+
+        await ctx.defer(ephemeral=True)
+
+        normalized = target.lower()
+        stored_asurite: str | None = None
+        discord_user_id: int | None = None
+        already_banned = False
+        missing_user = False
+
+        with session_scope() as db_session:
+            stmt = select(User).where(func.lower(User.asurite_id) == normalized)
+            user = db_session.execute(stmt).scalar_one_or_none()
+
+            if user is None:
+                missing_user = True
+            else:
+                stored_asurite = user.asurite_id
+                try:
+                    if user.discord_user_id:
+                        discord_user_id = int(user.discord_user_id)
+                except (TypeError, ValueError):
+                    discord_user_id = None
+
+                if user.banned:
+                    already_banned = True
+                else:
+                    user.banned = True
+                    user.verified = False
+                    user.verified_at = None
+
+        if missing_user:
+            await ctx.followup.send(
+                f"No verification record found for {target}.",
+                ephemeral=True,
+            )
+            return
+
+        notes: list[str] = []
+        member: Optional[discord.Member] = None
+        if discord_user_id is not None:
+            member = ctx.guild.get_member(discord_user_id)
+            if member is None:
+                try:
+                    member = await ctx.guild.fetch_member(discord_user_id)
+                except discord.NotFound:
+                    member = None
+                except discord.HTTPException as exc:  # pragma: no cover - network failure
+                    logger.warning(
+                        "Unable to load guild member %s for ban action: %s",
+                        discord_user_id,
+                        exc,
+                    )
+                    member = None
+
+        if member is not None:
+            removed = await self._remove_verified_role(
+                ctx.guild,
+                member,
+                reason=f"Verification ban by {ctx.author}",
+            )
+            if removed:
+                notes.append(
+                    f"Removed verification role from linked account {member.mention}."
+                )
+            else:
+                notes.append(
+                    "No verification role changes were required for the linked account."
+                )
+        elif discord_user_id is not None:
+            notes.append(
+                "Linked Discord account not found in the guild; no role changes made."
+            )
+
+        if already_banned:
+            await ctx.followup.send(
+                f"{stored_asurite or target} is already banned from verification."
+                + (f" {' '.join(notes)}" if notes else ""),
+                ephemeral=True,
+            )
+            return
+
+        await ctx.followup.send(
+            (
+                f"{stored_asurite or target} has been banned from verification."
+                + (f" {' '.join(notes)}" if notes else "")
+            ),
+            ephemeral=True,
+        )
 
     def _build_verification_embed(self) -> discord.Embed:
         embed = discord.Embed(
