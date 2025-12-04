@@ -256,10 +256,20 @@ class QnACog(commands.Cog):
 
         if ping_helper:
             if self.helper_role_id:
-                message = f"<@&{self.helper_role_id}> Assistance requested."
+                role = discord.utils.get(
+                    interaction.guild.roles, id=self.helper_role_id
+                )
+                message = (
+                    f"{role.mention} Assistance requested."
+                    if role
+                    else "Assistance requested."
+                )
             else:
                 message = ""
-            await interaction.response.send_message(message)
+            await interaction.response.send_message(
+                message,
+                allowed_mentions=discord.AllowedMentions(roles=True),
+            )
         else:
             await interaction.response.send_message(
                 "Thank you for your feedback!", ephemeral=True
