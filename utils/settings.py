@@ -33,6 +33,19 @@ def _env_list(
     return [item for item in items if item]
 
 
+def _env_int(name: str, *, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    raw = raw.strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid integer for {name}: {raw}") from exc
+
+
 @dataclass(slots=True)
 class AppConfig:
     """Expose high-level application configuration."""
@@ -198,6 +211,73 @@ try:
     DISCORD_CONFIG = DiscordConfig.from_env()
 except RuntimeError:
     DISCORD_CONFIG = None  # type: ignore[assignment]
+
+
+@dataclass(slots=True)
+class SftpUploadConfig:
+    """Configuration for uploading CSVs over SFTP."""
+
+    host: str
+    username: str
+    password: str | None
+    port: int = 22
+    key_file: Path | None = None
+    remote_dir: str = "/"
+    filename_prefix: str = "emails"
+    timeout: int = 30
+    state_path: Path = field(
+        default_factory=lambda: Path(__file__).resolve().parent.parent
+        / "data"
+        / "upload_emails_to_sftp.state"
+    )
+
+    @classmethod
+    def from_env(cls) -> "SftpUploadConfig":
+        enabled = _env_bool("SFTP_UPLOAD_ENABLED", default=False)
+        if not enabled:
+            raise RuntimeError("SFTP uploads disabled")
+
+        host = _env_value("SFTP_HOST")
+        username = _env_value("SFTP_USERNAME")
+        password = _env_value("SFTP_PASSWORD")
+        key_file_raw = _env_value("SFTP_KEY_FILE")
+
+        missing = [name for name, value in {"SFTP_HOST": host, "SFTP_USERNAME": username}.items() if value is None]
+        if missing:
+            missing_vars = ", ".join(missing)
+            raise RuntimeError(f"Missing SFTP environment variables: {missing_vars}")
+        if password is None and key_file_raw is None:
+            raise RuntimeError("Missing SFTP_PASSWORD or SFTP_KEY_FILE")
+
+        port = _env_int("SFTP_PORT", default=22)
+        timeout = _env_int("SFTP_TIMEOUT", default=30)
+        remote_dir = _env_value("SFTP_REMOTE_DIR", default="/") or "/"
+        filename_prefix = _env_value("SFTP_FILENAME_PREFIX", default="emails") or "emails"
+        state_path_raw = _env_value("SFTP_STATE_PATH")
+        state_path = (
+            Path(state_path_raw)
+            if state_path_raw
+            else Path(__file__).resolve().parent.parent / "data" / "upload_emails_to_sftp.state"
+        )
+        key_file = Path(key_file_raw) if key_file_raw else None
+
+        return cls(
+            host=host,
+            username=username,
+            password=password,
+            port=port,
+            key_file=key_file,
+            remote_dir=remote_dir,
+            filename_prefix=filename_prefix,
+            timeout=timeout,
+            state_path=state_path,
+        )
+
+
+try:
+    SFTP_CONFIG = SftpUploadConfig.from_env()
+except RuntimeError:
+    SFTP_CONFIG = None  # type: ignore[assignment]
 
 
 __all__ = ["CONFIG", "DISCORD_CONFIG", "DiscordConfig", "AppConfig"]
