@@ -174,16 +174,13 @@ def cas_callback():
                 user = User(asurite_id=asurite, email=email or "")
                 db_session.add(user)
 
-            if email:
-                user.email = email
-            if full_name:
-                user.full_name = full_name
-            if first_name:
-                user.first_name = first_name
-            if last_name:
-                user.last_name = last_name
-            if affiliations_values:
-                user.affiliations = ",".join(sorted(set(affiliations_values)))
+            user.email = email or ""
+            user.full_name = full_name
+            user.first_name = first_name
+            user.last_name = last_name
+            user.affiliations = (
+                ",".join(sorted(set(affiliations_values))) if affiliations_values else None
+            )
 
             user.saml_session_index = ticket
             user.saml_attributes = json.dumps(attributes)
