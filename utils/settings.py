@@ -140,7 +140,7 @@ class AppConfig:
             "PUBLIC_BASE_URL", os.getenv("SAML_BASE_URL", "https://verify.example.asu.edu")
         )
         self.PUBLIC_BASE_URL = public_base.rstrip("/")
-        cas_base = os.getenv("CAS_BASE_URL", "https://asu.edu/cas").rstrip("/")
+        cas_base = os.getenv("CAS_BASE_URL", "https://verify.devil2devil.asu.edu/cas").rstrip("/")
         self.CAS_BASE_URL = cas_base
         self.CAS_LOGIN_URL = os.getenv("CAS_LOGIN_URL", f"{self.CAS_BASE_URL}/")
         self.CAS_VALIDATE_URL = os.getenv(
