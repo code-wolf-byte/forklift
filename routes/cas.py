@@ -215,24 +215,12 @@ def cas_callback():
         "attributes": attributes,
     }
 
-    next_step = _safe_redirect(relay_state) or _safe_redirect(
-        verification_state.get("relay_state")
-    )
-    if next_step:
-        return redirect(next_step)
-
-    try:
-        home_url = url_for("hello_world")
-    except Exception:
-        home_url = None
-
-    if home_url:
-        return redirect(home_url)
-
     message = {
         "status": "cas_complete",
         "asurite": asurite,
         "email": email,
+        "attributes": attributes,
+        "relay_state": relay_state or verification_state.get("relay_state"),
     }
     return message
 
