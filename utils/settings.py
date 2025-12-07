@@ -137,7 +137,7 @@ class AppConfig:
         self.SSO_ATTRIBUTE_MAP = self.SAML_ATTRIBUTE_MAP
 
         public_base = os.getenv(
-            "PUBLIC_BASE_URL", os.getenv("SAML_BASE_URL", "https://verify.example.asu.edu")
+            "PUBLIC_BASE_URL", os.getenv("SAML_BASE_URL", "https://verify.devil2devil.asu.edu")
         )
         self.PUBLIC_BASE_URL = public_base.rstrip("/")
         cas_base = os.getenv("CAS_BASE_URL", "https://verify.devil2devil.asu.edu/cas").rstrip("/")
