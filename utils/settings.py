@@ -59,7 +59,14 @@ class AppConfig:
     AWS_ACCESS_KEY_ID: str | None = _env_value("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY: str | None = _env_value("AWS_SECRET_ACCESS_KEY")
     SAML_ATTRIBUTE_MAP: Dict[str, List[str]] = field(init=False)
-    SAML_ENABLED: bool = field(init=False)
+    SSO_ATTRIBUTE_MAP: Dict[str, List[str]] = field(init=False)
+    PUBLIC_BASE_URL: str = field(init=False)
+    CAS_BASE_URL: str = field(init=False)
+    CAS_LOGIN_URL: str = field(init=False)
+    CAS_VALIDATE_URL: str = field(init=False)
+    CAS_LOGOUT_URL: str | None = field(init=False)
+    CAS_SERVICE_URL: str = field(init=False)
+    CAS_ENABLED: bool = field(init=False)
 
     def __post_init__(self) -> None:
         default_db_path = self.BASE_DIR / "forklift.db"
@@ -127,7 +134,23 @@ class AppConfig:
                 "SAML_ATTR_AFFILIATIONS", default=default_affiliations
             ),
         }
-        self.SAML_ENABLED = not self.DEV_MODE
+        self.SSO_ATTRIBUTE_MAP = self.SAML_ATTRIBUTE_MAP
+
+        public_base = os.getenv(
+            "PUBLIC_BASE_URL", os.getenv("SAML_BASE_URL", "https://verify.example.asu.edu")
+        )
+        self.PUBLIC_BASE_URL = public_base.rstrip("/")
+        cas_base = os.getenv("CAS_BASE_URL", "https://cas.example.edu/cas").rstrip("/")
+        self.CAS_BASE_URL = cas_base
+        self.CAS_LOGIN_URL = os.getenv("CAS_LOGIN_URL", f"{self.CAS_BASE_URL}/login")
+        self.CAS_VALIDATE_URL = os.getenv(
+            "CAS_VALIDATE_URL", f"{self.CAS_BASE_URL}/serviceValidate"
+        )
+        self.CAS_LOGOUT_URL = _env_value("CAS_LOGOUT_URL")
+        self.CAS_SERVICE_URL = os.getenv(
+            "CAS_SERVICE_URL", f"{self.PUBLIC_BASE_URL}/auth/cas/callback"
+        )
+        self.CAS_ENABLED = _env_bool("CAS_ENABLED", default=not self.DEV_MODE)
         if not self.QNA_MODEL_ARN:
             self.QNA_MODEL_ARN = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
 

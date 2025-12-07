@@ -904,14 +904,14 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
                       <a class="nav-link" href="https://my.asu.edu/">My ASU</a>
                       <a class="nav-link" href="https://www.asu.edu/academics/colleges-schools">Colleges and Schools</a>
                       <div class="sc-fqkvVR iQlbge nav-link login-status">
-                        {% if saml_complete %}
+                        {% if cas_complete %}
                           {% if verification_state.asurite %}
                             <span class="text-white">Signed in as {{ verification_state.asurite }}</span>
                           {% else %}
                             <span class="text-white">Signed in</span>
                           {% endif %}
-                        {% elif saml_login_url %}
-                          <a href="{{ saml_login_url }}">Sign In</a>
+                        {% elif cas_login_url %}
+                          <a href="{{ cas_login_url }}">Sign In</a>
                         {% else %}
                           <span>Sign In</span>
                         {% endif %}
@@ -1031,9 +1031,9 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
     </div>
   </div>
 
-{% set step1_complete = saml_complete %}
+{% set step1_complete = cas_complete %}
 {% set step2_complete = discord_complete %}
-{% set step2_enabled = saml_complete %}
+{% set step2_enabled = cas_complete %}
 {% set step3_enabled = discord_complete %}
 
 
@@ -1089,20 +1089,20 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
       <div class="text-muted small mt-2">
         {% if discord_complete %}
           <span class="badge text-bg-success">All steps complete</span>
-        {% elif saml_complete %}
+        {% elif cas_complete %}
           Next up: connect your Discord account.
         {% else %}
           Start by signing in with your ASURITE ID.
         {% endif %}
       </div>
-      {% if discord_complete or saml_complete or verification_error %}
+      {% if discord_complete or cas_complete or verification_error %}
         <div class="mt-3 verification-status text-black">
           {% if discord_complete %}
             <p class="mb-0">
               Your ASU account{% if verification_state.asurite %} (<strong>{{ verification_state.asurite }}</strong>){% endif %}
               is linked with Discord. Welcome to Devil2Devil{% if verification_state.discord_username or discord_user.username %}, {{ verification_state.discord_username or discord_user.username }}{% endif %}!
             </p>
-          {% elif saml_complete %}
+          {% elif cas_complete %}
             <p class="mb-0">
               You're signed in with ASU{% if verification_state.asurite %} as <strong>{{ verification_state.asurite }}</strong>{% endif %}
               {% if verification_state.email %}({{ verification_state.email }}){% endif %}. Connect your Discord account to finish verification.
@@ -1137,8 +1137,8 @@ svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
               <p>Log in to MyASU so we can verify your admission status. You’ll be returned here to link your Discord account.</p>
             </div>
             <div class="card-buttons">
-              {% if saml_login_url %}
-                <a class="btn btn-maroon" href="{{ saml_login_url }}">
+              {% if cas_login_url %}
+                <a class="btn btn-maroon" href="{{ cas_login_url }}">
                   {% if step1_complete %}Reauthenticate with ASU{% else %}My ASU{% endif %}
                 </a>
               {% else %}
