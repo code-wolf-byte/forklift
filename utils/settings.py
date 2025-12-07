@@ -136,20 +136,18 @@ class AppConfig:
         }
         self.SSO_ATTRIBUTE_MAP = self.SAML_ATTRIBUTE_MAP
 
-        public_base = os.getenv(
-            "PUBLIC_BASE_URL", os.getenv("SAML_BASE_URL", "https://verify.devil2devil.asu.edu")
+        public_base = _env_value(
+            "PUBLIC_BASE_URL", default=os.getenv("SAML_BASE_URL", "https://verify.devil2devil.asu.edu")
         )
-        self.PUBLIC_BASE_URL = public_base.rstrip("/")
-        cas_base = os.getenv("CAS_BASE_URL", "https://verify.devil2devil.asu.edu/cas").rstrip("/")
-        self.CAS_BASE_URL = cas_base
-        self.CAS_LOGIN_URL = os.getenv("CAS_LOGIN_URL", f"{self.CAS_BASE_URL}/")
-        self.CAS_VALIDATE_URL = os.getenv(
-            "CAS_VALIDATE_URL", f"{self.CAS_BASE_URL}/serviceValidate"
+        self.PUBLIC_BASE_URL = (public_base or "https://verify.devil2devil.asu.edu").rstrip("/")
+        cas_base_raw = _env_value("CAS_BASE_URL", default="https://verify.devil2devil.asu.edu/cas")
+        self.CAS_BASE_URL = (cas_base_raw or "https://verify.devil2devil.asu.edu/cas").rstrip("/")
+        self.CAS_LOGIN_URL = _env_value("CAS_LOGIN_URL") or f"{self.CAS_BASE_URL}/login"
+        self.CAS_VALIDATE_URL = (
+            _env_value("CAS_VALIDATE_URL") or f"{self.CAS_BASE_URL}/serviceValidate"
         )
         self.CAS_LOGOUT_URL = _env_value("CAS_LOGOUT_URL")
-        self.CAS_SERVICE_URL = os.getenv(
-            "CAS_SERVICE_URL", f"{self.PUBLIC_BASE_URL}/auth/cas/callback"
-        )
+        self.CAS_SERVICE_URL = _env_value("CAS_SERVICE_URL") or f"{self.PUBLIC_BASE_URL}/auth/cas/callback"
         self.CAS_ENABLED = _env_bool("CAS_ENABLED", default=not self.DEV_MODE)
         if not self.QNA_MODEL_ARN:
             self.QNA_MODEL_ARN = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
