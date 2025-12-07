@@ -142,7 +142,7 @@ class AppConfig:
         self.PUBLIC_BASE_URL = public_base.rstrip("/")
         cas_base = os.getenv("CAS_BASE_URL", "https://asu.edu/cas").rstrip("/")
         self.CAS_BASE_URL = cas_base
-        self.CAS_LOGIN_URL = os.getenv("CAS_LOGIN_URL", f"{self.CAS_BASE_URL}/login")
+        self.CAS_LOGIN_URL = os.getenv("CAS_LOGIN_URL", f"{self.CAS_BASE_URL}/")
         self.CAS_VALIDATE_URL = os.getenv(
             "CAS_VALIDATE_URL", f"{self.CAS_BASE_URL}/serviceValidate"
         )
