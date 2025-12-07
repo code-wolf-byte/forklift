@@ -140,8 +140,8 @@ class AppConfig:
             "PUBLIC_BASE_URL", default=os.getenv("SAML_BASE_URL", "https://verify.devil2devil.asu.edu")
         )
         self.PUBLIC_BASE_URL = (public_base or "https://verify.devil2devil.asu.edu").rstrip("/")
-        cas_base_raw = _env_value("CAS_BASE_URL", default="https://verify.devil2devil.asu.edu/cas")
-        cas_base = (cas_base_raw or "https://verify.devil2devil.asu.edu/cas").strip().rstrip("/")
+        cas_base_raw = _env_value("CAS_BASE_URL", default="https://weblogin.asu.edu/cas")
+        cas_base = (cas_base_raw or "https://weblogin.asu.edu/cas").strip().rstrip("/")
         if not cas_base.startswith(("http://", "https://")):
             cas_base = f"https://{cas_base.lstrip('/')}"
         self.CAS_BASE_URL = cas_base
