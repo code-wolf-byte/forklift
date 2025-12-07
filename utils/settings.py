@@ -141,11 +141,21 @@ class AppConfig:
         )
         self.PUBLIC_BASE_URL = (public_base or "https://verify.devil2devil.asu.edu").rstrip("/")
         cas_base_raw = _env_value("CAS_BASE_URL", default="https://verify.devil2devil.asu.edu/cas")
-        self.CAS_BASE_URL = (cas_base_raw or "https://verify.devil2devil.asu.edu/cas").rstrip("/")
-        self.CAS_LOGIN_URL = _env_value("CAS_LOGIN_URL") or f"{self.CAS_BASE_URL}/login"
-        self.CAS_VALIDATE_URL = (
-            _env_value("CAS_VALIDATE_URL") or f"{self.CAS_BASE_URL}/serviceValidate"
-        )
+        cas_base = (cas_base_raw or "https://verify.devil2devil.asu.edu/cas").strip().rstrip("/")
+        if not cas_base.startswith(("http://", "https://")):
+            cas_base = f"https://{cas_base.lstrip('/')}"
+        self.CAS_BASE_URL = cas_base
+
+        cas_login_raw = _env_value("CAS_LOGIN_URL")
+        if cas_login_raw and not cas_login_raw.startswith(("http://", "https://")):
+            cas_login_raw = f"{self.CAS_BASE_URL.rstrip('/')}/{cas_login_raw.lstrip('/')}"
+        self.CAS_LOGIN_URL = cas_login_raw or f"{self.CAS_BASE_URL}/login"
+
+        cas_validate_raw = _env_value("CAS_VALIDATE_URL")
+        if cas_validate_raw and not cas_validate_raw.startswith(("http://", "https://")):
+            cas_validate_raw = f"{self.CAS_BASE_URL.rstrip('/')}/{cas_validate_raw.lstrip('/')}"
+        self.CAS_VALIDATE_URL = cas_validate_raw or f"{self.CAS_BASE_URL}/serviceValidate"
+
         self.CAS_LOGOUT_URL = _env_value("CAS_LOGOUT_URL")
         self.CAS_SERVICE_URL = _env_value("CAS_SERVICE_URL") or f"{self.PUBLIC_BASE_URL}/auth/cas/callback"
         self.CAS_ENABLED = _env_bool("CAS_ENABLED", default=not self.DEV_MODE)
