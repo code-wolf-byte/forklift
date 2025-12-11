@@ -44,6 +44,8 @@ class User(Base):
     discord_avatar = Column(String(255), nullable=True)
     verified = Column(Boolean, default=False, nullable=False)
     verified_at = Column(DateTime, nullable=True)
+    joined_at = Column(DateTime, nullable=True)
+    left_at = Column(DateTime, nullable=True)
     banned = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
@@ -113,24 +115,34 @@ class QnaModule(Base):
 
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
-    _ensure_banned_column()
+    _ensure_user_columns()
 
 
-def _ensure_banned_column() -> None:
+def _ensure_user_columns() -> None:
     inspector = inspect(engine)
     if not inspector.has_table(User.__tablename__):
         return
 
     columns = {col["name"] for col in inspector.get_columns(User.__tablename__)}
-    if "banned" in columns:
+
+    ddl_statements = []
+    if "banned" not in columns:
+        ddl = "ALTER TABLE users ADD COLUMN banned BOOLEAN NOT NULL DEFAULT 0"
+        if engine.dialect.name == "postgresql":
+            ddl = "ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN NOT NULL DEFAULT FALSE"
+        ddl_statements.append(ddl)
+
+    if "joined_at" not in columns:
+        ddl_statements.append("ALTER TABLE users ADD COLUMN joined_at DATETIME")
+    if "left_at" not in columns:
+        ddl_statements.append("ALTER TABLE users ADD COLUMN left_at DATETIME")
+
+    if not ddl_statements:
         return
 
-    ddl = "ALTER TABLE users ADD COLUMN banned BOOLEAN NOT NULL DEFAULT 0"
-    if engine.dialect.name == "postgresql":
-        ddl = "ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN NOT NULL DEFAULT FALSE"
-
     with engine.begin() as conn:
-        conn.execute(text(ddl))
+        for ddl in ddl_statements:
+            conn.execute(text(ddl))
 
 
 def get_session() -> Session:

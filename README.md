@@ -46,16 +46,13 @@ CAS_VALIDATE_URL=
 CAS_LOGOUT_URL=
 CAS_SERVICE_URL=https://verify.example.asu.edu/auth/cas/callback
 CAS_ENABLED=true
-# CAS attribute mapping (env names preserved for compatibility)
-SAML_ATTR_ASURITE=uid
-SAML_ATTR_EMAIL=mail
-SAML_ATTR_FULL_NAME=displayName
-SAML_ATTR_FIRST_NAME=givenName
-SAML_ATTR_LAST_NAME=sn
-SAML_ATTR_AFFILIATIONS=eduPersonAffiliation
-SAML_METADATA_PATH=/path/to/sp-metadata.xml
-SAML_IDP_METADATA=/path/to/idp-metadata.xml
-SAML_METADATA_VALIDITY_DAYS=365
+# CAS attribute mapping (prefers CAS_ATTR_*, falls back to SAML_ATTR_* for compatibility)
+CAS_ATTR_ASURITE=uid
+CAS_ATTR_EMAIL=mail
+CAS_ATTR_FULL_NAME=displayName
+CAS_ATTR_FIRST_NAME=givenName
+CAS_ATTR_LAST_NAME=sn
+CAS_ATTR_AFFILIATIONS=eduPersonAffiliation
 SFTP_UPLOAD_ENABLED=true
 SFTP_HOST=sftp.example.com
 SFTP_PORT=22
@@ -77,18 +74,6 @@ SFTP_TIMEOUT=30
    verified role to members who are already in the guild.
 4. The combined record is stored in the `users` table and the session is marked
    complete so the landing page shows the verified state.
-
-## Automated SAML metadata refresh
-
-Expose the generated service-provider metadata at `/saml/metadata`. Schedule the
-refresh command so the file regenerates before the `validUntil` timestamp:
-
-```cron
-0 0 * * * /path/to/venv/bin/python /path/to/project/utils/metadata.py --refresh-if-expired >> /var/log/forklift_metadata.log 2>&1
-```
-
-The CLI only writes a new file when the existing metadata is missing or expired.
-Adjust the interpreter path and logging location to match your deployment.
 
 ## SFTP email export
 

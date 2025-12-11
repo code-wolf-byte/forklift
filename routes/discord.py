@@ -158,6 +158,8 @@ def discord_callback():
 
             user.verified = True
             user.verified_at = datetime.utcnow()
+            if user.created_at != user.verified_at:
+                user.created_at = user.verified_at
     except DiscordAPIError as exc:
         logger.error("Discord integration failed for user %s: %s", discord_user_id, exc)
         return _oauth_failure(str(exc), 502)

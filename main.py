@@ -7,7 +7,7 @@ from typing import Callable
 
 from flask import Flask, redirect, render_template, session, url_for
 
-from cron import cron_manager, start_upload_scheduler
+from cron import start_upload_scheduler
 from routes.discord import discord_bp
 from routes.cas import cas_bp
 from utils.database import init_db
@@ -15,13 +15,8 @@ from utils.settings import CONFIG, DISCORD_CONFIG
 
 logging.basicConfig(level=logging.INFO)
 
-if CONFIG.SAML_ENABLED:
-    from routes.saml import saml_bp
-else:  # pragma: no cover - SAML disabled
-    saml_bp = None  # type: ignore[assignment]
 
-
-_should_start_metadata_scheduler: Callable[[], bool] = lambda: (
+_should_start_background_tasks: Callable[[], bool] = lambda: (
     os.environ.get("WERKZEUG_RUN_MAIN") in (None, "true")
 )
 
@@ -31,8 +26,20 @@ logger = logging.getLogger(__name__)
 
 
 _should_start_discord_bot: Callable[[], bool] = lambda: (
-    CONFIG.DISCORD_BOT_AUTOSTART and _should_start_metadata_scheduler()
+    CONFIG.DISCORD_BOT_AUTOSTART and _should_start_background_tasks()
 )
+
+
+class BlueprintRegistrar:
+    """Centralized blueprint registration."""
+
+    def __init__(self, *, cas_enabled: bool) -> None:
+        self.cas_enabled = cas_enabled
+
+    def register_all(self, app: Flask) -> None:
+        if self.cas_enabled:
+            app.register_blueprint(cas_bp)
+        app.register_blueprint(discord_bp)
 
 
 def _start_discord_bot_thread() -> None:
@@ -71,12 +78,7 @@ def _start_discord_bot_thread() -> None:
     logger.info("Started Discord bot background thread for guild %s", DISCORD_CONFIG.guild_id)
 
 
-if CONFIG.SAML_ENABLED:
-    cron_manager.run_jobs(
-        job_names=("refresh_saml_metadata",),
-        start_metadata_scheduler=_should_start_metadata_scheduler(),
-    )
-if _should_start_metadata_scheduler():
+if _should_start_background_tasks():
     start_upload_scheduler()
 init_db()
 if _should_start_discord_bot():
@@ -88,9 +90,8 @@ app.config["SESSION_COOKIE_NAME"] = CONFIG.SESSION_COOKIE_NAME
 app.config["SESSION_COOKIE_SECURE"] = CONFIG.SESSION_COOKIE_SECURE
 app.config["SESSION_COOKIE_SAMESITE"] = CONFIG.SESSION_COOKIE_SAMESITE
 
-if CONFIG.CAS_ENABLED:
-    app.register_blueprint(cas_bp)
-app.register_blueprint(discord_bp)
+registrar = BlueprintRegistrar(cas_enabled=CONFIG.CAS_ENABLED)
+registrar.register_all(app)
 
 
 @app.context_processor

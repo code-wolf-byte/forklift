@@ -1,4 +1,4 @@
-"""Application settings that are not specific to SAML metadata."""
+"""Application settings."""
 
 from __future__ import annotations
 
@@ -46,6 +46,16 @@ def _env_int(name: str, *, default: int) -> int:
         raise RuntimeError(f"Invalid integer for {name}: {raw}") from exc
 
 
+def _env_attr_list(
+    *env_names: str, default: Iterable[str] | None = None
+) -> List[str]:
+    """Return the first defined attr list from provided env names (fallback to default)."""
+    for name in env_names:
+        if os.getenv(name) is not None:
+            return _env_list(name, default=default)
+    return list(default) if default is not None else []
+
+
 @dataclass(slots=True)
 class AppConfig:
     """Expose high-level application configuration."""
@@ -71,7 +81,6 @@ class AppConfig:
     QNA_HELPER_ROLE_ID: str | None = _env_value("QNA_HELPER_ROLE_ID")
     AWS_ACCESS_KEY_ID: str | None = _env_value("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY: str | None = _env_value("AWS_SECRET_ACCESS_KEY")
-    SAML_ATTRIBUTE_MAP: Dict[str, List[str]] = field(init=False)
     SSO_ATTRIBUTE_MAP: Dict[str, List[str]] = field(init=False)
     PUBLIC_BASE_URL: str = field(init=False)
     CAS_BASE_URL: str = field(init=False)
@@ -137,17 +146,44 @@ class AppConfig:
             "eduPersonAffiliation",
             "urn:oid:1.3.6.1.4.1.5923.1.1.1.1",
         ]
-        self.SAML_ATTRIBUTE_MAP = {
-            "asurite": _env_list("SAML_ATTR_ASURITE", default=default_asurite),
-            "email": _env_list("SAML_ATTR_EMAIL", default=default_email),
-            "full_name": _env_list("SAML_ATTR_FULL_NAME", default=default_full_name),
-            "first_name": _env_list("SAML_ATTR_FIRST_NAME", default=default_first_name),
-            "last_name": _env_list("SAML_ATTR_LAST_NAME", default=default_last_name),
-            "affiliations": _env_list(
-                "SAML_ATTR_AFFILIATIONS", default=default_affiliations
+        self.SSO_ATTRIBUTE_MAP = {
+            "asurite": _env_attr_list(
+                "CAS_ATTR_ASURITE",
+                "SSO_ATTR_ASURITE",
+                "SAML_ATTR_ASURITE",
+                default=default_asurite,
+            ),
+            "email": _env_attr_list(
+                "CAS_ATTR_EMAIL",
+                "SSO_ATTR_EMAIL",
+                "SAML_ATTR_EMAIL",
+                default=default_email,
+            ),
+            "full_name": _env_attr_list(
+                "CAS_ATTR_FULL_NAME",
+                "SSO_ATTR_FULL_NAME",
+                "SAML_ATTR_FULL_NAME",
+                default=default_full_name,
+            ),
+            "first_name": _env_attr_list(
+                "CAS_ATTR_FIRST_NAME",
+                "SSO_ATTR_FIRST_NAME",
+                "SAML_ATTR_FIRST_NAME",
+                default=default_first_name,
+            ),
+            "last_name": _env_attr_list(
+                "CAS_ATTR_LAST_NAME",
+                "SSO_ATTR_LAST_NAME",
+                "SAML_ATTR_LAST_NAME",
+                default=default_last_name,
+            ),
+            "affiliations": _env_attr_list(
+                "CAS_ATTR_AFFILIATIONS",
+                "SSO_ATTR_AFFILIATIONS",
+                "SAML_ATTR_AFFILIATIONS",
+                default=default_affiliations,
             ),
         }
-        self.SSO_ATTRIBUTE_MAP = self.SAML_ATTRIBUTE_MAP
 
         public_base = _env_value(
             "PUBLIC_BASE_URL", default=os.getenv("SAML_BASE_URL", "https://verify.devil2devil.asu.edu")

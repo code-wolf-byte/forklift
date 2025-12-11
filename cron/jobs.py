@@ -9,26 +9,12 @@ from typing import Any, Callable, Iterable, List, Tuple
 
 from clients.sftp_client import SftpClient
 from utils.database import User, session_scope
-from utils.metadata import ensure_metadata_on_startup, start_metadata_scheduler
 from utils.settings import CONFIG, SFTP_CONFIG, SftpUploadConfig
 
 logger = logging.getLogger(__name__)
 
-# Cron job call signature. Jobs should accept **kwargs to stay flexible.
+# Cron job call signature.
 CronJob = Callable[..., None]
-
-
-def refresh_saml_metadata(*, start_scheduler: bool = True, **_: Any) -> None:
-    """Ensure SAML metadata exists and the refresh scheduler is running."""
-    if not CONFIG.SAML_ENABLED:
-        logger.info("SAML disabled; skipping metadata cron job")
-        return
-
-    ensure_metadata_on_startup()
-    if start_scheduler:
-        start_metadata_scheduler()
-
-    logger.info("SAML metadata ready; refresh scheduler %s", "started" if start_scheduler else "skipped")
 
 
 def _normalize_dt(value: datetime | None) -> datetime | None:
@@ -84,7 +70,7 @@ def _build_csv(rows: Iterable[Tuple[str, datetime]]) -> bytes:
     return buffer.getvalue().encode("utf-8")
 
 
-def upload_emails_to_sftp(*, start_scheduler: bool | None = None, **_: Any) -> None:
+def upload_emails_to_sftp() -> None:
     """Upload verified user emails to SFTP, only sending new rows since the last run."""
     if CONFIG.DEV_MODE:
         logger.info("FORKLIFT_DEV_MODE enabled; skipping SFTP upload")
@@ -116,7 +102,4 @@ def _upload_csv(config: SftpUploadConfig, payload: bytes, filename: str) -> str:
         return client.upload_bytes(payload, config.remote_dir, filename)
 
 
-AVAILABLE_JOBS: dict[str, CronJob] = {
-    "refresh_saml_metadata": refresh_saml_metadata,
-    "upload_emails_to_sftp": upload_emails_to_sftp,
-}
+AVAILABLE_JOBS: dict[str, CronJob] = {"upload_emails_to_sftp": upload_emails_to_sftp}

@@ -7,7 +7,7 @@ from typing import Callable, Iterable, Sequence
 
 from utils.settings import CONFIG, SFTP_CONFIG
 
-# Cron job call signature. Jobs should accept **kwargs to stay flexible.
+# Cron job call signature.
 CronJob = Callable[..., None]
 
 _UPLOAD_JOB: Sequence[str] = ("upload_emails_to_sftp",)
@@ -54,18 +54,16 @@ class CronManager:
         self,
         *,
         job_names: Iterable[str] | None = None,
-        start_metadata_scheduler: bool = True,
         raise_on_error: bool = True,
     ) -> bool:
         """Run the requested cron jobs, returning True on success."""
 
-        job_kwargs = {"start_scheduler": start_metadata_scheduler}
         failures: list[str] = []
 
         for name, job in self._resolve_jobs(job_names):
             self._logger.info("Running cron job: %s", name)
             try:
-                job(**job_kwargs)
+                job()
             except Exception:
                 self._logger.exception("Cron job failed: %s", name)
                 if raise_on_error:
@@ -81,7 +79,6 @@ class CronManager:
         *,
         job_names: Iterable[str],
         interval_seconds: float,
-        start_metadata_scheduler: bool = False,
         thread_name: str = "cron-scheduler",
     ) -> bool:
         """Start a background scheduler thread for the given jobs."""
@@ -93,7 +90,7 @@ class CronManager:
         self._stop_event.clear()
         self._scheduler_thread = threading.Thread(
             target=self._cron_loop,
-            args=(job_tuple, interval_seconds, start_metadata_scheduler),
+            args=(job_tuple, interval_seconds),
             name=thread_name,
             daemon=True,
         )
@@ -120,13 +117,11 @@ class CronManager:
         self,
         job_names: Iterable[str],
         interval_seconds: float,
-        start_metadata_scheduler: bool,
     ) -> None:
         while not self._stop_event.is_set():
             start = time.monotonic()
             self.run_jobs(
                 job_names=job_names,
-                start_metadata_scheduler=start_metadata_scheduler,
                 raise_on_error=False,
             )
             elapsed = time.monotonic() - start
@@ -151,7 +146,6 @@ def start_upload_scheduler(
     started = cron_manager.start_scheduler(
         job_names=_UPLOAD_JOB,
         interval_seconds=interval_seconds,
-        start_metadata_scheduler=False,
         thread_name="upload-emails-scheduler",
     )
     if started:

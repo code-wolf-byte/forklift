@@ -6,10 +6,10 @@ Utilities for registering and scheduling recurring jobs.
 
 - `CronManager` (in `cron/manager.py`): core registry and scheduler. Methods:
   - `register_job(name, callable)` / `register_jobs(dict)` to register jobs.
-  - `run_jobs(job_names=None, start_metadata_scheduler=True)` to run once.
-  - `start_scheduler(job_names, interval_seconds, start_metadata_scheduler=False, thread_name="cron-scheduler")` to launch a background loop.
+  - `run_jobs(job_names=None)` to run once.
+  - `start_scheduler(job_names, interval_seconds, thread_name="cron-scheduler")` to launch a background loop.
   - `stop_scheduler(timeout=5.0)` to stop the background loop.
-- `cron_manager` (from `cron/__init__.py`): shared instance with default jobs loaded from `cron/jobs.py`.
+- `cron_manager` (from `cron/__init__.py`): shared instance with default jobs loaded from `cron/jobs.py` (currently `upload_emails_to_sftp`).
 - `start_upload_scheduler(interval_seconds=86400)` / `stop_upload_scheduler(timeout=5.0)`: convenience wrappers that start/stop the daily `upload_emails_to_sftp` job, skipping itself when `DEV_MODE` is on or SFTP is not configured.
 
 ## Typical usage
@@ -23,7 +23,7 @@ from cron import cron_manager
 cron_manager.run_jobs()
 
 # Or run a subset
-cron_manager.run_jobs(job_names=("refresh_saml_metadata",))
+cron_manager.run_jobs(job_names=("upload_emails_to_sftp",))
 ```
 
 Start a background scheduler:
@@ -32,9 +32,8 @@ Start a background scheduler:
 from cron import cron_manager
 
 cron_manager.start_scheduler(
-    job_names=("refresh_saml_metadata",),
+    job_names=("upload_emails_to_sftp",),
     interval_seconds=3600,
-    start_metadata_scheduler=False,
 )
 ```
 
