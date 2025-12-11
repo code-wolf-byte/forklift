@@ -16,7 +16,7 @@ python main.py
 ```
 
 The server listens on `http://127.0.0.1:8000/`. Adjust values in `.env` to match
-your SAML metadata, Discord application, and cookie preferences.
+your CAS endpoints, Discord application, and cookie preferences.
 
 ## Required environment variables
 
@@ -39,6 +39,14 @@ DISCORD_SCOPE=identify
 DISCORD_TEST_GUILD_IDS=1082823852322725888
 DISCORD_SUCCESS_REDIRECT=/verified
 DISCORD_FAILURE_REDIRECT=/verification-error
+PUBLIC_BASE_URL=https://verify.example.asu.edu
+CAS_BASE_URL=https://cas.example.edu/cas
+CAS_LOGIN_URL=
+CAS_VALIDATE_URL=
+CAS_LOGOUT_URL=
+CAS_SERVICE_URL=https://verify.example.asu.edu/auth/cas/callback
+CAS_ENABLED=true
+# CAS attribute mapping (env names preserved for compatibility)
 SAML_ATTR_ASURITE=uid
 SAML_ATTR_EMAIL=mail
 SAML_ATTR_FULL_NAME=displayName
@@ -62,8 +70,7 @@ SFTP_TIMEOUT=30
 
 ## Verification flow
 
-1. `/auth/saml/login` starts ASU SSO and persists key identity attributes at the
-   Assertion Consumer Service (`/auth/saml/acs`).
+1. `/auth/cas/login` starts ASU SSO through CAS and persists key identity attributes when CAS returns to `/auth/cas/callback`.
 2. On success the browser continues to `/auth/discord/login` for Discord OAuth2
    consent.
 3. `/auth/discord/callback` exchanges the authorization code and assigns the

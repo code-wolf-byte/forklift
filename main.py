@@ -9,6 +9,7 @@ from flask import Flask, redirect, render_template, session, url_for
 
 from cron import cron_manager, start_upload_scheduler
 from routes.discord import discord_bp
+from routes.cas import cas_bp
 from utils.database import init_db
 from utils.settings import CONFIG, DISCORD_CONFIG
 
@@ -67,9 +68,7 @@ def _start_discord_bot_thread() -> None:
         target=_run_bot, name="discord-bot", daemon=True
     )
     _discord_bot_thread.start()
-    logger.info(
-        "Started Discord bot background thread for guild %s", DISCORD_CONFIG.guild_id
-    )
+    logger.info("Started Discord bot background thread for guild %s", DISCORD_CONFIG.guild_id)
 
 
 if CONFIG.SAML_ENABLED:
@@ -89,8 +88,8 @@ app.config["SESSION_COOKIE_NAME"] = CONFIG.SESSION_COOKIE_NAME
 app.config["SESSION_COOKIE_SECURE"] = CONFIG.SESSION_COOKIE_SECURE
 app.config["SESSION_COOKIE_SAMESITE"] = CONFIG.SESSION_COOKIE_SAMESITE
 
-if CONFIG.SAML_ENABLED and saml_bp is not None:
-    app.register_blueprint(saml_bp)
+if CONFIG.CAS_ENABLED:
+    app.register_blueprint(cas_bp)
 app.register_blueprint(discord_bp)
 
 
@@ -101,11 +100,11 @@ def inject_globals():
 
 def _verification_context() -> dict:
     verification_state = session.get("verification_state") or {}
-    saml_complete = bool(verification_state.get("saml_complete"))
+    cas_complete = bool(verification_state.get("cas_complete"))
     discord_complete = bool(
         verification_state.get("discord_complete") or verification_state.get("verified")
     )
-    saml_user = session.get("saml_user") or {}
+    cas_user = session.get("cas_user") or {}
     discord_user = session.get("discord_user") or {}
     student_profile = session.get("student_profile") or verification_state.get(
         "student_profile"
@@ -113,9 +112,9 @@ def _verification_context() -> dict:
     verification_error = session.pop("verification_error", None)
 
     try:
-        saml_login_url = url_for("saml.saml_login")
+        cas_login_url = url_for("cas.cas_login")
     except Exception:
-        saml_login_url = None
+        cas_login_url = None
 
     try:
         discord_login_url = url_for("discord.discord_login")
@@ -123,22 +122,22 @@ def _verification_context() -> dict:
         discord_login_url = None
 
     try:
-        logout_url = url_for("saml.saml_logout")
+        logout_url = url_for("cas.cas_logout")
     except Exception:
         logout_url = None
 
     context = {
         "verification_state": verification_state,
-        "saml_complete": saml_complete,
+        "cas_complete": cas_complete,
         "discord_complete": discord_complete,
-        "saml_user": saml_user,
+        "cas_user": cas_user,
         "discord_user": discord_user,
-        "saml_login_url": saml_login_url,
+        "cas_login_url": cas_login_url,
         "discord_login_url": discord_login_url,
         "verification_error": verification_error,
         "discord_configured": DISCORD_CONFIG is not None,
         "logout_url": logout_url,
-        "saml_enabled": CONFIG.SAML_ENABLED,
+        "cas_enabled": CONFIG.CAS_ENABLED,
         "student_profile": student_profile,
     }
     return context

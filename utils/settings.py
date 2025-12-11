@@ -72,7 +72,14 @@ class AppConfig:
     AWS_ACCESS_KEY_ID: str | None = _env_value("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY: str | None = _env_value("AWS_SECRET_ACCESS_KEY")
     SAML_ATTRIBUTE_MAP: Dict[str, List[str]] = field(init=False)
-    SAML_ENABLED: bool = field(init=False)
+    SSO_ATTRIBUTE_MAP: Dict[str, List[str]] = field(init=False)
+    PUBLIC_BASE_URL: str = field(init=False)
+    CAS_BASE_URL: str = field(init=False)
+    CAS_LOGIN_URL: str = field(init=False)
+    CAS_VALIDATE_URL: str = field(init=False)
+    CAS_LOGOUT_URL: str | None = field(init=False)
+    CAS_SERVICE_URL: str = field(init=False)
+    CAS_ENABLED: bool = field(init=False)
 
     def __post_init__(self) -> None:
         default_db_path = self.BASE_DIR / "forklift.db"
@@ -140,7 +147,31 @@ class AppConfig:
                 "SAML_ATTR_AFFILIATIONS", default=default_affiliations
             ),
         }
-        self.SAML_ENABLED = not self.DEV_MODE
+        self.SSO_ATTRIBUTE_MAP = self.SAML_ATTRIBUTE_MAP
+
+        public_base = _env_value(
+            "PUBLIC_BASE_URL", default=os.getenv("SAML_BASE_URL", "https://verify.devil2devil.asu.edu")
+        )
+        self.PUBLIC_BASE_URL = (public_base or "https://verify.devil2devil.asu.edu").rstrip("/")
+        cas_base_raw = _env_value("CAS_BASE_URL", default="https://weblogin.asu.edu/cas")
+        cas_base = (cas_base_raw or "https://weblogin.asu.edu/cas").strip().rstrip("/")
+        if not cas_base.startswith(("http://", "https://")):
+            cas_base = f"https://{cas_base.lstrip('/')}"
+        self.CAS_BASE_URL = cas_base
+
+        cas_login_raw = _env_value("CAS_LOGIN_URL")
+        if cas_login_raw and not cas_login_raw.startswith(("http://", "https://")):
+            cas_login_raw = f"{self.CAS_BASE_URL.rstrip('/')}/{cas_login_raw.lstrip('/')}"
+        self.CAS_LOGIN_URL = cas_login_raw or f"{self.CAS_BASE_URL}/login"
+
+        cas_validate_raw = _env_value("CAS_VALIDATE_URL")
+        if cas_validate_raw and not cas_validate_raw.startswith(("http://", "https://")):
+            cas_validate_raw = f"{self.CAS_BASE_URL.rstrip('/')}/{cas_validate_raw.lstrip('/')}"
+        self.CAS_VALIDATE_URL = cas_validate_raw or f"{self.CAS_BASE_URL}/serviceValidate"
+
+        self.CAS_LOGOUT_URL = _env_value("CAS_LOGOUT_URL")
+        self.CAS_SERVICE_URL = _env_value("CAS_SERVICE_URL") or f"{self.PUBLIC_BASE_URL}/auth/cas/callback"
+        self.CAS_ENABLED = _env_bool("CAS_ENABLED", default=not self.DEV_MODE)
         if not self.QNA_MODEL_ARN:
             self.QNA_MODEL_ARN = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
 
