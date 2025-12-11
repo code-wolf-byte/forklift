@@ -3,9 +3,11 @@ import logging
 import os
 import threading
 from datetime import datetime
+from typing import Callable
 
 from flask import Flask, redirect, render_template, session, url_for
 
+from cron import cron_manager, start_upload_scheduler
 from routes.discord import discord_bp
 from routes.cas import cas_bp
 from utils.database import init_db
@@ -13,19 +15,24 @@ from utils.settings import CONFIG, DISCORD_CONFIG
 
 logging.basicConfig(level=logging.INFO)
 
-def _should_start_background_workers() -> bool:
-    flag = os.environ.get("WERKZEUG_RUN_MAIN")
-    return flag is None or flag == "true"
+if CONFIG.SAML_ENABLED:
+    from routes.saml import saml_bp
+else:  # pragma: no cover - SAML disabled
+    saml_bp = None  # type: ignore[assignment]
+
+
+_should_start_metadata_scheduler: Callable[[], bool] = lambda: (
+    os.environ.get("WERKZEUG_RUN_MAIN") in (None, "true")
+)
 
 
 _discord_bot_thread: threading.Thread | None = None
 logger = logging.getLogger(__name__)
 
 
-def _should_start_discord_bot() -> bool:
-    if not CONFIG.DISCORD_BOT_AUTOSTART:
-        return False
-    return _should_start_background_workers()
+_should_start_discord_bot: Callable[[], bool] = lambda: (
+    CONFIG.DISCORD_BOT_AUTOSTART and _should_start_metadata_scheduler()
+)
 
 
 def _start_discord_bot_thread() -> None:
@@ -64,6 +71,13 @@ def _start_discord_bot_thread() -> None:
     logger.info("Started Discord bot background thread for guild %s", DISCORD_CONFIG.guild_id)
 
 
+if CONFIG.SAML_ENABLED:
+    cron_manager.run_jobs(
+        job_names=("refresh_saml_metadata",),
+        start_metadata_scheduler=_should_start_metadata_scheduler(),
+    )
+if _should_start_metadata_scheduler():
+    start_upload_scheduler()
 init_db()
 if _should_start_discord_bot():
     _start_discord_bot_thread()
@@ -130,7 +144,7 @@ def _verification_context() -> dict:
 
 
 @app.route("/")
-def hello_world():
+def index():
     context = _verification_context()
     return render_template("index.html", **context)
 

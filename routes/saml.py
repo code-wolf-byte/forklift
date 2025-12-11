@@ -4,6 +4,7 @@ import json
 import logging
 from typing import Iterable, Mapping
 
+from clients.saml_client import saml_client
 from flask import (
     Blueprint,
     make_response,
@@ -13,23 +14,15 @@ from flask import (
     url_for,
 )
 from saml2 import BINDING_HTTP_POST, BINDING_HTTP_REDIRECT
-from saml2.client import Saml2Client
-from saml2.config import Config
 from saml2.response import StatusAuthnFailed, StatusError
 from sqlalchemy import select
 
 from utils.database import User, session_scope
-from utils.metadata import METADATA_CONFIG, ensure_metadata_on_startup
+from utils.metadata import ensure_metadata_on_startup
 from utils.settings import CONFIG
 
 saml_bp = Blueprint("saml", __name__)
 logger = logging.getLogger(__name__)
-
-
-def _build_saml_client() -> Saml2Client:
-    cfg = Config()
-    cfg.load(METADATA_CONFIG.SAML_CONFIG)
-    return Saml2Client(config=cfg)
 
 
 def _first_attribute(
@@ -52,9 +45,8 @@ def _safe_redirect(target: str | None) -> str | None:
 @saml_bp.route("/auth/saml/login")
 def saml_login():
     relay_state = request.args.get("next")
-    client = _build_saml_client()
 
-    session_id, result = client.prepare_for_authenticate(
+    session_id, result = saml_client.prepare_for_authenticate(
         relay_state=relay_state,
         binding=BINDING_HTTP_REDIRECT,
     )
@@ -83,7 +75,6 @@ def saml_acs():
     if not saml_response:
         return "Missing SAMLResponse", 400
 
-    client = _build_saml_client()
     request_id = session.pop("saml_request_id", None)
     relay_state = request.form.get("RelayState") or request.args.get("RelayState")
 
@@ -92,7 +83,7 @@ def saml_acs():
         outstanding_queries = {request_id: {"relay_state": relay_state}}
 
     try:
-        authn_response = client.parse_authn_request_response(
+        authn_response = saml_client.parse_authn_request_response(
             saml_response,
             BINDING_HTTP_POST,
             outstanding=outstanding_queries,

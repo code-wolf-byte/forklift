@@ -53,6 +53,19 @@ SAML_ATTR_FULL_NAME=displayName
 SAML_ATTR_FIRST_NAME=givenName
 SAML_ATTR_LAST_NAME=sn
 SAML_ATTR_AFFILIATIONS=eduPersonAffiliation
+SAML_METADATA_PATH=/path/to/sp-metadata.xml
+SAML_IDP_METADATA=/path/to/idp-metadata.xml
+SAML_METADATA_VALIDITY_DAYS=365
+SFTP_UPLOAD_ENABLED=true
+SFTP_HOST=sftp.example.com
+SFTP_PORT=22
+SFTP_USERNAME=forklift
+SFTP_PASSWORD=super-secret
+SFTP_KEY_FILE=/path/to/private/key
+SFTP_REMOTE_DIR=/incoming/forklift
+SFTP_FILENAME_PREFIX=emails
+SFTP_STATE_PATH=/app/data/upload_emails_to_sftp.state
+SFTP_TIMEOUT=30
 ```
 
 ## Verification flow
@@ -64,6 +77,27 @@ SAML_ATTR_AFFILIATIONS=eduPersonAffiliation
    verified role to members who are already in the guild.
 4. The combined record is stored in the `users` table and the session is marked
    complete so the landing page shows the verified state.
+
+## Automated SAML metadata refresh
+
+Expose the generated service-provider metadata at `/saml/metadata`. Schedule the
+refresh command so the file regenerates before the `validUntil` timestamp:
+
+```cron
+0 0 * * * /path/to/venv/bin/python /path/to/project/utils/metadata.py --refresh-if-expired >> /var/log/forklift_metadata.log 2>&1
+```
+
+The CLI only writes a new file when the existing metadata is missing or expired.
+Adjust the interpreter path and logging location to match your deployment.
+
+## SFTP email export
+
+When `SFTP_UPLOAD_ENABLED=true`, the app starts a daily scheduler that uploads a
+CSV of verified users (`email,verified_at`) over SFTP to `SFTP_REMOTE_DIR`. The
+first run sends all verified users; subsequent runs send only those verified
+since the previous upload. A state file (default:
+`/app/data/upload_emails_to_sftp.state`) tracks the last successful upload.
+Provide either `SFTP_PASSWORD` or `SFTP_KEY_FILE` for authentication.
 
 ## Discord bot
 
