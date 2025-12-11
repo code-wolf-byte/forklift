@@ -79,8 +79,10 @@ def _start_discord_bot_thread() -> None:
 
 
 if _should_start_background_tasks():
+    init_db()
     start_upload_scheduler()
-init_db()
+else:
+    init_db()
 if _should_start_discord_bot():
     _start_discord_bot_thread()
 
