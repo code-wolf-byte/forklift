@@ -59,8 +59,8 @@ SFTP_PORT=22
 SFTP_USERNAME=forklift
 SFTP_PASSWORD=super-secret
 SFTP_KEY_FILE=/path/to/private/key
-SFTP_REMOTE_DIR=/incoming/forklift
-SFTP_FILENAME_PREFIX=emails
+SFTP_REMOTE_DIR=/Export
+SFTP_FILENAME_PREFIX=D2D_Verified
 SFTP_STATE_PATH=/app/data/upload_emails_to_sftp.state
 SFTP_TIMEOUT=30
 ```
@@ -78,7 +78,8 @@ SFTP_TIMEOUT=30
 ## SFTP email export
 
 When `SFTP_UPLOAD_ENABLED=true`, the app starts a daily scheduler that uploads a
-CSV of verified users (`email,verified_at`) over SFTP to `SFTP_REMOTE_DIR`. The
+CSV of verified users (`email,verified_at`) over SFTP to `SFTP_REMOTE_DIR`
+(default: `/Export`). Filenames default to `D2D_Verified_YYYYMMDD.csv`. The
 first run sends all verified users; subsequent runs send only those verified
 since the previous upload. A state file (default:
 `/app/data/upload_emails_to_sftp.state`) tracks the last successful upload.

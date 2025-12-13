@@ -289,8 +289,8 @@ class SftpUploadConfig:
     password: str | None
     port: int = 22
     key_file: Path | None = None
-    remote_dir: str = "/"
-    filename_prefix: str = "emails"
+    remote_dir: str = "/Export"
+    filename_prefix: str = "D2D_Verified"
     timeout: int = 30
     state_path: Path = field(
         default_factory=lambda: Path(__file__).resolve().parent.parent
@@ -318,8 +318,8 @@ class SftpUploadConfig:
 
         port = _env_int("SFTP_PORT", default=22)
         timeout = _env_int("SFTP_TIMEOUT", default=30)
-        remote_dir = _env_value("SFTP_REMOTE_DIR", default="/") or "/"
-        filename_prefix = _env_value("SFTP_FILENAME_PREFIX", default="emails") or "emails"
+        remote_dir = _env_value("SFTP_REMOTE_DIR", default="/Export") or "/Export"
+        filename_prefix = _env_value("SFTP_FILENAME_PREFIX", default="D2D_Verified") or "D2D_Verified"
         state_path_raw = _env_value("SFTP_STATE_PATH")
         state_path = (
             Path(state_path_raw)
