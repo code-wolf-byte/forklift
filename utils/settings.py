@@ -1,4 +1,4 @@
-"""Application settings that are not specific to SAML metadata."""
+"""Application settings."""
 
 from __future__ import annotations
 
@@ -33,6 +33,29 @@ def _env_list(
     return [item for item in items if item]
 
 
+def _env_int(name: str, *, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    raw = raw.strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid integer for {name}: {raw}") from exc
+
+
+def _env_attr_list(
+    *env_names: str, default: Iterable[str] | None = None
+) -> List[str]:
+    """Return the first defined attr list from provided env names (fallback to default)."""
+    for name in env_names:
+        if os.getenv(name) is not None:
+            return _env_list(name, default=default)
+    return list(default) if default is not None else []
+
+
 @dataclass(slots=True)
 class AppConfig:
     """Expose high-level application configuration."""
@@ -58,8 +81,14 @@ class AppConfig:
     QNA_HELPER_ROLE_ID: str | None = _env_value("QNA_HELPER_ROLE_ID")
     AWS_ACCESS_KEY_ID: str | None = _env_value("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY: str | None = _env_value("AWS_SECRET_ACCESS_KEY")
-    SAML_ATTRIBUTE_MAP: Dict[str, List[str]] = field(init=False)
-    SAML_ENABLED: bool = field(init=False)
+    SSO_ATTRIBUTE_MAP: Dict[str, List[str]] = field(init=False)
+    PUBLIC_BASE_URL: str = field(init=False)
+    CAS_BASE_URL: str = field(init=False)
+    CAS_LOGIN_URL: str = field(init=False)
+    CAS_VALIDATE_URL: str = field(init=False)
+    CAS_LOGOUT_URL: str | None = field(init=False)
+    CAS_SERVICE_URL: str = field(init=False)
+    CAS_ENABLED: bool = field(init=False)
 
     def __post_init__(self) -> None:
         default_db_path = self.BASE_DIR / "forklift.db"
@@ -117,17 +146,68 @@ class AppConfig:
             "eduPersonAffiliation",
             "urn:oid:1.3.6.1.4.1.5923.1.1.1.1",
         ]
-        self.SAML_ATTRIBUTE_MAP = {
-            "asurite": _env_list("SAML_ATTR_ASURITE", default=default_asurite),
-            "email": _env_list("SAML_ATTR_EMAIL", default=default_email),
-            "full_name": _env_list("SAML_ATTR_FULL_NAME", default=default_full_name),
-            "first_name": _env_list("SAML_ATTR_FIRST_NAME", default=default_first_name),
-            "last_name": _env_list("SAML_ATTR_LAST_NAME", default=default_last_name),
-            "affiliations": _env_list(
-                "SAML_ATTR_AFFILIATIONS", default=default_affiliations
+        self.SSO_ATTRIBUTE_MAP = {
+            "asurite": _env_attr_list(
+                "CAS_ATTR_ASURITE",
+                "SSO_ATTR_ASURITE",
+                "SAML_ATTR_ASURITE",
+                default=default_asurite,
+            ),
+            "email": _env_attr_list(
+                "CAS_ATTR_EMAIL",
+                "SSO_ATTR_EMAIL",
+                "SAML_ATTR_EMAIL",
+                default=default_email,
+            ),
+            "full_name": _env_attr_list(
+                "CAS_ATTR_FULL_NAME",
+                "SSO_ATTR_FULL_NAME",
+                "SAML_ATTR_FULL_NAME",
+                default=default_full_name,
+            ),
+            "first_name": _env_attr_list(
+                "CAS_ATTR_FIRST_NAME",
+                "SSO_ATTR_FIRST_NAME",
+                "SAML_ATTR_FIRST_NAME",
+                default=default_first_name,
+            ),
+            "last_name": _env_attr_list(
+                "CAS_ATTR_LAST_NAME",
+                "SSO_ATTR_LAST_NAME",
+                "SAML_ATTR_LAST_NAME",
+                default=default_last_name,
+            ),
+            "affiliations": _env_attr_list(
+                "CAS_ATTR_AFFILIATIONS",
+                "SSO_ATTR_AFFILIATIONS",
+                "SAML_ATTR_AFFILIATIONS",
+                default=default_affiliations,
             ),
         }
-        self.SAML_ENABLED = not self.DEV_MODE
+
+        public_base = _env_value(
+            "PUBLIC_BASE_URL", default=os.getenv("SAML_BASE_URL", "https://verify.devil2devil.asu.edu")
+        )
+        self.PUBLIC_BASE_URL = (public_base or "https://verify.devil2devil.asu.edu").rstrip("/")
+        cas_base_raw = _env_value("CAS_BASE_URL", default="https://weblogin.asu.edu/cas")
+        cas_base = (cas_base_raw or "https://weblogin.asu.edu/cas").strip().rstrip("/")
+        if not cas_base.startswith(("http://", "https://")):
+            cas_base = f"https://{cas_base.lstrip('/')}"
+        self.CAS_BASE_URL = cas_base
+
+        cas_login_raw = _env_value("CAS_LOGIN_URL")
+        if cas_login_raw and not cas_login_raw.startswith(("http://", "https://")):
+            cas_login_raw = f"{self.CAS_BASE_URL.rstrip('/')}/{cas_login_raw.lstrip('/')}"
+        self.CAS_LOGIN_URL = cas_login_raw or f"{self.CAS_BASE_URL}/login"
+
+        cas_validate_raw = _env_value("CAS_VALIDATE_URL")
+        if cas_validate_raw and not cas_validate_raw.startswith(("http://", "https://")):
+            cas_validate_raw = f"{self.CAS_BASE_URL.rstrip('/')}/{cas_validate_raw.lstrip('/')}"
+        self.CAS_VALIDATE_URL = cas_validate_raw or f"{self.CAS_BASE_URL}/serviceValidate"
+
+        self.CAS_LOGOUT_URL = _env_value("CAS_LOGOUT_URL")
+        self.CAS_SERVICE_URL = _env_value("CAS_SERVICE_URL") or f"{self.PUBLIC_BASE_URL}/auth/cas/callback"
+        self.CAS_ENABLED = _env_bool("CAS_ENABLED", default=not self.DEV_MODE)
         if not self.QNA_MODEL_ARN:
             self.QNA_MODEL_ARN = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
 
@@ -198,6 +278,73 @@ try:
     DISCORD_CONFIG = DiscordConfig.from_env()
 except RuntimeError:
     DISCORD_CONFIG = None  # type: ignore[assignment]
+
+
+@dataclass(slots=True)
+class SftpUploadConfig:
+    """Configuration for uploading CSVs over SFTP."""
+
+    host: str
+    username: str
+    password: str | None
+    port: int = 22
+    key_file: Path | None = None
+    remote_dir: str = "/Export"
+    filename_prefix: str = "D2D_Verified"
+    timeout: int = 30
+    state_path: Path = field(
+        default_factory=lambda: Path(__file__).resolve().parent.parent
+        / "data"
+        / "upload_emails_to_sftp.state"
+    )
+
+    @classmethod
+    def from_env(cls) -> "SftpUploadConfig":
+        enabled = _env_bool("SFTP_UPLOAD_ENABLED", default=False)
+        if not enabled:
+            raise RuntimeError("SFTP uploads disabled")
+
+        host = _env_value("SFTP_HOST")
+        username = _env_value("SFTP_USERNAME")
+        password = _env_value("SFTP_PASSWORD")
+        key_file_raw = _env_value("SFTP_KEY_FILE")
+
+        missing = [name for name, value in {"SFTP_HOST": host, "SFTP_USERNAME": username}.items() if value is None]
+        if missing:
+            missing_vars = ", ".join(missing)
+            raise RuntimeError(f"Missing SFTP environment variables: {missing_vars}")
+        if password is None and key_file_raw is None:
+            raise RuntimeError("Missing SFTP_PASSWORD or SFTP_KEY_FILE")
+
+        port = _env_int("SFTP_PORT", default=22)
+        timeout = _env_int("SFTP_TIMEOUT", default=30)
+        remote_dir = _env_value("SFTP_REMOTE_DIR", default="/Export") or "/Export"
+        filename_prefix = _env_value("SFTP_FILENAME_PREFIX", default="D2D_Verified") or "D2D_Verified"
+        state_path_raw = _env_value("SFTP_STATE_PATH")
+        state_path = (
+            Path(state_path_raw)
+            if state_path_raw
+            else Path(__file__).resolve().parent.parent / "data" / "upload_emails_to_sftp.state"
+        )
+        key_file = Path(key_file_raw) if key_file_raw else None
+
+        return cls(
+            host=host,
+            username=username,
+            password=password,
+            port=port,
+            key_file=key_file,
+            remote_dir=remote_dir,
+            filename_prefix=filename_prefix,
+            timeout=timeout,
+            state_path=state_path,
+        )
+
+
+try:
+    SFTP_CONFIG = SftpUploadConfig.from_env()
+except RuntimeError:
+    SFTP_CONFIG = None  # type: ignore[assignment]
 
 
 __all__ = ["CONFIG", "DISCORD_CONFIG", "DiscordConfig", "AppConfig"]

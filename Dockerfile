@@ -16,6 +16,7 @@ RUN apt-get update \
         libxmlsec1 \
         libxmlsec1-dev \
         libxmlsec1-openssl \
+        openssh-client \
         pkg-config \
         xmlsec1 \
     && rm -rf /var/lib/apt/lists/*

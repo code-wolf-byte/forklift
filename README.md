@@ -16,7 +16,7 @@ python main.py
 ```
 
 The server listens on `http://127.0.0.1:8000/`. Adjust values in `.env` to match
-your SAML metadata, Discord application, and cookie preferences.
+your CAS endpoints, Discord application, and cookie preferences.
 
 ## Required environment variables
 
@@ -39,21 +39,35 @@ DISCORD_SCOPE=identify
 DISCORD_TEST_GUILD_IDS=1082823852322725888
 DISCORD_SUCCESS_REDIRECT=/verified
 DISCORD_FAILURE_REDIRECT=/verification-error
-SAML_ATTR_ASURITE=uid
-SAML_ATTR_EMAIL=mail
-SAML_ATTR_FULL_NAME=displayName
-SAML_ATTR_FIRST_NAME=givenName
-SAML_ATTR_LAST_NAME=sn
-SAML_ATTR_AFFILIATIONS=eduPersonAffiliation
-SAML_METADATA_PATH=/path/to/sp-metadata.xml
-SAML_IDP_METADATA=/path/to/idp-metadata.xml
-SAML_METADATA_VALIDITY_DAYS=365
+PUBLIC_BASE_URL=https://verify.example.asu.edu
+CAS_BASE_URL=https://cas.example.edu/cas
+CAS_LOGIN_URL=
+CAS_VALIDATE_URL=
+CAS_LOGOUT_URL=
+CAS_SERVICE_URL=https://verify.example.asu.edu/auth/cas/callback
+CAS_ENABLED=true
+# CAS attribute mapping (prefers CAS_ATTR_*, falls back to SAML_ATTR_* for compatibility)
+CAS_ATTR_ASURITE=uid
+CAS_ATTR_EMAIL=mail
+CAS_ATTR_FULL_NAME=displayName
+CAS_ATTR_FIRST_NAME=givenName
+CAS_ATTR_LAST_NAME=sn
+CAS_ATTR_AFFILIATIONS=eduPersonAffiliation
+SFTP_UPLOAD_ENABLED=true
+SFTP_HOST=sftp.example.com
+SFTP_PORT=22
+SFTP_USERNAME=forklift
+SFTP_PASSWORD=super-secret
+SFTP_KEY_FILE=/path/to/private/key
+SFTP_REMOTE_DIR=/Export
+SFTP_FILENAME_PREFIX=D2D_Verified
+SFTP_STATE_PATH=/app/data/upload_emails_to_sftp.state
+SFTP_TIMEOUT=30
 ```
 
 ## Verification flow
 
-1. `/auth/saml/login` starts ASU SSO and persists key identity attributes at the
-   Assertion Consumer Service (`/auth/saml/acs`).
+1. `/auth/cas/login` starts ASU SSO through CAS and persists key identity attributes when CAS returns to `/auth/cas/callback`.
 2. On success the browser continues to `/auth/discord/login` for Discord OAuth2
    consent.
 3. `/auth/discord/callback` exchanges the authorization code and assigns the
@@ -61,17 +75,15 @@ SAML_METADATA_VALIDITY_DAYS=365
 4. The combined record is stored in the `users` table and the session is marked
    complete so the landing page shows the verified state.
 
-## Automated SAML metadata refresh
+## SFTP email export
 
-Expose the generated service-provider metadata at `/saml/metadata`. Schedule the
-refresh command so the file regenerates before the `validUntil` timestamp:
-
-```cron
-0 0 * * * /path/to/venv/bin/python /path/to/project/utils/metadata.py --refresh-if-expired >> /var/log/forklift_metadata.log 2>&1
-```
-
-The CLI only writes a new file when the existing metadata is missing or expired.
-Adjust the interpreter path and logging location to match your deployment.
+When `SFTP_UPLOAD_ENABLED=true`, the app starts a daily scheduler that uploads a
+CSV of verified users (`email,verified_at`) over SFTP to `SFTP_REMOTE_DIR`
+(default: `/Export`). Filenames default to `D2D_Verified_YYYYMMDD.csv`. The
+first run sends all verified users; subsequent runs send only those verified
+since the previous upload. A state file (default:
+`/app/data/upload_emails_to_sftp.state`) tracks the last successful upload.
+Provide either `SFTP_PASSWORD` or `SFTP_KEY_FILE` for authentication.
 
 ## Discord bot
 

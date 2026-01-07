@@ -3,35 +3,43 @@ import logging
 import os
 import threading
 from datetime import datetime
+from typing import Callable
 
 from flask import Flask, redirect, render_template, session, url_for
 
+from cron import start_upload_scheduler
 from routes.discord import discord_bp
+from routes.cas import cas_bp
 from utils.database import init_db
-from utils.metadata import ensure_metadata_on_startup, start_metadata_scheduler
 from utils.settings import CONFIG, DISCORD_CONFIG
 
 logging.basicConfig(level=logging.INFO)
 
-if CONFIG.SAML_ENABLED:
-    from routes.saml import saml_bp
-else:  # pragma: no cover - SAML disabled
-    saml_bp = None  # type: ignore[assignment]
 
-
-def _should_start_metadata_scheduler() -> bool:
-    flag = os.environ.get("WERKZEUG_RUN_MAIN")
-    return flag is None or flag == "true"
+_should_start_background_tasks: Callable[[], bool] = lambda: (
+    os.environ.get("WERKZEUG_RUN_MAIN") in (None, "true")
+)
 
 
 _discord_bot_thread: threading.Thread | None = None
 logger = logging.getLogger(__name__)
 
 
-def _should_start_discord_bot() -> bool:
-    if not CONFIG.DISCORD_BOT_AUTOSTART:
-        return False
-    return _should_start_metadata_scheduler()
+_should_start_discord_bot: Callable[[], bool] = lambda: (
+    CONFIG.DISCORD_BOT_AUTOSTART and _should_start_background_tasks()
+)
+
+
+class BlueprintRegistrar:
+    """Centralized blueprint registration."""
+
+    def __init__(self, *, cas_enabled: bool) -> None:
+        self.cas_enabled = cas_enabled
+
+    def register_all(self, app: Flask) -> None:
+        if self.cas_enabled:
+            app.register_blueprint(cas_bp)
+        app.register_blueprint(discord_bp)
 
 
 def _start_discord_bot_thread() -> None:
@@ -67,16 +75,14 @@ def _start_discord_bot_thread() -> None:
         target=_run_bot, name="discord-bot", daemon=True
     )
     _discord_bot_thread.start()
-    logger.info(
-        "Started Discord bot background thread for guild %s", DISCORD_CONFIG.guild_id
-    )
+    logger.info("Started Discord bot background thread for guild %s", DISCORD_CONFIG.guild_id)
 
 
-if CONFIG.SAML_ENABLED:
-    ensure_metadata_on_startup()
-init_db()
-if CONFIG.SAML_ENABLED and _should_start_metadata_scheduler():
-    start_metadata_scheduler()
+if _should_start_background_tasks():
+    init_db()
+    start_upload_scheduler()
+else:
+    init_db()
 if _should_start_discord_bot():
     _start_discord_bot_thread()
 
@@ -86,9 +92,8 @@ app.config["SESSION_COOKIE_NAME"] = CONFIG.SESSION_COOKIE_NAME
 app.config["SESSION_COOKIE_SECURE"] = CONFIG.SESSION_COOKIE_SECURE
 app.config["SESSION_COOKIE_SAMESITE"] = CONFIG.SESSION_COOKIE_SAMESITE
 
-if CONFIG.SAML_ENABLED and saml_bp is not None:
-    app.register_blueprint(saml_bp)
-app.register_blueprint(discord_bp)
+registrar = BlueprintRegistrar(cas_enabled=CONFIG.CAS_ENABLED)
+registrar.register_all(app)
 
 
 @app.context_processor
@@ -98,11 +103,11 @@ def inject_globals():
 
 def _verification_context() -> dict:
     verification_state = session.get("verification_state") or {}
-    saml_complete = bool(verification_state.get("saml_complete"))
+    cas_complete = bool(verification_state.get("cas_complete"))
     discord_complete = bool(
         verification_state.get("discord_complete") or verification_state.get("verified")
     )
-    saml_user = session.get("saml_user") or {}
+    cas_user = session.get("cas_user") or {}
     discord_user = session.get("discord_user") or {}
     student_profile = session.get("student_profile") or verification_state.get(
         "student_profile"
@@ -110,9 +115,9 @@ def _verification_context() -> dict:
     verification_error = session.pop("verification_error", None)
 
     try:
-        saml_login_url = url_for("saml.saml_login")
+        cas_login_url = url_for("cas.cas_login")
     except Exception:
-        saml_login_url = None
+        cas_login_url = None
 
     try:
         discord_login_url = url_for("discord.discord_login")
@@ -120,29 +125,29 @@ def _verification_context() -> dict:
         discord_login_url = None
 
     try:
-        logout_url = url_for("saml.saml_logout")
+        logout_url = url_for("cas.cas_logout")
     except Exception:
         logout_url = None
 
     context = {
         "verification_state": verification_state,
-        "saml_complete": saml_complete,
+        "cas_complete": cas_complete,
         "discord_complete": discord_complete,
-        "saml_user": saml_user,
+        "cas_user": cas_user,
         "discord_user": discord_user,
-        "saml_login_url": saml_login_url,
+        "cas_login_url": cas_login_url,
         "discord_login_url": discord_login_url,
         "verification_error": verification_error,
         "discord_configured": DISCORD_CONFIG is not None,
         "logout_url": logout_url,
-        "saml_enabled": CONFIG.SAML_ENABLED,
+        "cas_enabled": CONFIG.CAS_ENABLED,
         "student_profile": student_profile,
     }
     return context
 
 
 @app.route("/")
-def hello_world():
+def index():
     context = _verification_context()
     return render_template("index.html", **context)
 

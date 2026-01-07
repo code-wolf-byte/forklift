@@ -33,17 +33,17 @@ def _oauth_failure(message: str, status_code: int = 400):
 
 @discord_bp.route("/auth/discord/login")
 def discord_login():
-    if not CONFIG.SAML_ENABLED:
-        logger.info("Discord login requested while SAML is disabled")
+    if not CONFIG.CAS_ENABLED:
+        logger.info("Discord login requested while CAS is disabled")
         return _oauth_failure("ASU single sign-on is disabled in this environment", 503)
     if DISCORD_CONFIG is None:
         logger.error("Discord login attempted without configuration")
         return _oauth_failure("Discord integration is not configured", 503)
 
     verification_state = session.get("verification_state")
-    if not verification_state or not verification_state.get("saml_complete"):
-        logger.info("Discord login requested without SAML completion")
-        return redirect(url_for("saml.saml_login"))
+    if not verification_state or not verification_state.get("cas_complete"):
+        logger.info("Discord login requested without CAS completion")
+        return redirect(url_for("cas.cas_login"))
 
     user_id = verification_state.get("user_id")
     if user_id:
@@ -62,9 +62,9 @@ def discord_login():
 
 @discord_bp.route("/auth/discord/callback")
 def discord_callback():
-    if not CONFIG.SAML_ENABLED:
-        logger.error("Discord callback invoked while SAML is disabled")
-        return _oauth_failure("SAML verification is disabled in this environment", 503)
+    if not CONFIG.CAS_ENABLED:
+        logger.error("Discord callback invoked while CAS is disabled")
+        return _oauth_failure("CAS verification is disabled in this environment", 503)
     if DISCORD_CONFIG is None:
         logger.error("Discord callback invoked without configuration")
         return _oauth_failure("Discord integration is not configured", 503)
@@ -90,10 +90,10 @@ def discord_callback():
         return _oauth_failure("Missing Discord authorization code", 400)
 
     verification_state = session.get("verification_state") or {}
-    if not verification_state.get("saml_complete"):
-        logger.error("Discord callback without completed SAML verification")
+    if not verification_state.get("cas_complete"):
+        logger.error("Discord callback without completed CAS verification")
         return _oauth_failure(
-            "SAML verification must be completed before Discord linking", 400
+            "CAS verification must be completed before Discord linking", 400
         )
 
     user_db_id = verification_state.get("user_id")
@@ -158,6 +158,8 @@ def discord_callback():
 
             user.verified = True
             user.verified_at = datetime.utcnow()
+            if user.created_at != user.verified_at:
+                user.created_at = user.verified_at
     except DiscordAPIError as exc:
         logger.error("Discord integration failed for user %s: %s", discord_user_id, exc)
         return _oauth_failure(str(exc), 502)

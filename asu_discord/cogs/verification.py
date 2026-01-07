@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any, Optional
 
 import discord
@@ -335,6 +336,44 @@ class VerificationCog(commands.Cog):
             )
         else:
             logger.info("VerificationCog ready in guild %s (%s)", guild.id, guild.name)
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member) -> None:
+        """Track when a linked Discord user joins the guild."""
+        if member.guild.id != self.guild_id:
+            return
+
+        with session_scope() as session:
+            user = (
+                session.query(User)
+                .filter(User.discord_user_id == str(member.id))
+                .one_or_none()
+            )
+            if user is None:
+                return
+
+            user.joined_at = datetime.utcnow()
+            user.left_at = None
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member) -> None:
+        """Track when a linked Discord user leaves the guild."""
+        if member.guild.id != self.guild_id:
+            return
+
+        with session_scope() as session:
+            user = (
+                session.query(User)
+                .filter(User.discord_user_id == str(member.id))
+                .one_or_none()
+            )
+            if user is None:
+                return
+
+            user.left_at = datetime.utcnow()
+
+    # Alias to match common terminology
+    on_member_leave = on_member_remove
 
     @slash_command(
         **_moderation_command_kwargs(
