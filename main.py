@@ -161,7 +161,7 @@ def health():
 def verification_error():
     context = _verification_context()
     if not context.get("verification_error"):
-        return redirect(url_for("hello_world"))
+        return redirect(url_for("index"))
     return render_template("index.html", **context), 400
 
 
@@ -169,7 +169,7 @@ def verification_error():
 def verified():
     context = _verification_context()
     if not context["discord_complete"]:
-        return redirect(url_for("hello_world"))
+        return redirect(url_for("index"))
     return render_template("index.html", **context)
 
 

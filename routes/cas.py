@@ -219,7 +219,7 @@ def cas_callback():
         return redirect(next_step)
 
     try:
-        home_url = url_for("hello_world")
+        home_url = url_for("index")
     except Exception:
         home_url = None
 
@@ -237,7 +237,7 @@ def cas_callback():
 @cas_bp.route("/auth/logout", methods=["POST"])
 def cas_logout():
     logger.info("User requested logout from CAS and Discord sessions")
-    redirect_url = url_for("hello_world")
+    redirect_url = url_for("index")
 
     preserved_keys = {"_fresh", "_id", "_permanent"}
     keys_to_remove = [key for key in list(session.keys()) if key not in preserved_keys]
@@ -246,7 +246,7 @@ def cas_logout():
 
     if CONFIG.CAS_LOGOUT_URL:
         try:
-            target = url_for("hello_world", _external=True)
+            target = url_for("index", _external=True)
             return redirect(_append_query(CONFIG.CAS_LOGOUT_URL, {"service": target}))
         except Exception:
             logger.warning("Failed to build external logout redirect", exc_info=True)
