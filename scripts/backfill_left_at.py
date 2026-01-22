@@ -28,7 +28,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 import discord
 
-from utils.database import User, session_scope
+from utils.database import User, init_db, session_scope
 
 logging.basicConfig(
     level=logging.INFO,
@@ -177,6 +177,9 @@ async def run_backfill(dry_run: bool, backfill_date: datetime) -> None:
     except ValueError:
         logger.error("DISCORD_GUILD_ID is not a valid integer: %s", guild_id_raw)
         sys.exit(1)
+
+    # Ensure columns exist (adds joined_at/left_at if missing)
+    init_db()
 
     # Step 1: Get verified users from database
     logger.info("Fetching verified users with Discord accounts...")
