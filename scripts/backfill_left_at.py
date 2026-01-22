@@ -23,18 +23,39 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 import discord
 
 from utils.database import User, session_scope
-from utils.settings import DISCORD_CONFIG
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+ENV_PATH = PROJECT_ROOT / ".env"
+
+
+def load_env(path: Path) -> dict[str, str]:
+    """Parse a .env file into a dict, ignoring comments and blank lines."""
+    env: dict[str, str] = {}
+    if not path.exists():
+        return env
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip("\"'")
+        if key:
+            env[key] = value
+    return env
 
 
 def parse_args() -> argparse.Namespace:
@@ -140,15 +161,21 @@ async def fetch_guild_member_ids(guild_id: int, bot_token: str) -> set[int]:
 
 async def run_backfill(dry_run: bool, backfill_date: datetime) -> None:
     """Main backfill logic."""
-    if DISCORD_CONFIG is None:
-        logger.error("DISCORD_CONFIG is not set. Cannot connect to Discord.")
+    env = load_env(ENV_PATH)
+
+    bot_token = env.get("DISCORD_BOT_TOKEN")
+    guild_id_raw = env.get("DISCORD_GUILD_ID")
+
+    if not bot_token or not guild_id_raw:
+        logger.error(
+            "Missing DISCORD_BOT_TOKEN or DISCORD_GUILD_ID in %s", ENV_PATH
+        )
         sys.exit(1)
 
-    guild_id = DISCORD_CONFIG.guild_id
-    bot_token = DISCORD_CONFIG.bot_token
-
-    if not guild_id or not bot_token:
-        logger.error("Missing guild_id or bot_token in DISCORD_CONFIG")
+    try:
+        guild_id = int(guild_id_raw)
+    except ValueError:
+        logger.error("DISCORD_GUILD_ID is not a valid integer: %s", guild_id_raw)
         sys.exit(1)
 
     # Step 1: Get verified users from database
