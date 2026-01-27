@@ -123,7 +123,7 @@ def _parse_discord_id(value: str | None, user_id: int) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         logger.warning("Invalid discord_user_id for user %s: %s", user_id, value)
-        return None
+    return None
 
 
 def _roles_from_profile(profile: dict[str, Any]) -> list[int]:
@@ -136,6 +136,16 @@ def _roles_from_profile(profile: dict[str, Any]) -> list[int]:
             continue
         role_ids.append(role_id)
     return role_ids
+
+
+def _normalize_asurite(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = value.strip()
+    suffix = "@asu.edu"
+    if normalized.lower().endswith(suffix):
+        normalized = normalized[: -len(suffix)]
+    return normalized or None
 
 
 async def _update_member_roles(
@@ -238,6 +248,22 @@ async def run_sync(apply: bool, csv_path: Path) -> None:
             return
 
         for user in users:
+            asurite_id = _normalize_asurite(user.asurite_id)
+            if not user.asurite_id:
+                stats["skipped_profile_error"] += 1
+                rows.append(
+                    {
+                        "id": user.id,
+                        "asurite_id": user.asurite_id,
+                        "email": user.email,
+                        "discord_user_id": user.discord_user_id,
+                        "roles_current": "",
+                        "roles_after_apply": "",
+                        "status": "skipped",
+                        "notes": "missing_asurite_id",
+                    }
+                )
+                continue
             discord_id = _parse_discord_id(user.discord_user_id, user.id)
             if discord_id is None:
                 stats["skipped_no_discord"] += 1
@@ -294,7 +320,23 @@ async def run_sync(apply: bool, csv_path: Path) -> None:
                 )
                 continue
 
-            profile = get_student_profile(user.asurite_id)
+            if not asurite_id:
+                stats["skipped_profile_error"] += 1
+                rows.append(
+                    {
+                        "id": user.id,
+                        "asurite_id": user.asurite_id,
+                        "email": user.email,
+                        "discord_user_id": user.discord_user_id,
+                        "roles_current": "",
+                        "roles_after_apply": "",
+                        "status": "skipped",
+                        "notes": "invalid_asurite_id",
+                    }
+                )
+                continue
+
+            profile = get_student_profile(asurite_id)
             if profile.get("error"):
                 logger.warning(
                     "Salesforce profile error for %s: %s",
