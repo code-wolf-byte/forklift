@@ -5,8 +5,7 @@ from typing import Any, Dict
 import requests
 
 
-BASE_URL = "https://esb-qa.asu.edu/api/v1/asu-sf-contact/contact"
-BASE = "https://esb-qa.asu.edu"
+BASE = "https://esb.asu.edu"
 CONTACT_URL = f"{BASE}/api/v1/asu-sf-contact/contact"
 OPP_URL = f"{BASE}/api/v1/asu-sf-opportunity/opportunity"
 
@@ -168,10 +167,3 @@ def get_student_profile(asurite: str) -> Dict[str, Any]:
 
     return profile
 
-
-# --------------------
-# Test
-# --------------------
-if __name__ == "__main__":
-    result = get_student_profile("tupreti")
-    print(result)

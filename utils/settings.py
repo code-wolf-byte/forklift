@@ -347,4 +347,59 @@ except RuntimeError:
     SFTP_CONFIG = None  # type: ignore[assignment]
 
 
-__all__ = ["CONFIG", "DISCORD_CONFIG", "DiscordConfig", "AppConfig"]
+@dataclass(slots=True)
+class GoogleSheetsConfig:
+    """Configuration for writing to Google Sheets."""
+
+    credentials_file: Path
+    spreadsheet_id: str
+    worksheet_name: str = "Sheet1"
+
+    @classmethod
+    def from_env(cls) -> "GoogleSheetsConfig":
+        enabled = _env_bool("GOOGLE_SHEETS_ENABLED", default=False)
+        if not enabled:
+            raise RuntimeError("Google Sheets integration disabled")
+
+        credentials_file_raw = _env_value("GOOGLE_SHEETS_CREDENTIALS_FILE")
+        spreadsheet_id = _env_value("GOOGLE_SHEETS_SPREADSHEET_ID")
+
+        missing = [
+            name
+            for name, value in {
+                "GOOGLE_SHEETS_CREDENTIALS_FILE": credentials_file_raw,
+                "GOOGLE_SHEETS_SPREADSHEET_ID": spreadsheet_id,
+            }.items()
+            if value is None
+        ]
+        if missing:
+            missing_vars = ", ".join(missing)
+            raise RuntimeError(
+                f"Missing Google Sheets environment variables: {missing_vars}"
+            )
+
+        credentials_file = Path(credentials_file_raw)
+        if not credentials_file.exists():
+            raise RuntimeError(
+                f"Google Sheets credentials file not found: {credentials_file}"
+            )
+
+        worksheet_name = (
+            _env_value("GOOGLE_SHEETS_WORKSHEET_NAME", default="Sheet1")
+            or "Sheet1"
+        )
+
+        return cls(
+            credentials_file=credentials_file,
+            spreadsheet_id=spreadsheet_id,
+            worksheet_name=worksheet_name,
+        )
+
+
+try:
+    GOOGLE_SHEETS_CONFIG = GoogleSheetsConfig.from_env()
+except RuntimeError:
+    GOOGLE_SHEETS_CONFIG = None  # type: ignore[assignment]
+
+
+__all__ = ["CONFIG", "DISCORD_CONFIG", "DiscordConfig", "AppConfig", "GOOGLE_SHEETS_CONFIG", "GoogleSheetsConfig"]

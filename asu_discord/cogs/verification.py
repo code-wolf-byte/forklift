@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 
 from utils.settings import DISCORD_CONFIG
 from utils.database import User, session_scope
+from services.google_sheets import write_user_left
 from ..roles import ROLE_ID_MAP
 
 logger = logging.getLogger(__name__)
@@ -102,18 +103,21 @@ def _college_role_from_name(college_name: Any) -> str | None:
 
 
 def _campus_role_from_opportunity(opp: dict[str, Any]) -> str | None:
-    location = _normalize_str(opp.get("currentLocation") or opp.get("locationName"))
+    # Salesforce campus assignments are provided via locationName.
+    location = _normalize_str(opp.get("locationName"))
     if not location:
         return None
 
-    if "tempe" in location:
+    if location == "tempe":
         return "Tempe"
-    if "downtown" in location and "phoenix" in location:
+    if location == "downtown phoenix":
         return "Downtown Phoenix"
-    if "polytechnic" in location:
+    if location == "polytechnic":
         return "Polytechnic"
-    if "la center" in location or "la centre" in location:
-        return "LA Center"
+    if location == "online":
+        return "Online"
+    if location == "west valley":
+        return "West Valley"
     return None
 
 
@@ -370,7 +374,11 @@ class VerificationCog(commands.Cog):
             if user is None:
                 return
 
-            user.left_at = datetime.utcnow()
+            now = datetime.utcnow()
+            user.left_at = now
+
+            if user.verified and user.email:
+                write_user_left(user.email, now)
 
     # Alias to match common terminology
     on_member_leave = on_member_remove
