@@ -35,4 +35,5 @@ ROLE_ID_MAP: Dict[str, int] = {
     "Polytechnic": 1282465090808971397,
     "LA Center": 1282501414433849378,
     "West Valley": 1282465131749576704,
+    "Online": 1465991804993278113,
 }
