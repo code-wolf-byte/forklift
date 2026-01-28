@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Optional
@@ -13,6 +14,7 @@ from utils.settings import DISCORD_CONFIG
 from utils.database import User, session_scope
 from services.google_sheets import write_user_left
 from ..roles import ROLE_ID_MAP
+from ..salesforce import get_student_profile
 
 logger = logging.getLogger(__name__)
 
@@ -416,6 +418,29 @@ class VerificationCog(commands.Cog):
         await member.add_roles(role, reason=reason)
 
         await self._remove_unverified_role(ctx.guild, member, reason=reason)
+
+        # Optionally assign Salesforce-derived roles after manual verification.
+        try:
+            with session_scope() as session:
+                user = (
+                    session.query(User)
+                    .filter(User.discord_user_id == str(member.id))
+                    .one_or_none()
+                )
+            asurite = user.asurite_id if user else None
+            if asurite:
+                profile = await asyncio.to_thread(get_student_profile, asurite)
+                if not profile.get("error"):
+                    await self.assign_roles_from_profile(member.id, profile)
+        except Exception:
+            logger.exception(
+                "Failed to assign Salesforce-based roles for user %s", member.id
+            )
+            await ctx.respond(
+                f"{member.mention} has been marked as verified, "
+                "but there was an error assigning additional roles.",
+            )
+            return
 
         await ctx.respond(f"{member.mention} has been marked as verified. ✅")
 

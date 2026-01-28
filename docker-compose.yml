@@ -21,15 +21,3 @@ services:
     command: --label-enable --scope forklift --cleanup --interval 300
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-
-  forklift-refresh-roles:
-    image: ghcr.io/your-org/forklift:latest
-    build:
-      context: .
-    env_file:
-      - .env
-    volumes:
-      - ./certs:/app/certs:ro
-      - ./data:/app/data
-    restart: "no"
-    entrypoint: ["python", "scripts/refresh_salesforce_roles.py"]
