@@ -147,6 +147,33 @@ def discord_callback():
                 session["verification_error"] = BANNED_VERIFICATION_MESSAGE
                 return _oauth_failure(BANNED_VERIFICATION_MESSAGE, 403)
 
+            existing_user = (
+                db_session.query(User)
+                .filter(User.discord_user_id == discord_user_id, User.id != user.id)
+                .one_or_none()
+            )
+            if existing_user:
+                asurite = verification_state.get("asurite")
+                if asurite and existing_user.asurite_id == asurite:
+                    logger.warning(
+                        "Discord user %s already linked to ASURITE %s under id %s; "
+                        "refreshing that record instead of %s",
+                        discord_user_id,
+                        asurite,
+                        existing_user.id,
+                        user.id,
+                    )
+                    user = existing_user
+                    user_db_id = user.id
+                    verification_state["user_id"] = user_db_id
+                else:
+                    message = (
+                        "This Discord account is already linked to another ASURITE. "
+                        "If this is your account, please contact support."
+                    )
+                    session["verification_error"] = message
+                    return _oauth_failure(message, 409)
+
             user.discord_user_id = discord_user_id
             user.discord_username = profile.get("username")
             user.discord_global_name = profile.get("global_name")
