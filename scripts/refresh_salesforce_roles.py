@@ -336,7 +336,8 @@ async def run_sync(apply: bool, csv_path: Path) -> None:
                 )
                 continue
 
-            profile = get_student_profile(asurite_id)
+            # Avoid blocking the Discord gateway heartbeat with sync HTTP calls.
+            profile = await asyncio.to_thread(get_student_profile, asurite_id)
             if profile.get("error"):
                 logger.warning(
                     "Salesforce profile error for %s: %s",
