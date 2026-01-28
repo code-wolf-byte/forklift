@@ -386,10 +386,10 @@ async def run_sync(apply: bool, csv_path: Path) -> None:
 
         await client.close()
 
+    await client.start(bot_token)
+
     write_role_csv(rows, csv_path)
     logger.info("Wrote %d rows to %s", len(rows), csv_path)
-
-    await client.start(bot_token)
 
     logger.info(
         "Done. processed=%d skipped_no_discord=%d skipped_profile_error=%d removed=%d added=%d",
