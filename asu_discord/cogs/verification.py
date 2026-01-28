@@ -495,6 +495,38 @@ class VerificationCog(commands.Cog):
             asurite,
         )
 
+    async def unverify_member_by_id(
+        self, user_id: int, *, reason: str | None = None
+    ) -> bool:
+        """Remove the verified role from a Discord user identified by ID."""
+        await self.bot.wait_until_ready()
+
+        guild = self.bot.get_guild(self.guild_id)
+        if guild is None:
+            try:
+                guild = await self.bot.fetch_guild(self.guild_id)
+            except discord.HTTPException as exc:  # pragma: no cover - network failure
+                raise RuntimeError(
+                    "Unable to load the Discord guild for unverification"
+                ) from exc
+
+        if guild is None:
+            raise RuntimeError("Discord guild is not available for unverification")
+
+        member = guild.get_member(user_id)
+        if member is None:
+            try:
+                member = await guild.fetch_member(user_id)
+            except discord.NotFound as exc:
+                raise RuntimeError(
+                    f"Discord user {user_id} is not a member of the guild"
+                ) from exc
+            except discord.HTTPException as exc:  # pragma: no cover - network failure
+                raise RuntimeError("Unable to load Discord member information") from exc
+
+        remove_reason = reason or "Automatic re-verification"
+        return await self._remove_verified_role(guild, member, reason=remove_reason)
+
     async def assign_roles_from_profile(
         self, user_id: int, student_profile: dict[str, Any]
     ) -> None:
@@ -568,6 +600,80 @@ class VerificationCog(commands.Cog):
         logger.info(
             "Assigned Salesforce-based roles %s to Discord user %s",
             [r.id for r in roles_to_add],
+            user_id,
+        )
+
+    async def remove_roles_from_profile(
+        self, user_id: int, student_profile: dict[str, Any]
+    ) -> None:
+        """Remove Discord roles for a user based on Salesforce data."""
+        await self.bot.wait_until_ready()
+
+        guild = self.bot.get_guild(self.guild_id)
+        if guild is None:
+            try:
+                guild = await self.bot.fetch_guild(self.guild_id)
+            except discord.HTTPException as exc:  # pragma: no cover - network failure
+                raise RuntimeError(
+                    "Unable to load the Discord guild for role removal"
+                ) from exc
+
+        if guild is None:
+            raise RuntimeError("Discord guild is not available for role removal")
+
+        member = guild.get_member(user_id)
+        if member is None:
+            try:
+                member = await guild.fetch_member(user_id)
+            except discord.NotFound as exc:
+                raise RuntimeError(
+                    f"Discord user {user_id} is not a member of the guild"
+                ) from exc
+            except discord.HTTPException as exc:  # pragma: no cover - network failure
+                raise RuntimeError("Unable to load Discord member information") from exc
+
+        logical_role_names = role_names_from_student_profile(student_profile)
+        if not logical_role_names:
+            logger.info(
+                "No Salesforce-derived roles to remove for user %s", user_id
+            )
+            return
+
+        roles_to_remove: list[discord.Role] = []
+        for logical_name in sorted(logical_role_names):
+            role_id = ROLE_ID_MAP.get(logical_name)
+            if role_id is None:
+                logger.debug("No configured Discord role id for %s", logical_name)
+                continue
+            role = guild.get_role(role_id)
+            if role is None:
+                logger.warning(
+                    "Configured role id %s for %s not found in guild %s",
+                    role_id,
+                    logical_name,
+                    guild.id,
+                )
+                continue
+            if role not in member.roles:
+                continue
+            roles_to_remove.append(role)
+
+        if not roles_to_remove:
+            logger.info(
+                "No Salesforce-derived roles to remove for user %s", user_id
+            )
+            return
+
+        reason = "Automatic Salesforce-based role removal"
+        asurite = student_profile.get("asurite")
+        if isinstance(asurite, str) and asurite:
+            reason = f"{reason} for {asurite}"
+
+        await member.remove_roles(*roles_to_remove, reason=reason)
+
+        logger.info(
+            "Removed Salesforce-based roles %s from Discord user %s",
+            [r.id for r in roles_to_remove],
             user_id,
         )
 

@@ -5,6 +5,7 @@ import secrets
 from datetime import datetime
 
 from flask import Blueprint, redirect, request, session, url_for
+from sqlalchemy.exc import IntegrityError
 
 from asu_discord.api import (
     DiscordAPIError,
@@ -13,6 +14,8 @@ from asu_discord.api import (
     build_authorize_url,
     exchange_code_for_token,
     fetch_user_profile,
+    remove_verified_role,
+    remove_roles_from_profile,
 )
 from asu_discord.salesforce import get_student_profile
 from utils.database import User, session_scope
@@ -133,6 +136,8 @@ def discord_callback():
         logger.error("Discord profile missing user id: %s", profile)
         return _oauth_failure("Discord profile response missing user id", 500)
 
+    asurite = verification_state.get("asurite")
+    old_discord_user_id: str | None = None
     try:
         with session_scope() as db_session:
             user = db_session.get(User, user_db_id)
@@ -146,6 +151,26 @@ def discord_callback():
             if user.banned:
                 session["verification_error"] = BANNED_VERIFICATION_MESSAGE
                 return _oauth_failure(BANNED_VERIFICATION_MESSAGE, 403)
+
+            if asurite and user.asurite_id != asurite:
+                user = (
+                    db_session.query(User)
+                    .filter(User.asurite_id == asurite)
+                    .one_or_none()
+                )
+                if user is None:
+                    logger.error(
+                        "Database user for ASURITE %s not found during verification",
+                        asurite,
+                    )
+                    raise DiscordAPIError(
+                        "Unable to load verification record for Discord linking"
+                    )
+                if user.banned:
+                    session["verification_error"] = BANNED_VERIFICATION_MESSAGE
+                    return _oauth_failure(BANNED_VERIFICATION_MESSAGE, 403)
+                user_db_id = user.id
+                verification_state["user_id"] = user_db_id
 
             existing_user = (
                 db_session.query(User)
@@ -174,19 +199,107 @@ def discord_callback():
                     session["verification_error"] = message
                     return _oauth_failure(message, 409)
 
-            user.discord_user_id = discord_user_id
-            user.discord_username = profile.get("username")
-            user.discord_global_name = profile.get("global_name")
-            user.discord_avatar = profile.get("avatar")
+            if user.discord_user_id == discord_user_id and (
+                not asurite or user.asurite_id == asurite
+            ):
+                user.updated_at = datetime.utcnow()
+            else:
+                if user.discord_user_id and user.discord_user_id != discord_user_id:
+                    old_discord_user_id = user.discord_user_id
+                    try:
+                        remove_verified_role(
+                            user.discord_user_id,
+                            reason=f"Re-linking verification for {user.asurite_id}",
+                        )
+                    except DiscordAPIError as exc:
+                        logger.warning(
+                            "Failed to remove verified role for Discord user %s: %s",
+                            user.discord_user_id,
+                            exc,
+                        )
 
+                user.discord_user_id = discord_user_id
+                user.discord_username = profile.get("username")
+                user.discord_global_name = profile.get("global_name")
+                user.discord_avatar = profile.get("avatar")
+                user.verified = True
+                user.verified_at = datetime.utcnow()
+                if user.created_at != user.verified_at:
+                    user.created_at = user.verified_at
+
+            try:
+                assign_verified_role(
+                    discord_user_id, asurite=verification_state.get("asurite")
+                )
+            except DiscordAPIError as exc:
+                logger.error(
+                    "Discord integration failed for user %s: %s", discord_user_id, exc
+                )
+                return _oauth_failure(str(exc), 502)
+    except IntegrityError as exc:
+        if "users.discord_user_id" not in str(getattr(exc, "orig", exc)):
+            logger.exception("Unexpected database error linking Discord account")
+            return _oauth_failure("Unexpected Discord verification failure", 500)
+
+        logger.warning(
+            "Discord user %s triggered unique constraint; attempting to reuse existing record",
+            discord_user_id,
+        )
+        try:
+            with session_scope() as db_session:
+                existing_user = (
+                    db_session.query(User)
+                    .filter(User.discord_user_id == discord_user_id)
+                    .one_or_none()
+                )
+                if existing_user is None:
+                    logger.exception(
+                        "Discord user %s caused uniqueness error but no existing record was found",
+                        discord_user_id,
+                    )
+                    return _oauth_failure(
+                        "Unexpected Discord verification failure", 500
+                    )
+
+                asurite = verification_state.get("asurite")
+                if asurite and existing_user.asurite_id != asurite:
+                    message = (
+                        "This Discord account is already linked to another ASURITE. "
+                        "If this is your account, please contact support."
+                    )
+                    session["verification_error"] = message
+                    return _oauth_failure(message, 409)
+
+                if existing_user.discord_user_id == discord_user_id and (
+                    not asurite or existing_user.asurite_id == asurite
+                ):
+                    existing_user.updated_at = datetime.utcnow()
+                else:
+                    existing_user.discord_username = profile.get("username")
+                    existing_user.discord_global_name = profile.get("global_name")
+                    existing_user.discord_avatar = profile.get("avatar")
+                    existing_user.verified = True
+                    existing_user.verified_at = datetime.utcnow()
+                    if existing_user.created_at != existing_user.verified_at:
+                        existing_user.created_at = existing_user.verified_at
+
+                user_db_id = existing_user.id
+                verification_state["user_id"] = user_db_id
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to recover from Discord uniqueness error")
+            return _oauth_failure("Unexpected Discord verification failure", 500)
+
+        try:
             assign_verified_role(
                 discord_user_id, asurite=verification_state.get("asurite")
             )
-
-            user.verified = True
-            user.verified_at = datetime.utcnow()
-            if user.created_at != user.verified_at:
-                user.created_at = user.verified_at
+        except DiscordAPIError as assign_exc:
+            logger.error(
+                "Discord integration failed for user %s: %s",
+                discord_user_id,
+                assign_exc,
+            )
+            return _oauth_failure(str(assign_exc), 502)
     except DiscordAPIError as exc:
         logger.error("Discord integration failed for user %s: %s", discord_user_id, exc)
         return _oauth_failure(str(exc), 502)
@@ -222,6 +335,16 @@ def discord_callback():
 
         # Assign additional Discord roles based on Salesforce profile data.
         try:
+            if old_discord_user_id and old_discord_user_id != discord_user_id:
+                try:
+                    remove_roles_from_profile(old_discord_user_id, student_profile)
+                except DiscordAPIError as exc:
+                    logger.warning(
+                        "Failed to remove Salesforce-based roles for user %s: %s",
+                        old_discord_user_id,
+                        exc,
+                    )
+
             logger.info(
                 "Salesforce profile data for %s (Discord %s): %s",
                 asurite,
