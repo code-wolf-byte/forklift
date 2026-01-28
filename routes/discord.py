@@ -222,6 +222,12 @@ def discord_callback():
 
         # Assign additional Discord roles based on Salesforce profile data.
         try:
+            logger.info(
+                "Salesforce profile data for %s (Discord %s): %s",
+                asurite,
+                discord_user_id,
+                student_profile,
+            )
             assign_roles_from_profile(discord_user_id, student_profile)
         except DiscordAPIError as exc:
             logger.error(
