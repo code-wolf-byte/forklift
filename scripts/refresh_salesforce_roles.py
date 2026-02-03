@@ -97,6 +97,8 @@ def write_role_csv(rows: list[dict[str, Any]], csv_path: Path) -> None:
                 "discord_user_id",
                 "roles_current",
                 "roles_after_apply",
+                "in_state",
+                "out_of_state",
                 "status",
                 "notes",
             ]
@@ -110,6 +112,8 @@ def write_role_csv(rows: list[dict[str, Any]], csv_path: Path) -> None:
                     row.get("discord_user_id"),
                     row.get("roles_current"),
                     row.get("roles_after_apply"),
+                    row.get("in_state"),
+                    row.get("out_of_state"),
                     row.get("status"),
                     row.get("notes"),
                 ]
@@ -259,6 +263,8 @@ async def run_sync(apply: bool, csv_path: Path) -> None:
                         "discord_user_id": user.discord_user_id,
                         "roles_current": "",
                         "roles_after_apply": "",
+                        "in_state": "",
+                        "out_of_state": "",
                         "status": "skipped",
                         "notes": "missing_asurite_id",
                     }
@@ -275,6 +281,8 @@ async def run_sync(apply: bool, csv_path: Path) -> None:
                         "discord_user_id": user.discord_user_id,
                         "roles_current": "",
                         "roles_after_apply": "",
+                        "in_state": "",
+                        "out_of_state": "",
                         "status": "skipped",
                         "notes": "missing_or_invalid_discord_id",
                     }
@@ -296,6 +304,8 @@ async def run_sync(apply: bool, csv_path: Path) -> None:
                         "discord_user_id": user.discord_user_id,
                         "roles_current": "",
                         "roles_after_apply": "",
+                        "in_state": "",
+                        "out_of_state": "",
                         "status": "skipped",
                         "notes": "member_not_found",
                     }
@@ -314,6 +324,8 @@ async def run_sync(apply: bool, csv_path: Path) -> None:
                         "discord_user_id": user.discord_user_id,
                         "roles_current": "",
                         "roles_after_apply": "",
+                        "in_state": "",
+                        "out_of_state": "",
                         "status": "skipped",
                         "notes": "member_fetch_failed",
                     }
@@ -330,6 +342,8 @@ async def run_sync(apply: bool, csv_path: Path) -> None:
                         "discord_user_id": user.discord_user_id,
                         "roles_current": "",
                         "roles_after_apply": "",
+                        "in_state": "",
+                        "out_of_state": "",
                         "status": "skipped",
                         "notes": "invalid_asurite_id",
                     }
@@ -353,6 +367,8 @@ async def run_sync(apply: bool, csv_path: Path) -> None:
                         "discord_user_id": user.discord_user_id,
                         "roles_current": ", ".join(_current_role_names(member)),
                         "roles_after_apply": "",
+                        "in_state": profile.get("inState"),
+                        "out_of_state": profile.get("outOfState"),
                         "status": "skipped",
                         "notes": "salesforce_profile_error",
                     }
@@ -380,6 +396,8 @@ async def run_sync(apply: bool, csv_path: Path) -> None:
                     "discord_user_id": user.discord_user_id,
                     "roles_current": ", ".join(current_names),
                     "roles_after_apply": ", ".join(desired_names),
+                    "in_state": profile.get("inState"),
+                    "out_of_state": profile.get("outOfState"),
                     "status": "applied" if apply else "dry_run",
                     "notes": "",
                 }

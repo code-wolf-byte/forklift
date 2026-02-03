@@ -1,17 +1,65 @@
 import base64
-import os
-from typing import Any, Dict
+from typing import Any, Dict, Iterable
 
 import requests
-
+import os
 
 BASE = "https://esb.asu.edu"
 CONTACT_URL = f"{BASE}/api/v1/asu-sf-contact/contact"
 OPP_URL = f"{BASE}/api/v1/asu-sf-opportunity/opportunity"
 
 # These credentials are expected to be provided via environment variables.
-CLIENT_ID = os.getenv("SALESFORCE_API_CLIENT_ID")
-CLIENT_SECRET = os.getenv("SALESFORCE_API_CLIENT_SECRET")
+CLIENT_ID = os.getenv('SALESFORCE_API_CLIENT_ID')
+CLIENT_SECRET = os.getenv('SALESFORCE_API_CLIENT_SECRET')
+
+# Map program codes (undergrad + graduate) to college role names.
+PROGRAM_CODE_TO_COLLEGE_ROLE = {
+    # College of Global Futures
+    "UGGF": "College of Global Futures",
+    "GRGF": "College of Global Futures",
+    # College of Health Solutions
+    "UGNH": "College of Health Solutions",
+    "GRNH": "College of Health Solutions",
+    # College of Integrative Sciences and Arts
+    "UGLS": "College of Integrative Sciences and Arts",
+    "GRLS": "College of Integrative Sciences and Arts",
+    # Edson College of Nursing and Health Innovation
+    "UGNU": "Edson College of Nursing and Health Innovation",
+    "GRNU": "Edson College of Nursing and Health Innovation",
+    # Herberger Institute for Design and the Arts
+    "UGHI": "Herberger Institute for Design and the Arts",
+    "GRHI": "Herberger Institute for Design and the Arts",
+    # Ira A. Fulton Schools of Engineering
+    "UGES": "Ira A. Fulton Schools of Engineering",
+    "GRES": "Ira A. Fulton Schools of Engineering",
+    # Mary Lou Fulton Teachers College
+    "UGTE": "Mary Lou Fulton Teachers College",
+    "GRTE": "Mary Lou Fulton Teachers College",
+    # New College of Interdisciplinary Arts and Sciences
+    "UGAS": "New College of Interdisciplinary Arts and Sciences",
+    "GRAS": "New College of Interdisciplinary Arts and Sciences",
+    # The College of Liberal Arts and Sciences
+    "UGLA": "College of Liberal Arts and Sciences",
+    "GRLA": "College of Liberal Arts and Sciences",
+    # Thunderbird School of Global Management
+    "UGTB": "Thunderbird School of Global Management",
+    "GRTB": "Thunderbird School of Global Management",
+    # University College
+    "UGUC": "University College",
+    # W. P. Carey School of Business
+    "UGBA": "W.P. Carey School of Business",
+    "GRBA": "W.P. Carey School of Business",
+    # Walter Cronkite School of Journalism and Mass Communication
+    "UGCS": "Walter Cronkite School of Journalism and Mass Communication",
+    "GRCS": "Walter Cronkite School of Journalism and Mass Communication",
+    # Watts College of Public Service and Community Solutions
+    "UGPP": "Watts College of Public Service and Community Solutions",
+    "GRPP": "Watts College of Public Service and Community Solutions",
+    # School of Technology for Public Health
+    "GRTH": "School of Technology for Public Health",
+}
+
+TARGET_TERM_CODES = {"2267", "2261"}
 
 
 def _parse_bool(value: Any) -> bool:
@@ -24,6 +72,51 @@ def _parse_bool(value: Any) -> bool:
 
 def _created_date(opp: Dict[str, Any]) -> str:
     return str(opp.get("createdDate") or "")
+
+def _is_admitted_or_enrolled(opp: Dict[str, Any]) -> bool:
+    stage = (opp.get("stageName") or "").strip().lower()
+    return stage in {"enrolled", "admitted"}
+
+
+def _eligible_opportunities(
+    opportunities: Iterable[Dict[str, Any]],
+) -> list[Dict[str, Any]]:
+    return [
+        opp
+        for opp in opportunities
+        if isinstance(opp, dict) and _is_admitted_or_enrolled(opp)
+    ]
+
+
+def _select_opportunity(
+    opportunities: list[Dict[str, Any]],
+) -> tuple[Dict[str, Any] | None, bool | None]:
+    """
+    Select the opportunity to derive summary status fields.
+
+    Returns (selected_opp, is_current_student) where is_current_student is:
+    - False for target term codes (incoming/current term)
+    - True for admitted/enrolled non-target term codes
+    - None if no eligible opportunity found
+    """
+    eligible = _eligible_opportunities(opportunities)
+
+    for opp in eligible:
+        term_code = str(opp.get("termCode") or "")
+        if term_code in TARGET_TERM_CODES:
+            return opp, False
+
+    if eligible:
+        return eligible[0], True
+
+    return None, None
+
+
+def _deposit_paid_from_opportunity(opp: Dict[str, Any]) -> bool:
+    if _parse_bool(opp.get("enrollmentDepositPaid")):
+        return True
+    status = (opp.get("enrollmentDepositStatus") or "").strip().lower()
+    return status == "paid"
 
 
 def get_student_profile(asurite: str) -> Dict[str, Any]:
@@ -97,19 +190,11 @@ def get_student_profile(asurite: str) -> Dict[str, Any]:
             if isinstance(opp_data, list):
                 opportunities.extend(opp_data)
 
-    # Sort newest first for summary fields
-    opportunities.sort(key=_created_date, reverse=True)
+    # Sort oldest first to match legacy selection behavior.
+    opportunities.sort(key=_created_date)
 
-    # Choose a primary opportunity for summary fields:
-    # Prefer latest "Admitted" or "Enrolled", otherwise latest overall.
-    primary_opp: Dict[str, Any] | None = None
-    for opp in opportunities:
-        stage = (opp.get("stageName") or "").strip().lower()
-        if stage in {"admitted", "enrolled"}:
-            primary_opp = opp
-            break
-    if primary_opp is None and opportunities:
-        primary_opp = opportunities[0]
+    # Choose an opportunity for summary fields.
+    selected_opp, is_current_student = _select_opportunity(opportunities)
 
     # --------------------
     # 3. Build profile payload
@@ -129,20 +214,23 @@ def get_student_profile(asurite: str) -> Dict[str, Any]:
         "opportunities": opportunities,
     }
 
-    if primary_opp is not None:
-        college_program_code = primary_opp.get("collegeProgramCode")
-        enrollment_deposit_paid = (
-            primary_opp.get("enrollmentDepositStatus") or ""
-        ).strip().lower() == "paid"
-        is_international = _parse_bool(primary_opp.get("internationalStudent"))
-        admit_type = primary_opp.get("type")
-        career = primary_opp.get("career")
+    if selected_opp is not None:
+        college_program_code = selected_opp.get("collegeProgramCode") or selected_opp.get(
+            "programCode"
+        )
+        is_international = _parse_bool(selected_opp.get("internationalStudent"))
+        admit_type = selected_opp.get("type")
+        career = selected_opp.get("career")
+        in_state = (state == "Arizona") if not is_international else False
+        out_of_state = not in_state if not is_international else False
 
         # Summary / convenience fields
         profile.update(
             {
-                "college": primary_opp.get("collegeName") or "None",
-                "program": primary_opp.get("academicPlanName") or "None",
+                "college": PROGRAM_CODE_TO_COLLEGE_ROLE.get(
+                    college_program_code, selected_opp.get("collegeName") or "N/A"
+                ),
+                "program": selected_opp.get("academicPlanName") or "None",
                 "career": career or "Unknown",
                 "admitType": admit_type or "None",
                 "firstTimeFreshman": bool(
@@ -157,13 +245,38 @@ def get_student_profile(asurite: str) -> Dict[str, Any]:
                 "collegeProgramCode": college_program_code,
                 "is_international": is_international,
                 "stateOfResidence": state if not is_international else None,
-                "enrollmentDepositPaid": enrollment_deposit_paid,
-                "stageName": primary_opp.get("stageName"),
+                "enrollmentDepositPaid": _deposit_paid_from_opportunity(selected_opp),
+                "stageName": selected_opp.get("stageName"),
+                # Fields used by role derivation / status displays
+                "current": is_current_student,
+                "firstYear": False,
+                "depositPaid": _deposit_paid_from_opportunity(selected_opp),
+                "international": is_international,
+                "inState": in_state,
+                "outOfState": out_of_state,
+                "campus": selected_opp.get("currentLocation") or "N/A",
+                "locationName": selected_opp.get("locationName")
+                or selected_opp.get("currentLocation")
+                or "N/A",
+                "termCode": selected_opp.get("termCode"),
+                "selectedOpportunity": selected_opp,
             }
         )
+        if career and career.lower() == "undergraduate":
+            if isinstance(admit_type, str) and "transfer" in admit_type.lower():
+                profile["firstYear"] = False
+                profile["transfer"] = True
+                profile["type"] = "Transfer"
+            elif isinstance(admit_type, str) and "freshman" in admit_type.lower():
+                profile["firstYear"] = True
+                profile["transfer"] = False
+                profile["type"] = "First Time Freshman"
+        elif career and career.lower() == "graduate":
+            profile["firstYear"] = False
+            profile["transfer"] = False
+            profile["type"] = "Masters"
 
     if not opportunities:
         profile["error"] = "No opportunities found"
 
     return profile
-

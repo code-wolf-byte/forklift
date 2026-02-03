@@ -120,6 +120,30 @@ def _campus_role_from_opportunity(opp: dict[str, Any]) -> str | None:
         return "Online"
     if location == "west valley":
         return "West Valley"
+    if location == "la center":
+        return "LA Center"
+    return None
+
+
+def _campus_role_from_profile(student_profile: dict[str, Any]) -> str | None:
+    location = _normalize_str(
+        student_profile.get("locationName") or student_profile.get("campus")
+    )
+    if not location:
+        return None
+
+    if location == "tempe":
+        return "Tempe"
+    if location == "downtown phoenix":
+        return "Downtown Phoenix"
+    if location == "polytechnic":
+        return "Polytechnic"
+    if location == "online":
+        return "Online"
+    if location == "west valley":
+        return "West Valley"
+    if location == "la center":
+        return "LA Center"
     return None
 
 
@@ -133,13 +157,11 @@ def role_names_from_student_profile(student_profile: dict[str, Any]) -> set[str]
 
     opportunities_raw = student_profile.get("opportunities") or []
     if not isinstance(opportunities_raw, list):
-        return roles
+        opportunities_raw = []
 
     opportunities: list[dict[str, Any]] = [
         opp for opp in opportunities_raw if isinstance(opp, dict)
     ]
-    if not opportunities:
-        return roles
 
     enrolled_opps = _select_enrolled_opps(opportunities)
 
@@ -206,6 +228,39 @@ def role_names_from_student_profile(student_profile: dict[str, Any]) -> set[str]
         campus_role = _campus_role_from_opportunity(opp)
         if campus_role:
             roles.add(campus_role)
+
+    # 5. Profile-based fallbacks (for summary fields derived upstream)
+    if not has_level_role:
+        career = _normalize_str(student_profile.get("career"))
+        if career == "graduate":
+            roles.add("Graduate Student")
+            has_level_role = True
+        elif career == "undergraduate":
+            if student_profile.get("transfer"):
+                roles.add("Transfer Student")
+                has_level_role = True
+            elif student_profile.get("firstYear"):
+                roles.add("First Year")
+                has_level_role = True
+            elif student_profile.get("current") is True:
+                roles.add("Upperclassmen")
+                has_level_role = True
+
+    if student_profile.get("international") or student_profile.get("is_international"):
+        roles.add("International Student")
+
+    if student_profile.get("inState"):
+        roles.add("Arizona Resident")
+    elif student_profile.get("outOfState"):
+        roles.add("Out of State")
+
+    college_name = student_profile.get("college")
+    if isinstance(college_name, str) and college_name in ROLE_ID_MAP:
+        roles.add(college_name)
+
+    campus_role = _campus_role_from_profile(student_profile)
+    if campus_role:
+        roles.add(campus_role)
 
     return roles
 

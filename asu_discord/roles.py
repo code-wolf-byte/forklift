@@ -10,12 +10,14 @@ from __future__ import annotations
 from typing import Dict
 
 ROLE_ID_MAP: Dict[str, int] = {
+    # Special Roles
     "First Generation Student": 1210322592544596030,
-    "International Student": 1187457897966338129,
+    # Academic Level Roles
     "First Year": 1187164746454138900,
     "Transfer Student": 1187164763189416078,
     "Graduate Student": 1187164940923060284,
     "Upperclassmen": 1205549707938766878,
+    # College Roles
     "Barrett The Honors College": 1187459588287635466,
     "Ira A. Fulton Schools of Engineering": 1187460517422444676,
     "College of Liberal Arts and Sciences": 1187460910936232099,
@@ -30,10 +32,15 @@ ROLE_ID_MAP: Dict[str, int] = {
     "Walter Cronkite School of Journalism and Mass Communication": 1187461060320571442,
     "Watts College of Public Service and Community Solutions": 1187461173533233192,
     "University College": 1263595373058981898,
+    # Campus Roles
     "Tempe": 1282464973255348366,
     "Downtown Phoenix": 1282465059431252051,
     "Polytechnic": 1282465090808971397,
     "LA Center": 1282501414433849378,
     "West Valley": 1282465131749576704,
     "Online": 1465991804993278113,
+    # Residency Status Roles
+    "Out of State": 1333934752490848377,
+    "Arizona Resident": 1333934478887882823,
+    "International Student": 1187457897966338129,
 }
