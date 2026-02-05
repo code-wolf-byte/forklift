@@ -5,9 +5,11 @@ from datetime import datetime
 from typing import Iterator
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Column,
     DateTime,
+    ForeignKey,
     Integer,
     String,
     Text,
@@ -15,7 +17,7 @@ from sqlalchemy import (
     inspect,
     text,
 )
-from sqlalchemy.orm import Session, declarative_base, scoped_session, sessionmaker
+from sqlalchemy.orm import Session, declarative_base, relationship, scoped_session, sessionmaker
 
 from utils.settings import CONFIG
 
@@ -76,6 +78,27 @@ class User(Base):
     @property
     def is_employee(self) -> bool:
         return self._has_affiliation("employee@asu.edu")
+
+
+class UserRole(Base):
+    """Tracks Discord roles assigned to users from Salesforce data."""
+
+    __tablename__ = "user_roles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    role_name = Column(String(128), nullable=False, index=True)
+    role_discord_id = Column(BigInteger, nullable=False)
+    source = Column(String(32), default="verification", nullable=False)
+    assigned_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    user = relationship("User", backref="roles")
 
 
 class QnaPost(Base):
@@ -160,3 +183,43 @@ def session_scope() -> Iterator[Session]:
         raise
     finally:
         session.close()
+
+
+def save_user_roles(
+    user_id: int,
+    roles: list[tuple[str, int]],
+    source: str = "verification",
+) -> None:
+    """
+    Save or update roles for a user.
+
+    Args:
+        user_id: The database user ID (not Discord ID).
+        roles: List of (role_name, role_discord_id) tuples.
+        source: Source of role assignment (e.g., "verification", "salesforce_sync", "manual").
+    """
+    with session_scope() as session:
+        # Delete existing roles for this user
+        session.query(UserRole).filter(UserRole.user_id == user_id).delete()
+
+        # Add new roles
+        for role_name, role_discord_id in roles:
+            role = UserRole(
+                user_id=user_id,
+                role_name=role_name,
+                role_discord_id=role_discord_id,
+                source=source,
+            )
+            session.add(role)
+
+
+def get_user_roles(user_id: int) -> list[UserRole]:
+    """Get all roles for a user."""
+    with session_scope() as session:
+        return session.query(UserRole).filter(UserRole.user_id == user_id).all()
+
+
+def get_user_by_discord_id(discord_id: str) -> User | None:
+    """Get a user by their Discord ID."""
+    with session_scope() as session:
+        return session.query(User).filter(User.discord_user_id == discord_id).first()

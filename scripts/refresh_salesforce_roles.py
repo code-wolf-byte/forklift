@@ -2,11 +2,17 @@
 Sync Discord roles derived from Salesforce data for all users in the database.
 
 This script:
-1. Exports all users to a CSV.
+1. Exports all users to a CSV with categorized role information.
 2. For each user with a Discord ID, fetches Salesforce profile data.
 3. Removes all roles listed in ROLE_ID_MAP, then adds roles derived from Salesforce.
 
 By default, this is a dry run. Pass --apply to modify roles.
+
+CSV output columns (data/users.csv by default):
+id, asurite_id, email, discord_user_id,
+first_year, transfer, graduate, upperclassmen, first_generation,
+college, campus, residency, stage_name, term_code,
+status, notes
 """
 from __future__ import annotations
 
@@ -77,6 +83,12 @@ def parse_args() -> argparse.Namespace:
         default=str(PROJECT_ROOT / "data" / "users.csv"),
         help="Output CSV path for all users in the database.",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=10,
+        help="Number of concurrent workers for processing users (default: 10).",
+    )
     return parser.parse_args()
 
 
@@ -95,10 +107,21 @@ def write_role_csv(rows: list[dict[str, Any]], csv_path: Path) -> None:
                 "asurite_id",
                 "email",
                 "discord_user_id",
-                "roles_current",
-                "roles_after_apply",
-                "in_state",
-                "out_of_state",
+                # Academic Level (boolean columns)
+                "first_year",
+                "transfer",
+                "graduate",
+                "upperclassmen",
+                # Special
+                "first_generation",
+                # Categories
+                "college",
+                "campus",
+                "residency",
+                # Salesforce metadata
+                "stage_name",
+                "term_code",
+                # Processing info
                 "status",
                 "notes",
             ]
@@ -110,10 +133,16 @@ def write_role_csv(rows: list[dict[str, Any]], csv_path: Path) -> None:
                     row.get("asurite_id"),
                     row.get("email"),
                     row.get("discord_user_id"),
-                    row.get("roles_current"),
-                    row.get("roles_after_apply"),
-                    row.get("in_state"),
-                    row.get("out_of_state"),
+                    row.get("first_year"),
+                    row.get("transfer"),
+                    row.get("graduate"),
+                    row.get("upperclassmen"),
+                    row.get("first_generation"),
+                    row.get("college"),
+                    row.get("campus"),
+                    row.get("residency"),
+                    row.get("stage_name"),
+                    row.get("term_code"),
                     row.get("status"),
                     row.get("notes"),
                 ]
@@ -183,16 +212,6 @@ async def _update_member_roles(
     return len(roles_to_remove), len(roles_to_add)
 
 
-def _current_role_names(member: discord.Member) -> list[str]:
-    reverse_map = {role_id: name for name, role_id in ROLE_ID_MAP.items()}
-    names: list[str] = []
-    for role in member.roles:
-        name = reverse_map.get(role.id)
-        if name:
-            names.append(name)
-    return sorted(set(names))
-
-
 def _role_names_from_ids(role_ids: list[int]) -> list[str]:
     reverse_map = {role_id: name for name, role_id in ROLE_ID_MAP.items()}
     names: list[str] = []
@@ -203,7 +222,249 @@ def _role_names_from_ids(role_ids: list[int]) -> list[str]:
     return sorted(set(names))
 
 
-async def run_sync(apply: bool, csv_path: Path) -> None:
+RESIDENCY_ROLE_NAMES = {
+    "Arizona Resident",
+    "Out of State",
+    "International Student",
+}
+
+COLLEGE_ROLE_NAMES = {
+    "Barrett The Honors College",
+    "College of Health Solutions",
+    "Ira A. Fulton Schools of Engineering",
+    "College of Liberal Arts and Sciences",
+    "College of Global Futures",
+    "Edson College of Nursing and Health Innovation",
+    "Herberger Institute for Design and the Arts",
+    "Thunderbird School of Global Management",
+    "Mary Lou Fulton Teachers College",
+    "New College of Interdisciplinary Arts and Sciences",
+    "College of Integrative Sciences and Arts",
+    "W.P. Carey School of Business",
+    "Walter Cronkite School of Journalism and Mass Communication",
+    "Watts College of Public Service and Community Solutions",
+    "University College",
+}
+
+CAMPUS_ROLE_NAMES = {
+    "Tempe",
+    "Downtown Phoenix",
+    "Polytechnic",
+    "LA Center",
+    "West Valley",
+    "Online",
+}
+
+
+def _missing_category_flags(role_names: list[str]) -> tuple[bool, bool, bool]:
+    role_set = set(role_names)
+    missing_residency = not any(name in role_set for name in RESIDENCY_ROLE_NAMES)
+    missing_college = not any(name in role_set for name in COLLEGE_ROLE_NAMES)
+    missing_campus = not any(name in role_set for name in CAMPUS_ROLE_NAMES)
+    return missing_residency, missing_college, missing_campus
+
+
+def _diagnose_missing_roles(
+    profile: dict[str, Any],
+    missing_residency: bool,
+    missing_college: bool,
+    missing_campus: bool,
+) -> list[str]:
+    """
+    Diagnose why roles are missing - either data missing from Salesforce
+    or a parsing/mapping issue.
+    """
+    notes = []
+
+    if missing_residency:
+        state = profile.get("state")
+        is_international = profile.get("international") or profile.get("is_international")
+        if is_international:
+            # International students should have the International Student role
+            notes.append("residency: international flag set but role not assigned (parsing)")
+        elif not state:
+            notes.append("residency: state missing in Salesforce contact")
+        else:
+            notes.append(f"residency: state='{state}' not mapped (parsing)")
+
+    if missing_college:
+        college_code = profile.get("collegeProgramCode")
+        college_name = profile.get("college")
+        if not college_code and not college_name:
+            notes.append("college: no collegeProgramCode in Salesforce")
+        elif college_code:
+            notes.append(f"college: code='{college_code}' not mapped (parsing)")
+        elif college_name:
+            notes.append(f"college: name='{college_name}' not in ROLE_ID_MAP (parsing)")
+
+    if missing_campus:
+        location = profile.get("locationName") or profile.get("campus")
+        if not location or location == "N/A":
+            notes.append("campus: no locationName in Salesforce")
+        else:
+            notes.append(f"campus: location='{location}' not mapped (parsing)")
+
+    # Check stage - non-enrolled/admitted users may have incomplete data
+    stage = profile.get("stageName")
+    if stage and stage.lower() not in {"enrolled", "admitted"}:
+        notes.append(f"stage '{stage}' may have incomplete data")
+
+    return notes
+
+
+def _derive_role_flags(role_names: list[str]) -> dict[str, Any]:
+    """Derive categorized role flags from a list of role names."""
+    role_set = set(role_names)
+
+    # Academic level flags (boolean)
+    first_year = "First Year" in role_set
+    transfer = "Transfer Student" in role_set
+    graduate = "Graduate Student" in role_set
+    upperclassmen = "Upperclassmen" in role_set
+
+    # Special flags
+    first_generation = "First Generation Student" in role_set
+
+    # College (single value)
+    college = ""
+    for name in COLLEGE_ROLE_NAMES:
+        if name in role_set:
+            college = name
+            break
+
+    # Campus (single value)
+    campus = ""
+    for name in CAMPUS_ROLE_NAMES:
+        if name in role_set:
+            campus = name
+            break
+
+    # Residency (single value)
+    residency = ""
+    for name in ("International Student", "Arizona Resident", "Out of State"):
+        if name in role_set:
+            residency = name
+            break
+
+    return {
+        "first_year": first_year,
+        "transfer": transfer,
+        "graduate": graduate,
+        "upperclassmen": upperclassmen,
+        "first_generation": first_generation,
+        "college": college,
+        "campus": campus,
+        "residency": residency,
+    }
+
+
+async def _process_user(
+    user: User,
+    guild: discord.Guild,
+    get_student_profile,
+    apply: bool,
+    semaphore: asyncio.Semaphore,
+) -> dict[str, Any] | None:
+    """Process a single user and return their row data or None if skipped."""
+    async with semaphore:
+        asurite_id = _normalize_asurite(user.asurite_id)
+        if not user.asurite_id:
+            logger.debug("User %s: skipped (no asurite_id)", user.id)
+            return {"status": "skipped_profile_error"}
+
+        discord_id = _parse_discord_id(user.discord_user_id, user.id)
+        if discord_id is None:
+            logger.debug("User %s (%s): skipped (no discord_id)", user.id, user.asurite_id)
+            return {"status": "skipped_no_discord"}
+
+        try:
+            member = guild.get_member(discord_id)
+            if member is None:
+                member = await guild.fetch_member(discord_id)
+        except discord.NotFound:
+            logger.info("User %s (%s): Discord member not found", user.id, user.asurite_id)
+            return {"status": "skipped_no_discord"}
+        except discord.HTTPException as exc:
+            logger.warning(
+                "User %s (%s): failed to fetch Discord member: %s", user.id, user.asurite_id, exc
+            )
+            return {"status": "skipped_no_discord"}
+
+        if not asurite_id:
+            logger.debug("User %s: skipped (normalized asurite_id empty)", user.id)
+            return {"status": "skipped_profile_error"}
+
+        # Avoid blocking the Discord gateway heartbeat with sync HTTP calls.
+        profile = await asyncio.to_thread(get_student_profile, asurite_id)
+        if profile.get("error"):
+            logger.info(
+                "User %s (%s): Salesforce error: %s",
+                user.id,
+                user.asurite_id,
+                profile.get("error"),
+            )
+            return {"status": "skipped_profile_error"}
+
+        target_role_ids = _roles_from_profile(profile)
+        desired_names = _role_names_from_ids(target_role_ids)
+        role_flags = _derive_role_flags(desired_names)
+        (
+            missing_residency_role,
+            missing_college_role,
+            missing_campus_role,
+        ) = _missing_category_flags(desired_names)
+        removed, added = await _update_member_roles(
+            member=member,
+            guild=guild,
+            target_role_ids=target_role_ids,
+            apply=apply,
+        )
+
+        # Diagnose why roles are missing
+        notes_parts = _diagnose_missing_roles(
+            profile,
+            missing_residency_role,
+            missing_college_role,
+            missing_campus_role,
+        )
+
+        action = "applied" if apply else "dry_run"
+        logger.info(
+            "User %s (%s): %s, -%d/+%d roles, assigned=[%s]",
+            user.id,
+            user.asurite_id,
+            action,
+            removed,
+            added,
+            ", ".join(desired_names) if desired_names else "none",
+        )
+
+        return {
+            "status": "processed",
+            "removed": removed,
+            "added": added,
+            "row": {
+                "id": user.id,
+                "asurite_id": user.asurite_id,
+                "email": user.email,
+                "discord_user_id": user.discord_user_id,
+                "first_year": role_flags["first_year"],
+                "transfer": role_flags["transfer"],
+                "graduate": role_flags["graduate"],
+                "upperclassmen": role_flags["upperclassmen"],
+                "first_generation": role_flags["first_generation"],
+                "college": role_flags["college"],
+                "campus": role_flags["campus"],
+                "residency": role_flags["residency"],
+                "stage_name": profile.get("stageName") or "",
+                "term_code": profile.get("termCode") or "",
+                "status": "applied" if apply else "dry_run",
+                "notes": "; ".join(notes_parts),
+            },
+        }
+
+
+async def run_sync(apply: bool, csv_path: Path, workers: int) -> None:
     env = load_env(ENV_PATH)
     apply_env(env)
 
@@ -244,6 +505,7 @@ async def run_sync(apply: bool, csv_path: Path) -> None:
     @client.event
     async def on_ready() -> None:
         logger.info("Connected to Discord as %s", client.user)
+        logger.info("Processing users with %d concurrent workers", workers)
 
         guild = client.get_guild(guild_id)
         if guild is None:
@@ -251,157 +513,37 @@ async def run_sync(apply: bool, csv_path: Path) -> None:
             await client.close()
             return
 
-        for user in users:
-            asurite_id = _normalize_asurite(user.asurite_id)
-            if not user.asurite_id:
-                stats["skipped_profile_error"] += 1
-                rows.append(
-                    {
-                        "id": user.id,
-                        "asurite_id": user.asurite_id,
-                        "email": user.email,
-                        "discord_user_id": user.discord_user_id,
-                        "roles_current": "",
-                        "roles_after_apply": "",
-                        "in_state": "",
-                        "out_of_state": "",
-                        "status": "skipped",
-                        "notes": "missing_asurite_id",
-                    }
-                )
+        semaphore = asyncio.Semaphore(workers)
+
+        # Create tasks for all users
+        tasks = [
+            _process_user(user, guild, get_student_profile, apply, semaphore)
+            for user in users
+        ]
+
+        # Process all users concurrently with progress logging
+        total = len(tasks)
+        completed = 0
+        for coro in asyncio.as_completed(tasks):
+            result = await coro
+            completed += 1
+            if completed % 50 == 0 or completed == total:
+                logger.info("Progress: %d/%d users processed", completed, total)
+
+            if result is None:
                 continue
-            discord_id = _parse_discord_id(user.discord_user_id, user.id)
-            if discord_id is None:
+
+            status = result.get("status")
+            if status == "skipped_no_discord":
                 stats["skipped_no_discord"] += 1
-                rows.append(
-                    {
-                        "id": user.id,
-                        "asurite_id": user.asurite_id,
-                        "email": user.email,
-                        "discord_user_id": user.discord_user_id,
-                        "roles_current": "",
-                        "roles_after_apply": "",
-                        "in_state": "",
-                        "out_of_state": "",
-                        "status": "skipped",
-                        "notes": "missing_or_invalid_discord_id",
-                    }
-                )
-                continue
-
-            try:
-                member = guild.get_member(discord_id)
-                if member is None:
-                    member = await guild.fetch_member(discord_id)
-            except discord.NotFound:
-                logger.warning("Discord member not found for user %s", user.id)
-                stats["skipped_no_discord"] += 1
-                rows.append(
-                    {
-                        "id": user.id,
-                        "asurite_id": user.asurite_id,
-                        "email": user.email,
-                        "discord_user_id": user.discord_user_id,
-                        "roles_current": "",
-                        "roles_after_apply": "",
-                        "in_state": "",
-                        "out_of_state": "",
-                        "status": "skipped",
-                        "notes": "member_not_found",
-                    }
-                )
-                continue
-            except discord.HTTPException as exc:
-                logger.warning(
-                    "Failed to fetch Discord member %s: %s", discord_id, exc
-                )
-                stats["skipped_no_discord"] += 1
-                rows.append(
-                    {
-                        "id": user.id,
-                        "asurite_id": user.asurite_id,
-                        "email": user.email,
-                        "discord_user_id": user.discord_user_id,
-                        "roles_current": "",
-                        "roles_after_apply": "",
-                        "in_state": "",
-                        "out_of_state": "",
-                        "status": "skipped",
-                        "notes": "member_fetch_failed",
-                    }
-                )
-                continue
-
-            if not asurite_id:
+            elif status == "skipped_profile_error":
                 stats["skipped_profile_error"] += 1
-                rows.append(
-                    {
-                        "id": user.id,
-                        "asurite_id": user.asurite_id,
-                        "email": user.email,
-                        "discord_user_id": user.discord_user_id,
-                        "roles_current": "",
-                        "roles_after_apply": "",
-                        "in_state": "",
-                        "out_of_state": "",
-                        "status": "skipped",
-                        "notes": "invalid_asurite_id",
-                    }
-                )
-                continue
-
-            # Avoid blocking the Discord gateway heartbeat with sync HTTP calls.
-            profile = await asyncio.to_thread(get_student_profile, asurite_id)
-            if profile.get("error"):
-                logger.warning(
-                    "Salesforce profile error for %s: %s",
-                    user.asurite_id,
-                    profile.get("error"),
-                )
-                stats["skipped_profile_error"] += 1
-                rows.append(
-                    {
-                        "id": user.id,
-                        "asurite_id": user.asurite_id,
-                        "email": user.email,
-                        "discord_user_id": user.discord_user_id,
-                        "roles_current": ", ".join(_current_role_names(member)),
-                        "roles_after_apply": "",
-                        "in_state": profile.get("inState"),
-                        "out_of_state": profile.get("outOfState"),
-                        "status": "skipped",
-                        "notes": "salesforce_profile_error",
-                    }
-                )
-                continue
-
-            target_role_ids = _roles_from_profile(profile)
-            current_names = _current_role_names(member)
-            desired_names = _role_names_from_ids(target_role_ids)
-            removed, added = await _update_member_roles(
-                member=member,
-                guild=guild,
-                target_role_ids=target_role_ids,
-                apply=apply,
-            )
-
-            stats["processed"] += 1
-            stats["role_removals"] += removed
-            stats["role_additions"] += added
-            rows.append(
-                {
-                    "id": user.id,
-                    "asurite_id": user.asurite_id,
-                    "email": user.email,
-                    "discord_user_id": user.discord_user_id,
-                    "roles_current": ", ".join(current_names),
-                    "roles_after_apply": ", ".join(desired_names),
-                    "in_state": profile.get("inState"),
-                    "out_of_state": profile.get("outOfState"),
-                    "status": "applied" if apply else "dry_run",
-                    "notes": "",
-                }
-            )
+            elif status == "processed":
+                stats["processed"] += 1
+                stats["role_removals"] += result.get("removed", 0)
+                stats["role_additions"] += result.get("added", 0)
+                if result.get("row"):
+                    rows.append(result["row"])
 
         await client.close()
 
@@ -426,7 +568,7 @@ def main() -> None:
     logger.info("=" * 60)
     logger.info("Salesforce Role Refresh (%s)", mode)
     logger.info("=" * 60)
-    asyncio.run(run_sync(args.apply, Path(args.csv_path)))
+    asyncio.run(run_sync(args.apply, Path(args.csv_path), args.workers))
 
 
 if __name__ == "__main__":

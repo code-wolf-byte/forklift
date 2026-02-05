@@ -1,16 +1,15 @@
 import base64
-from typing import Any, Dict, Iterable
-
-import requests
 import os
+from typing import Any, Dict, Iterable
+import requests
 
 BASE = "https://esb.asu.edu"
 CONTACT_URL = f"{BASE}/api/v1/asu-sf-contact/contact"
 OPP_URL = f"{BASE}/api/v1/asu-sf-opportunity/opportunity"
 
 # These credentials are expected to be provided via environment variables.
-CLIENT_ID = os.getenv('SALESFORCE_API_CLIENT_ID')
-CLIENT_SECRET = os.getenv('SALESFORCE_API_CLIENT_SECRET')
+CLIENT_ID = os.getenv("SALESFORCE_API_CLIENT_ID")
+CLIENT_SECRET = os.getenv("SALESFORCE_API_CLIENT_SECRET")
 
 # Map program codes (undergrad + graduate) to college role names.
 PROGRAM_CODE_TO_COLLEGE_ROLE = {
@@ -203,6 +202,9 @@ def get_student_profile(asurite: str) -> Dict[str, Any]:
     state = contact.get("state")
     country = contact.get("country")
 
+    # Compute residency from contact state (used as fallback or when no opportunity)
+    state_normalized = (state or "").strip().lower()
+
     profile: Dict[str, Any] = {
         "asurite": asurite,
         "name": full_name,
@@ -212,6 +214,9 @@ def get_student_profile(asurite: str) -> Dict[str, Any]:
         "country": country,
         "contactId": contact_id,
         "opportunities": opportunities,
+        # Default residency from contact state (may be overridden by opportunity data)
+        "inState": state_normalized in {"arizona", "az"},
+        "outOfState": bool(state_normalized and state_normalized not in {"arizona", "az"}),
     }
 
     if selected_opp is not None:
@@ -221,8 +226,9 @@ def get_student_profile(asurite: str) -> Dict[str, Any]:
         is_international = _parse_bool(selected_opp.get("internationalStudent"))
         admit_type = selected_opp.get("type")
         career = selected_opp.get("career")
-        in_state = (state == "Arizona") if not is_international else False
-        out_of_state = not in_state if not is_international else False
+        # Override residency if international student
+        in_state = (state_normalized in {"arizona", "az"}) if not is_international else False
+        out_of_state = bool(not in_state and state_normalized) if not is_international else False
 
         # Summary / convenience fields
         profile.update(

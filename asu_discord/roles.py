@@ -19,6 +19,7 @@ ROLE_ID_MAP: Dict[str, int] = {
     "Upperclassmen": 1205549707938766878,
     # College Roles
     "Barrett The Honors College": 1187459588287635466,
+    "College of Health Solutions": 1187459874808930474,
     "Ira A. Fulton Schools of Engineering": 1187460517422444676,
     "College of Liberal Arts and Sciences": 1187460910936232099,
     "College of Global Futures": 1187459643304312852,

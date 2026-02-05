@@ -11,7 +11,7 @@ from discord.commands import Option, slash_command
 from sqlalchemy import func, select
 
 from utils.settings import DISCORD_CONFIG
-from utils.database import User, session_scope
+from utils.database import User, session_scope, save_user_roles, get_user_by_discord_id
 from services.google_sheets import write_user_left
 from ..roles import ROLE_ID_MAP
 from ..salesforce import get_student_profile
@@ -120,7 +120,7 @@ def _campus_role_from_opportunity(opp: dict[str, Any]) -> str | None:
         return "Online"
     if location == "west valley":
         return "West Valley"
-    if location == "la center":
+    if location in {"la center", "los angeles"}:
         return "LA Center"
     return None
 
@@ -142,7 +142,7 @@ def _campus_role_from_profile(student_profile: dict[str, Any]) -> str | None:
         return "Online"
     if location == "west valley":
         return "West Valley"
-    if location == "la center":
+    if location in {"la center", "los angeles"}:
         return "LA Center"
     return None
 
@@ -657,6 +657,41 @@ class VerificationCog(commands.Cog):
             [r.id for r in roles_to_add],
             user_id,
         )
+
+        # Save all assigned roles to the database
+        await self._save_roles_to_database(user_id, logical_role_names, source="verification")
+
+    async def _save_roles_to_database(
+        self, discord_user_id: int, role_names: set[str], source: str = "verification"
+    ) -> None:
+        """Save the user's Salesforce-derived roles to the database."""
+        try:
+            db_user = await asyncio.to_thread(get_user_by_discord_id, str(discord_user_id))
+            if db_user is None:
+                logger.warning(
+                    "Cannot save roles to database: no database user for Discord ID %s",
+                    discord_user_id,
+                )
+                return
+
+            roles_to_save: list[tuple[str, int]] = []
+            for role_name in sorted(role_names):
+                role_id = ROLE_ID_MAP.get(role_name)
+                if role_id is not None:
+                    roles_to_save.append((role_name, role_id))
+
+            if roles_to_save:
+                await asyncio.to_thread(save_user_roles, db_user.id, roles_to_save, source)
+                logger.info(
+                    "Saved %d roles to database for user %s (Discord ID: %s)",
+                    len(roles_to_save),
+                    db_user.asurite_id,
+                    discord_user_id,
+                )
+        except Exception:
+            logger.exception(
+                "Failed to save roles to database for Discord user %s", discord_user_id
+            )
 
     async def remove_roles_from_profile(
         self, user_id: int, student_profile: dict[str, Any]
