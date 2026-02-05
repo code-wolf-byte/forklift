@@ -79,6 +79,7 @@ class AppConfig:
     QNA_MODEL_ARN: str | None = _env_value("QNA_MODEL_ARN")
     QNA_AWS_REGION: str | None = _env_value("QNA_AWS_REGION")
     QNA_HELPER_ROLE_ID: str | None = _env_value("QNA_HELPER_ROLE_ID")
+    SURVEY_CHANNEL_ID: str | None = _env_value("SURVEY_CHANNEL_ID")
     AWS_ACCESS_KEY_ID: str | None = _env_value("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY: str | None = _env_value("AWS_SECRET_ACCESS_KEY")
     SSO_ATTRIBUTE_MAP: Dict[str, List[str]] = field(init=False)

@@ -6,10 +6,11 @@ from typing import Optional
 import discord
 from discord.ext import commands
 
-from utils.settings import DISCORD_CONFIG
+from utils.settings import CONFIG, DISCORD_CONFIG
 from .cogs.verification import VerificationCog
 from .shared import register_bot
 from .cogs.qna import QnACog
+from .cogs.survey import SurveyCog
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class ForkliftBot(commands.Bot):
         super().__init__(command_prefix=command_prefix, intents=intents)
         self._load_verification_cog()
         self._load_qna_cog()
+        self._load_survey_cog()
 
     def _load_verification_cog(self) -> None:
         """Attach the verification cog immediately after initialization."""
@@ -73,6 +75,35 @@ class ForkliftBot(commands.Bot):
             raise
 
         logger.info("Loaded QnACog")
+
+    def _load_survey_cog(self) -> None:
+        """Attach the survey reminder cog."""
+        if DISCORD_CONFIG is None:
+            logger.warning(
+                "Discord bot started without DISCORD_CONFIG; skipping survey cog"
+            )
+            return
+
+        survey_channel_id = CONFIG.SURVEY_CHANNEL_ID
+        if not survey_channel_id:
+            logger.warning(
+                "SURVEY_CHANNEL_ID not configured; skipping survey cog"
+            )
+            return
+
+        try:
+            self.add_cog(
+                SurveyCog(
+                    self,
+                    guild_id=int(DISCORD_CONFIG.guild_id),
+                    survey_channel_id=int(survey_channel_id),
+                )
+            )
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to load SurveyCog")
+            raise
+
+        logger.info("Loaded SurveyCog for guild %s", DISCORD_CONFIG.guild_id)
 
     async def setup_hook(self) -> None:
         """Run after the bot connects to Discord."""
