@@ -8,8 +8,6 @@ from typing import Any, Optional
 import discord
 from discord.ext import commands
 from discord.commands import Option, slash_command
-from sqlalchemy import func, select
-
 from utils.settings import DISCORD_CONFIG
 from utils.database import User, session_scope, save_user_roles, get_user_by_discord_id
 from services.google_sheets import write_user_left
@@ -551,7 +549,7 @@ class VerificationCog(commands.Cog):
         )
 
     async def unverify_member_by_id(
-        self, user_id: int, *, reason: str | None = None
+        self, user_id: int, reason: str | None = None
     ) -> bool:
         """Remove the verified role from a Discord user identified by ID."""
         await self.bot.wait_until_ready()
@@ -802,15 +800,15 @@ class VerificationCog(commands.Cog):
     @slash_command(
         **_moderation_command_kwargs(
             "ban",
-            "Ban an ASURITE from verification and remove their verification role.",
+            "Ban a member from verification and remove their verification role.",
         )
     )
-    async def ban_asurite(
+    async def ban_member(
         self,
         ctx: discord.ApplicationContext,
-        asurite: Option(str, "ASURITE ID to ban"),
+        member: Option(discord.Member, "Member to ban from verification"),
     ) -> None:
-        """Ban an ASURITE from verification and revoke their Discord access."""
+        """Ban a member's linked ASURITE from verification and revoke their access."""
         if ctx.guild_id != self.guild_id or ctx.guild is None:
             await ctx.respond(
                 "This command is only available in the Devil2Devil server.",
@@ -818,32 +816,23 @@ class VerificationCog(commands.Cog):
             )
             return
 
-        target = (asurite or "").strip()
-        if not target:
-            await ctx.respond("Please provide an ASURITE to ban.", ephemeral=True)
-            return
-
         await ctx.defer(ephemeral=True)
 
-        normalized = target.lower()
         stored_asurite: str | None = None
-        discord_user_id: int | None = None
         already_banned = False
         missing_user = False
 
         with session_scope() as db_session:
-            stmt = select(User).where(func.lower(User.asurite_id) == normalized)
-            user = db_session.execute(stmt).scalar_one_or_none()
+            user = (
+                db_session.query(User)
+                .filter(User.discord_user_id == str(member.id))
+                .one_or_none()
+            )
 
             if user is None:
                 missing_user = True
             else:
                 stored_asurite = user.asurite_id
-                try:
-                    if user.discord_user_id:
-                        discord_user_id = int(user.discord_user_id)
-                except (TypeError, ValueError):
-                    discord_user_id = None
 
                 if user.banned:
                     already_banned = True
@@ -854,50 +843,29 @@ class VerificationCog(commands.Cog):
 
         if missing_user:
             await ctx.followup.send(
-                f"No verification record found for {target}.",
+                f"No verification record found for {member.mention}.",
                 ephemeral=True,
             )
             return
 
         notes: list[str] = []
-        member: Optional[discord.Member] = None
-        if discord_user_id is not None:
-            member = ctx.guild.get_member(discord_user_id)
-            if member is None:
-                try:
-                    member = await ctx.guild.fetch_member(discord_user_id)
-                except discord.NotFound:
-                    member = None
-                except discord.HTTPException as exc:  # pragma: no cover - network failure
-                    logger.warning(
-                        "Unable to load guild member %s for ban action: %s",
-                        discord_user_id,
-                        exc,
-                    )
-                    member = None
-
-        if member is not None:
-            removed = await self._remove_verified_role(
-                ctx.guild,
-                member,
-                reason=f"Verification ban by {ctx.author}",
-            )
-            if removed:
-                notes.append(
-                    f"Removed verification role from linked account {member.mention}."
-                )
-            else:
-                notes.append(
-                    "No verification role changes were required for the linked account."
-                )
-        elif discord_user_id is not None:
+        removed = await self._remove_verified_role(
+            ctx.guild,
+            member,
+            reason=f"Verification ban by {ctx.author}",
+        )
+        if removed:
             notes.append(
-                "Linked Discord account not found in the guild; no role changes made."
+                f"Removed verification role from {member.mention}."
+            )
+        else:
+            notes.append(
+                "No verification role changes were required."
             )
 
         if already_banned:
             await ctx.followup.send(
-                f"{stored_asurite or target} is already banned from verification."
+                f"{stored_asurite or member.mention} is already banned from verification."
                 + (f" {' '.join(notes)}" if notes else ""),
                 ephemeral=True,
             )
@@ -905,9 +873,52 @@ class VerificationCog(commands.Cog):
 
         await ctx.followup.send(
             (
-                f"{stored_asurite or target} has been banned from verification."
+                f"{stored_asurite or member.mention} has been banned from verification."
                 + (f" {' '.join(notes)}" if notes else "")
             ),
+            ephemeral=True,
+        )
+
+    @slash_command(
+        **{
+            "name": "email",
+            "description": "Look up a member's email and ASURITE.",
+            "dm_permission": False,
+            "default_member_permissions": discord.Permissions(manage_guild=True),
+            **({"guild_ids": TEST_GUILD_IDS} if TEST_GUILD_IDS else {}),
+        }
+    )
+    async def lookup_email(
+        self,
+        ctx: discord.ApplicationContext,
+        member: Option(discord.Member, "Member to look up"),
+    ) -> None:
+        """Look up the email and ASURITE a member used for verification."""
+        if ctx.guild_id != self.guild_id or ctx.guild is None:
+            await ctx.respond(
+                "This command is only available in the Devil2Devil server.",
+                ephemeral=True,
+            )
+            return
+
+        with session_scope() as session:
+            user = (
+                session.query(User)
+                .filter(User.discord_user_id == str(member.id))
+                .one_or_none()
+            )
+
+        if user is None:
+            await ctx.respond(
+                f"No verification record found for {member.mention}.",
+                ephemeral=True,
+            )
+            return
+
+        await ctx.respond(
+            f"**{member.mention}**\n"
+            f"**ASURITE:** {user.asurite_id or 'N/A'}\n"
+            f"**Email:** {user.email or 'N/A'}",
             ephemeral=True,
         )
 
