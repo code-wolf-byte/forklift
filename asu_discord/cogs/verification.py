@@ -10,7 +10,6 @@ from discord.ext import commands
 from discord.commands import Option, slash_command
 from utils.settings import DISCORD_CONFIG
 from utils.database import User, session_scope, save_user_roles, get_user_by_discord_id
-from services.google_sheets import write_user_left
 from ..roles import ROLE_ID_MAP
 from ..salesforce import get_student_profile
 
@@ -429,11 +428,7 @@ class VerificationCog(commands.Cog):
             if user is None:
                 return
 
-            now = datetime.utcnow()
-            user.left_at = now
-
-            if user.verified and user.email:
-                write_user_left(user.email, now)
+            user.left_at = datetime.utcnow()
 
     # Alias to match common terminology
     on_member_leave = on_member_remove

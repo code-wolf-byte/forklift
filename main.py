@@ -10,7 +10,6 @@ from flask import Flask, redirect, render_template, session, url_for
 from cron import start_upload_scheduler
 from routes.discord import discord_bp
 from routes.cas import cas_bp
-from services.google_sheets import sync_departed_users
 from utils.database import init_db
 from utils.settings import CONFIG, DISCORD_CONFIG
 
@@ -82,7 +81,6 @@ def _start_discord_bot_thread() -> None:
 if _should_start_background_tasks():
     init_db()
     start_upload_scheduler()
-    sync_departed_users()
 else:
     init_db()
 if _should_start_discord_bot():

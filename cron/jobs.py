@@ -61,12 +61,38 @@ def _fetch_verified_users(since: datetime | None) -> List[Tuple[str, datetime]]:
     return rows
 
 
-def _build_csv(rows: Iterable[Tuple[str, datetime]]) -> bytes:
+def _fetch_verified_leaves(since: datetime | None) -> List[Tuple[str, datetime]]:
+    """Fetch verified users who left the server, optionally since a given timestamp."""
+    since = _normalize_dt(since)
+    with session_scope() as session:
+        query = (
+            session.query(User)
+            .filter(User.verified.is_(True))
+            .filter(User.email.isnot(None))
+            .filter(User.left_at.isnot(None))
+        )
+        if since is not None:
+            query = query.filter(User.left_at >= since)
+
+        rows: List[Tuple[str, datetime]] = []
+        for user in query.order_by(User.left_at.asc()).all():
+            left_at = _normalize_dt(user.left_at)
+            if left_at is None:
+                continue
+            rows.append((user.email, left_at))
+    return rows
+
+
+def _build_csv(
+    rows: Iterable[Tuple[str, datetime]],
+    *,
+    headers: Tuple[str, str] = ("email", "verified_at"),
+) -> bytes:
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(["email", "verified_at"])
-    for email, verified_at in rows:
-        writer.writerow([email, verified_at.isoformat()])
+    writer.writerow(headers)
+    for col1, col2 in rows:
+        writer.writerow([col1, col2.isoformat()])
     return buffer.getvalue().encode("utf-8")
 
 
@@ -102,4 +128,40 @@ def _upload_csv(config: SftpUploadConfig, payload: bytes, filename: str) -> str:
         return client.upload_bytes(payload, config.remote_dir, filename)
 
 
-AVAILABLE_JOBS: dict[str, CronJob] = {"upload_emails_to_sftp": upload_emails_to_sftp}
+_LEAVES_STATE_FILENAME = "upload_leaves_to_sftp.state"
+_LEAVES_FILENAME_PREFIX = "D2D_Verified_Leaves"
+
+
+def upload_leaves_to_sftp() -> None:
+    """Upload verified-and-left user emails to SFTP, only sending new rows since the last run."""
+    if CONFIG.DEV_MODE:
+        logger.info("FORKLIFT_DEV_MODE enabled; skipping SFTP leaves upload")
+        return
+
+    if SFTP_CONFIG is None:
+        logger.warning("SFTP configuration missing or disabled; skipping upload_leaves_to_sftp")
+        return
+
+    state_path = SFTP_CONFIG.state_path.parent / _LEAVES_STATE_FILENAME
+
+    now = datetime.now(timezone.utc)
+    last_run = _load_last_run(state_path)
+    rows = _fetch_verified_leaves(last_run)
+
+    if not rows:
+        _save_last_run(state_path, now)
+        logger.info("No verified leaves to upload; recorded last run at %s", now.isoformat())
+        return
+
+    csv_payload = _build_csv(rows, headers=("email", "left_at"))
+    filename = f"{_LEAVES_FILENAME_PREFIX}_{now.strftime('%Y%m%d')}.csv"
+    remote_path = _upload_csv(SFTP_CONFIG, csv_payload, filename)
+
+    _save_last_run(state_path, now)
+    logger.info("Uploaded %d verified leaves to SFTP at %s", len(rows), remote_path)
+
+
+AVAILABLE_JOBS: dict[str, CronJob] = {
+    "upload_emails_to_sftp": upload_emails_to_sftp,
+    "upload_leaves_to_sftp": upload_leaves_to_sftp,
+}
