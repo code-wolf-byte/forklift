@@ -61,12 +61,12 @@ def _fetch_verified_users(since: datetime | None) -> List[Tuple[str, datetime]]:
     return rows
 
 
-def _build_csv(rows: Iterable[Tuple[str, datetime]]) -> bytes:
+def _build_csv(rows: Iterable[Tuple[str, datetime]], dt_column: str = "verified_at") -> bytes:
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(["email", "verified_at"])
-    for email, verified_at in rows:
-        writer.writerow([email, verified_at.isoformat()])
+    writer.writerow(["email", dt_column])
+    for email, dt in rows:
+        writer.writerow([email, dt.isoformat()])
     return buffer.getvalue().encode("utf-8")
 
 
@@ -102,4 +102,60 @@ def _upload_csv(config: SftpUploadConfig, payload: bytes, filename: str) -> str:
         return client.upload_bytes(payload, config.remote_dir, filename)
 
 
-AVAILABLE_JOBS: dict[str, CronJob] = {"upload_emails_to_sftp": upload_emails_to_sftp}
+_DEPARTED_STATE_PATH = (
+    Path(__file__).resolve().parent.parent / "data" / "upload_departed_to_sftp.state"
+)
+_DEPARTED_FILENAME_PREFIX = "Devil2Devil_Left"
+
+
+def _fetch_departed_users(since: datetime | None) -> List[Tuple[str, datetime]]:
+    since = _normalize_dt(since)
+    with session_scope() as session:
+        query = (
+            session.query(User)
+            .filter(User.verified.is_(True))
+            .filter(User.left_at.isnot(None))
+        )
+        if since is not None:
+            query = query.filter(User.left_at >= since)
+
+        rows: List[Tuple[str, datetime]] = []
+        for user in query.order_by(User.left_at.asc()).all():
+            left_at = _normalize_dt(user.left_at)
+            if left_at is None:
+                continue
+            rows.append((user.email, left_at))
+    return rows
+
+
+def upload_departed_to_sftp() -> None:
+    """Upload departed verified user emails to SFTP, all on first run then incremental."""
+    if CONFIG.DEV_MODE:
+        logger.info("FORKLIFT_DEV_MODE enabled; skipping SFTP upload")
+        return
+
+    if SFTP_CONFIG is None:
+        logger.warning("SFTP configuration missing or disabled; skipping upload_departed_to_sftp")
+        return
+
+    now = datetime.now(timezone.utc)
+    last_run = _load_last_run(_DEPARTED_STATE_PATH)
+    rows = _fetch_departed_users(last_run)
+
+    if not rows:
+        _save_last_run(_DEPARTED_STATE_PATH, now)
+        logger.info("No departed users to upload; recorded last run at %s", now.isoformat())
+        return
+
+    csv_payload = _build_csv(rows, dt_column="left_at")
+    filename = f"{_DEPARTED_FILENAME_PREFIX}-{now.strftime('%Y%m%d')}.csv"
+    remote_path = _upload_csv(SFTP_CONFIG, csv_payload, filename)
+
+    _save_last_run(_DEPARTED_STATE_PATH, now)
+    logger.info("Uploaded %d departed users to SFTP at %s", len(rows), remote_path)
+
+
+AVAILABLE_JOBS: dict[str, CronJob] = {
+    "upload_emails_to_sftp": upload_emails_to_sftp,
+    "upload_departed_to_sftp": upload_departed_to_sftp,
+}
