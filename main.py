@@ -5,7 +5,7 @@ import threading
 from datetime import datetime
 from typing import Callable
 
-from flask import Flask, redirect, render_template, session, url_for
+from flask import Flask, abort, jsonify, redirect, render_template, send_from_directory, session, url_for
 
 from cron import start_upload_scheduler
 from routes.discord import discord_bp
@@ -97,6 +97,11 @@ app.config["SESSION_COOKIE_SAMESITE"] = CONFIG.SESSION_COOKIE_SAMESITE
 registrar = BlueprintRegistrar(cas_enabled=CONFIG.CAS_ENABLED)
 registrar.register_all(app)
 
+REACT_BUILD_DIR = os.getenv(
+    "REACT_BUILD_DIR",
+    os.path.join(os.path.dirname(__file__), "asu-unity-react", "dist"),
+)
+
 
 @app.context_processor
 def inject_globals():
@@ -148,10 +153,10 @@ def _verification_context() -> dict:
     return context
 
 
-@app.route("/")
-def index():
+@app.route("/api/status")
+def api_status():
     context = _verification_context()
-    return render_template("index.html", **context)
+    return jsonify(context)
 
 
 @app.route("/health")
@@ -161,17 +166,28 @@ def health():
 
 @app.route("/verification-error")
 def verification_error():
-    context = _verification_context()
-    if not context.get("verification_error"):
-        return redirect(url_for("index"))
-    return render_template("index.html", **context), 400
+    return redirect(url_for("index"))
 
 
 @app.route("/verified")
 def verified():
+    return redirect(url_for("index"))
+
+
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def index(path):
+    react_index = os.path.join(REACT_BUILD_DIR, "index.html")
+    if os.path.exists(react_index):
+        # Serve static assets (JS, CSS, images) directly
+        if path and os.path.exists(os.path.join(REACT_BUILD_DIR, path)):
+            return send_from_directory(REACT_BUILD_DIR, path)
+        # SPA fallback — all other paths serve index.html
+        return send_from_directory(REACT_BUILD_DIR, "index.html")
+    # Dev fallback: no React build present, serve old Jinja template
+    if path:
+        abort(404)
     context = _verification_context()
-    if not context["discord_complete"]:
-        return redirect(url_for("index"))
     return render_template("index.html", **context)
 
 

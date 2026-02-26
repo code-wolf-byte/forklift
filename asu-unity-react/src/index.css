@@ -1,0 +1,115 @@
+/* Verification step card states */
+.step-card {
+  transition: border 0.2s, box-shadow 0.2s;
+}
+
+.step-card.completed {
+  border: 2px solid #8c1d40 !important;
+  box-shadow: 0 0.5rem 1rem rgba(140, 29, 64, 0.2);
+}
+
+.step-card.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.step-card .card-body {
+  text-align: center;
+}
+
+.step-card .step-icon {
+  font-size: 2.5rem;
+  margin-bottom: 0.75rem;
+  color: #8c1d40;
+}
+
+/* Completed badge */
+.badge-complete {
+  background-color: #198754;
+  color: #fff;
+  font-size: 0.75rem;
+  padding: 0.25em 0.6em;
+  border-radius: 50rem;
+}
+
+/* Button group inside cards */
+.card-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+/* Non-interactive status button style */
+.btn-status {
+  background-color: #8c1d40;
+  border-color: #8c1d40;
+  color: #fff;
+  cursor: default;
+}
+.btn-status:hover,
+.btn-status:focus,
+.btn-status:active {
+  background-color: #8c1d40;
+  border-color: #8c1d40;
+  color: #fff;
+  box-shadow: none;
+}
+
+/* Hero section */
+.hero-section {
+  position: relative;
+  min-height: 400px;
+  display: flex;
+  align-items: center;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.hero-section::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.hero-section .hero-content {
+  position: relative;
+  z-index: 1;
+}
+
+/* Gold highlight for headings */
+.text-gold {
+  color: #ffb310;
+}
+
+/* Next steps link grid */
+.next-steps-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.next-step-card {
+  display: flex;
+  align-items: center;
+  padding: 1rem;
+  border: 1px solid #dee2e6;
+  border-radius: 0.5rem;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.next-step-card:hover {
+  border-color: #8c1d40;
+  box-shadow: 0 0.25rem 0.5rem rgba(140, 29, 64, 0.15);
+  color: inherit;
+}
+
+.next-step-card .step-label {
+  flex: 1;
+  font-weight: 500;
+}
