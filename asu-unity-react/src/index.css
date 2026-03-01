@@ -1,0 +1,52 @@
+/* ─── Card states ─────────────────────────────────────────────────────────── */
+
+.completed-card {
+  border: 2px solid var(--asu-maroon, #8c1d40) !important;
+  box-shadow: 0 0.5rem 1rem rgba(140, 29, 64, 0.25);
+}
+
+.disabled-card {
+  opacity: 0.5;
+}
+
+.disabled-card .btn {
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+/* ─── Card buttons ────────────────────────────────────────────────────────── */
+
+.card-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  text-align: center;
+}
+
+.card-buttons .btn {
+  white-space: normal;
+}
+
+/* ─── Hero CTA button (no hover state change) ─────────────────────────────── */
+
+.btn-no-hover,
+.btn-no-hover:hover,
+.btn-no-hover:focus,
+.btn-no-hover:active {
+  background-color: #8c1d40;
+  border-color: #8c1d40;
+  color: #ffffff;
+  text-decoration: none;
+  box-shadow: none;
+}
+
+.hero-cta-buttons .btn,
+.hero-cta-buttons .btn:hover,
+.hero-cta-buttons .btn:focus,
+.hero-cta-buttons .btn:active {
+  background-color: #8c1d40;
+  border-color: #8c1d40;
+  color: #ffffff;
+  text-decoration: none;
+  box-shadow: none;
+}

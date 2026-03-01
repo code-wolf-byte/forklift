@@ -12,6 +12,10 @@ web/node_modules
 web/forklift/node_modules
 web/forklift/.next
 web/forklift/dist
+asu-unity-react/node_modules
+asu-unity-react/dist
+asu-unity-react/.yarn/cache
+asu-unity-react/.yarn/unplugged
 sp-metadata.xml
 idp-metadata.xml
 certs/*.key

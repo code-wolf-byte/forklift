@@ -1,8 +1,10 @@
 services:
   forklift:
-    image: ghcr.io/your-org/forklift:latest
+    image: codewolfbyte/forklift:latest
     build:
       context: .
+      args:
+        NPM_AUTH_TOKEN: ${NPM_AUTH_TOKEN}
     env_file:
       - .env
     ports:
