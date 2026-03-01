@@ -1,80 +1,64 @@
 import heroImage from "../assets/devil2devil-hero.jpeg";
 import profileGif from "../assets/devil2devil-profile.gif";
-import discordLogo from "../assets/discord.png";
 
 // ─── Hero ─────────────────────────────────────────────────────────────────────
 
 function HeroSection() {
   return (
-    <section
-      className="hero-section py-5"
-      style={{ backgroundImage: `url(${heroImage})` }}
-      aria-label="Devil2Devil hero"
-    >
-      <div className="container hero-content">
-        <div className="row">
-          <div className="col-12 col-md-8 col-lg-6">
-            <h1 className="display-4 fw-bold text-white mb-3">
-              <span className="text-gold">Devil</span>
-              <span className="text-white">2</span>
-              <span className="text-gold">Devil</span>
-            </h1>
-            <p className="lead text-white mb-4">
-              Find new friends, join communities and make connections in ASU's
-              Devil2Devil Discord server for admitted students.
-            </p>
-            <a
-              href="https://devil2devil.asu.edu/"
-              className="btn btn-gold btn-lg"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learn more
-            </a>
-          </div>
+    <div className="uds-hero-lg">
+      <div className="hero-overlay" />
+      <img
+        className="hero"
+        src={heroImage}
+        alt=""
+        loading="lazy"
+        decoding="async"
+      />
+      <h1>
+        <span className="highlight-gold">Devil2Devil</span>
+      </h1>
+      <div className="content hero-cta">
+        <p className="text-white">
+          Find new friends, join communities and make connections in ASU's
+          Devil2Devil Discord server for admitted students.
+        </p>
+        <div className="d-flex flex-wrap gap-3 align-items-center mt-4 hero-cta-buttons">
+          <a
+            className="btn btn-maroon text-white"
+            href="https://devil2devil.asu.edu/"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Learn more
+          </a>
         </div>
       </div>
-    </section>
+    </div>
   );
 }
 
 // ─── Verification step card ────────────────────────────────────────────────────
 
-function StepCard({
-  stepNumber,
-  icon,
-  title,
-  description,
-  complete,
-  enabled,
-  children,
-}) {
-  const cardClass = [
-    "card h-100 step-card",
-    complete ? "completed" : "",
-    !enabled ? "disabled" : "",
+function StepCard({ icon, title, description, complete, enabled, children }) {
+  const wrapperClass = [
+    "card-wrapper",
+    complete ? "completed-card" : "",
+    !enabled ? "disabled-card" : "",
   ]
     .filter(Boolean)
     .join(" ");
 
   return (
-    <div className="col-12 col-sm-6 col-xl-3">
-      <div className={cardClass}>
-        <div className="card-body py-4 px-3">
-          <div className="d-flex justify-content-between align-items-start mb-2">
-            <span className="badge bg-secondary">Step {stepNumber}</span>
-            {complete && (
-              <span className="badge-complete">
-                <i className="fas fa-check me-1" aria-hidden="true" />
-                Completed
-              </span>
-            )}
-          </div>
-          <div className="step-icon my-3">{icon}</div>
-          <h3 className="h5 card-title">{title}</h3>
-          <p className="card-text text-muted small">{description}</p>
-          <div className="card-actions">{children}</div>
+    <div className={wrapperClass}>
+      <div className="card cards-components">
+        {icon}
+        <div className="card-header">
+          <h3 className="card-title">{title}</h3>
         </div>
+        <div className="card-body">
+          <p>{description}</p>
+        </div>
+        <div className="card-buttons">{children}</div>
       </div>
     </div>
   );
@@ -96,142 +80,164 @@ function VerificationSection({
   const step2Enabled = casComplete;
   const step3Enabled = discordComplete;
 
+  const contextLine = discordComplete ? (
+    <span className="badge text-bg-success">All steps complete</span>
+  ) : casComplete ? (
+    "Next up: connect your Discord account."
+  ) : (
+    "Start by signing in with your ASURITE ID."
+  );
+
+  let statusMessage = null;
+  if (discordComplete) {
+    const username = verificationState?.discord_username || discordUser?.username;
+    statusMessage = (
+      <p className="mb-0">
+        Your ASU account
+        {verificationState?.asurite && (
+          <> (<strong>{verificationState.asurite}</strong>)</>
+        )}{" "}
+        is linked with Discord. Welcome to Devil2Devil
+        {username && `, ${username}`}!
+      </p>
+    );
+  } else if (casComplete) {
+    statusMessage = (
+      <p className="mb-0">
+        You're signed in with ASU
+        {verificationState?.asurite && (
+          <> as <strong>{verificationState.asurite}</strong></>
+        )}
+        {verificationState?.email && ` (${verificationState.email})`}. Connect
+        your Discord account to finish verification.
+      </p>
+    );
+  }
+
   return (
-    <section id="verification-steps" className="py-5">
+    <section id="verification-steps" className="py-5 bg-white">
       <div className="container">
-        <div className="text-center mb-5">
-          <h2 className="fw-bold">
-            Get Started with{" "}
-            <span style={{ color: "#8c1d40" }}>Devil2Devil</span>
-          </h2>
-          <p className="text-muted">
-            Complete the steps below to join the community.
-          </p>
+        <div className="mb-4">
+          <div className="uds-highlighted-heading">
+            <h2>
+              <span className="highlight-gold">Verify Your Discord Account</span>
+            </h2>
+          </div>
+          <div className="text-muted small mt-2">{contextLine}</div>
+          {(discordComplete || casComplete || verificationError) && (
+            <div className="mt-3 text-black">
+              {statusMessage}
+              {verificationError && (
+                <div className="alert alert-warning border-0 fw-semibold text-dark bg-warning-subtle mt-3 mb-0">
+                  Verification issue: {verificationError}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {verificationError && (
-          <div className="alert alert-danger mb-4" role="alert">
-            <i className="fas fa-exclamation-triangle me-2" aria-hidden="true" />
-            {verificationError}
-          </div>
-        )}
+        <div className="uds-card-arrangement">
+          <div className="uds-card-arrangement-content-container default" />
+          <div className="uds-card-arrangement-card-container auto-arrangement four-columns">
 
-        <div className="row g-4">
-          {/* Step 1 — My ASU */}
-          <StepCard
-            stepNumber={1}
-            icon={<i className="fas fa-user-circle fa-2x" aria-hidden="true" />}
-            title="My ASU"
-            description="Login with your ASURITE ID to verify your admission status."
-            complete={casComplete}
-            enabled={true}
-          >
-            {casComplete ? (
-              <>
-                <span className="text-success small fw-semibold">
-                  <i className="fas fa-check me-1" />
-                  Verified as {verificationState?.asurite}
-                </span>
-                <a href={casLoginUrl} className="btn btn-sm btn-outline-maroon">
-                  Reauthenticate
+            {/* Step 1 — My ASU */}
+            <StepCard
+              icon={<i className="fas fa-desktop fa-2x card-icon-top" aria-hidden="true" />}
+              title="My ASU"
+              description="Log in to MyASU so we can verify your admission status. You'll be returned here to link your Discord account."
+              complete={casComplete}
+              enabled={true}
+            >
+              {casLoginUrl ? (
+                <a href={casLoginUrl} className="btn btn-maroon">
+                  {casComplete ? "Reauthenticate with ASU" : "My ASU"}
                 </a>
-              </>
-            ) : (
-              <a href={casLoginUrl} className="btn btn-maroon btn-sm">
-                My ASU
-              </a>
-            )}
-          </StepCard>
+              ) : (
+                <a href="#" className="btn btn-secondary disabled" aria-disabled="true">
+                  ASU login unavailable
+                </a>
+              )}
+            </StepCard>
 
-          {/* Step 2 — Discord */}
-          <StepCard
-            stepNumber={2}
-            icon={
-              <img
-                src={discordLogo}
-                alt="Discord logo"
-                style={{ height: "2.5rem" }}
-              />
-            }
-            title="Connect Discord"
-            description="Connect your Discord account and approve the Forkman bot."
-            complete={discordComplete}
-            enabled={step2Enabled}
-          >
-            {discordComplete ? (
-              <span className="text-success small fw-semibold">
-                <i className="fas fa-check me-1" />
-                {discordUser?.username
-                  ? `Connected as ${discordUser.username}`
-                  : "Discord linked"}
-              </span>
-            ) : discordConfigured ? (
+            {/* Step 2 — Discord */}
+            <StepCard
+              icon={<i className="fab fa-discord fa-2x card-icon-top" aria-hidden="true" />}
+              title="Discord"
+              description={
+                discordComplete
+                  ? `Discord is linked${discordUser?.username ? ` as ${discordUser.username}` : ""}. You can reconnect to refresh permissions.`
+                  : step2Enabled
+                  ? "Approve the Forkman bot to verify you in the server and grant your verified role automatically."
+                  : "Complete Step 1 to unlock this step."
+              }
+              complete={discordComplete}
+              enabled={step2Enabled}
+            >
+              {discordConfigured && discordLoginUrl ? (
+                <a
+                  href={discordLoginUrl}
+                  className={`btn btn-maroon${!step2Enabled ? " disabled" : ""}`}
+                  aria-disabled={!step2Enabled || undefined}
+                >
+                  {discordComplete ? "Manage Discord Link" : "Connect Discord"}
+                </a>
+              ) : (
+                <div className="alert alert-secondary small mb-0">
+                  Discord integration is not configured.
+                </div>
+              )}
+            </StepCard>
+
+            {/* Step 3 — Devil2Devil Server */}
+            <StepCard
+              icon={<i className="fas fa-comments fa-2x card-icon-top" aria-hidden="true" />}
+              title="Devil2Devil Server"
+              description="Head to the Devil2Devil Discord community and start meeting the Class of Fall 2026!"
+              complete={false}
+              enabled={step3Enabled}
+            >
               <a
-                href={discordLoginUrl}
-                className="btn btn-maroon btn-sm"
-                aria-disabled={!step2Enabled}
+                href={
+                  step3Enabled
+                    ? "https://discord.com/channels/1187144343400751234/1435338904994709626"
+                    : "#"
+                }
+                className={`btn btn-maroon${!step3Enabled ? " disabled" : ""}`}
+                aria-disabled={!step3Enabled || undefined}
+                {...(step3Enabled
+                  ? { target: "_blank", rel: "noopener noreferrer" }
+                  : {})}
               >
-                Connect Discord
+                Visit Devil2Devil
               </a>
-            ) : (
-              <span className="text-muted small">Discord not configured</span>
-            )}
-          </StepCard>
+            </StepCard>
 
-          {/* Step 3 — Join Server */}
-          <StepCard
-            stepNumber={3}
-            icon={
-              <i className="fab fa-discord fa-2x" style={{ color: "#5865f2" }} aria-hidden="true" />
-            }
-            title="Devil2Devil Server"
-            description="Join the Devil2Devil Discord community for Class of Fall 2026."
-            complete={false}
-            enabled={step3Enabled}
-          >
-            <a
-              href="https://discord.gg/devil2devil"
-              className="btn btn-maroon btn-sm"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-disabled={!step3Enabled}
+            {/* Step 4 — Instagram */}
+            <StepCard
+              icon={<i className="fab fa-instagram fa-2x card-icon-top" aria-hidden="true" />}
+              title="Future Sun Devils Instagram"
+              description="Follow @FutureSunDevils on Instagram and click the link in our bio to join the server."
+              complete={false}
+              enabled={true}
             >
-              Visit Devil2Devil
-            </a>
-          </StepCard>
+              <a
+                href="https://www.instagram.com/futuresundevils/"
+                className="btn btn-maroon"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Instagram
+              </a>
+            </StepCard>
 
-          {/* Step 4 — Instagram */}
-          <StepCard
-            stepNumber={4}
-            icon={
-              <i
-                className="fab fa-instagram fa-2x"
-                style={{ color: "#e1306c" }}
-                aria-hidden="true"
-              />
-            }
-            title="Future Sun Devils"
-            description="Follow @FutureSunDevils on Instagram to stay up to date."
-            complete={false}
-            enabled={true}
-          >
-            <a
-              href="https://www.instagram.com/futuresundevils/"
-              className="btn btn-maroon btn-sm"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Instagram
-            </a>
-          </StepCard>
+          </div>
         </div>
 
         {discordComplete && logoutUrl && (
-          <div className="text-center mt-4">
-            <form method="POST" action={logoutUrl} style={{ display: "inline" }}>
-              <button type="submit" className="btn btn-outline-secondary btn-sm">
-                <i className="fas fa-sign-out-alt me-1" aria-hidden="true" />
-                Sign out
+          <div className="d-flex justify-content-center mt-4">
+            <form method="POST" action={logoutUrl}>
+              <button type="submit" className="btn btn-maroon text-white btn-no-hover">
+                Log out of My ASU and Discord
               </button>
             </form>
           </div>
@@ -245,96 +251,46 @@ function VerificationSection({
 
 function AboutSection() {
   return (
-    <section id="about" className="py-5 bg-light">
+    <div className="spacing-top-72 spacing-bottom-32">
       <div className="container">
-        <div className="row align-items-center g-5">
-          <div className="col-12 col-md-5 text-center">
+        <div className="row g-5 align-items-center">
+          <div className="col-lg-4 text-center text-lg-start">
             <img
               src={profileGif}
-              alt="Devil2Devil community"
-              className="img-fluid rounded shadow"
+              alt="Devil2Devil profile graphic"
+              className="img-fluid rounded"
               loading="lazy"
-              style={{ maxHeight: "320px" }}
             />
           </div>
-          <div className="col-12 col-md-7">
-            <h2 className="fw-bold mb-3">
-              <span style={{ color: "#8c1d40" }}>Devil2Devil</span>{" "}
-              <span className="text-gold" style={{ color: "#ffb310" }}>
-                Fall 2026
-              </span>
-            </h2>
-            <p className="mb-3">
-              Devil2Devil is ASU's Discord community hub for students enrolling
-              in Fall 2026. Connect with fellow students across all ASU campuses
-              — Tempe, West, Polytechnic, Downtown Phoenix, and the LA Center.
+          <div className="col-lg-8">
+            <div className="uds-highlighted-heading">
+              <h2>
+                <span className="highlight-gold">Devil2Devil Fall 2026</span>
+              </h2>
+            </div>
+            <p>
+              Devil2Devil serves as ASU's vibrant Discord community for admitted
+              students enrolling in the Fall 2026 semester. Whether you're an
+              incoming first-year, transfer or master's-level graduate student,
+              from as close as central Phoenix to as far-flung as Hanoi, Vietnam,
+              you can seamlessly connect with peers on Discord's engaging platform.
+              Upon joining, you'll be automatically sorted into channels based on
+              your campus location, enabling you to form instant connections within
+              your academic community. It's a hub for forging friendships, finding
+              potential roommates, engaging with current students about campus life
+              and staying updated on all things ASU, ensuring a smooth transition
+              before you set foot on campus in the fall.
             </p>
-            <p className="text-muted small mb-0">
-              Open for engagement starting in November 2025.
+            <p>
+              Devil2Devil is open for engagement starting in November 2025 and is
+              tailored for students attending in-person degree programs at ASU's
+              Downtown Phoenix, Polytechnic, Tempe and West Valley campuses, as
+              well as LA Center.
             </p>
           </div>
         </div>
       </div>
-    </section>
-  );
-}
-
-// ─── Next Steps section ────────────────────────────────────────────────────────
-
-const NEXT_STEPS = [
-  {
-    label: "First-year student",
-    href: "https://admission.asu.edu/first-year/next-steps",
-  },
-  {
-    label: "Transfer student",
-    href: "https://admission.asu.edu/transfer/next-steps",
-  },
-  {
-    label: "Graduate student",
-    href: "https://graduate.asu.edu/prospective-students/steps-apply",
-  },
-  {
-    label: "International first-year",
-    href: "https://admission.asu.edu/international/first-year",
-  },
-  {
-    label: "International transfer",
-    href: "https://admission.asu.edu/international/transfer",
-  },
-  {
-    label: "International graduate",
-    href: "https://graduate.asu.edu/prospective-students/international-students",
-  },
-];
-
-function NextStepsSection() {
-  return (
-    <section className="py-5">
-      <div className="container">
-        <h2 className="fw-bold mb-2">Next Steps</h2>
-        <p className="text-muted mb-4">
-          Find your personalized next steps based on your student type.
-        </p>
-        <div className="next-steps-grid">
-          {NEXT_STEPS.map((step) => (
-            <a
-              key={step.href}
-              href={step.href}
-              className="next-step-card"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <span className="step-label">{step.label}</span>
-              <i
-                className="fas fa-chevron-right text-muted"
-                aria-hidden="true"
-              />
-            </a>
-          ))}
-        </div>
-      </div>
-    </section>
+    </div>
   );
 }
 
@@ -368,7 +324,6 @@ export default function Home({ status }) {
         discordUser={discord_user}
       />
       <AboutSection />
-      <NextStepsSection />
     </>
   );
 }

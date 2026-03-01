@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect } from "react";
+import { useState, useEffect } from "react";
 import Header from "./components/Header.jsx";
 import Footer from "./components/Footer.jsx";
 import Home from "./pages/Home.jsx";
@@ -33,16 +33,30 @@ export default function App() {
       .catch(() => setLoading(false));
   }, []);
 
-  // Offset main content below the sticky ASU header
-  useLayoutEffect(() => {
-    const el = document.querySelector(".asuHeader");
-    if (!el) return;
-    const observer = new ResizeObserver(() => {
+  // Offset main content below the fixed ASU header
+  useEffect(() => {
+    let ro;
+    let timer;
+
+    const attach = () => {
+      const el = document.querySelector(".asuHeader") || document.querySelector("header");
+      if (!el) return false;
       setHeaderOffset(el.offsetHeight);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [loading]);
+      ro = new ResizeObserver(() => setHeaderOffset(el.offsetHeight));
+      ro.observe(el);
+      return true;
+    };
+
+    if (!attach()) {
+      // ASU header may render asynchronously — retry after a short delay
+      timer = setTimeout(attach, 300);
+    }
+
+    return () => {
+      ro?.disconnect();
+      clearTimeout(timer);
+    };
+  }, []);
 
   return (
     <>

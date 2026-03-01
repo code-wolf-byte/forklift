@@ -11,7 +11,7 @@ COPY asu-unity-react/.npmrc ./
 
 # Install JS dependencies (NPM_AUTH_TOKEN must be passed as a build arg)
 ARG NPM_AUTH_TOKEN
-RUN NPM_AUTH_TOKEN=${NPM_AUTH_TOKEN} npm ci
+RUN NPM_AUTH_TOKEN=${NPM_AUTH_TOKEN} npm install
 
 # Copy the rest of the React source
 COPY asu-unity-react/ .
