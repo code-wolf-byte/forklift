@@ -252,6 +252,19 @@ def remove_roles_from_profile(user_id: str, student_profile: Dict[str, Any]) -> 
         ) from exc
 
 
+def check_member_is_admin(discord_user_id: str) -> bool:
+    """Return True if the Discord user has Administrator permission in the guild."""
+    bot = get_running_bot()
+    if bot is None:
+        return False
+    cfg = _config()
+    guild = bot.get_guild(int(cfg.guild_id))
+    if guild is None:
+        return False
+    member = guild.get_member(int(discord_user_id))
+    return bool(member and member.guild_permissions.administrator)
+
+
 def _safe_json(response: requests.Response) -> Dict[str, Any]:
     try:
         data = response.json()
@@ -269,6 +282,7 @@ __all__ = [
     "assign_roles_from_profile",
     "remove_roles_from_profile",
     "build_authorize_url",
+    "check_member_is_admin",
     "exchange_code_for_token",
     "fetch_user_profile",
 ]

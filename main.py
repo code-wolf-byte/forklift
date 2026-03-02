@@ -8,6 +8,7 @@ from typing import Callable
 from flask import Flask, abort, jsonify, redirect, render_template, send_from_directory, session, url_for
 
 from cron import start_upload_scheduler
+from routes.admin import admin_bp
 from routes.discord import discord_bp
 from routes.cas import cas_bp
 from services.google_sheets import sync_departed_users
@@ -41,6 +42,7 @@ class BlueprintRegistrar:
         if self.cas_enabled:
             app.register_blueprint(cas_bp)
         app.register_blueprint(discord_bp)
+        app.register_blueprint(admin_bp)
 
 
 def _start_discord_bot_thread() -> None:

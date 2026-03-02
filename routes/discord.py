@@ -12,6 +12,7 @@ from asu_discord.api import (
     assign_verified_role,
     assign_roles_from_profile,
     build_authorize_url,
+    check_member_is_admin,
     exchange_code_for_token,
     fetch_user_profile,
     remove_verified_role,
@@ -328,6 +329,21 @@ def discord_callback():
     )
     session["verification_state"] = verification_state
     session["discord_user"] = profile
+
+    # Check and persist admin status (non-fatal if bot is unavailable)
+    is_admin = False
+    try:
+        is_admin = check_member_is_admin(discord_user_id)
+    except Exception:
+        logger.warning("Failed to check admin status for Discord user %s", discord_user_id)
+    try:
+        with session_scope() as db_session:
+            admin_user = db_session.get(User, user_db_id)
+            if admin_user is not None:
+                admin_user.is_admin = is_admin
+    except Exception:
+        logger.warning("Failed to update is_admin in DB for user %s", user_db_id)
+    session["is_admin"] = is_admin
 
     if student_profile is not None:
         verification_state["student_profile"] = student_profile
