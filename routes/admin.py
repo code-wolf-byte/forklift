@@ -177,7 +177,6 @@ def _serialize_cron_config(cfg: CronJobConfig) -> dict:
         "last_run_at": last_run_str,
         "next_run_at": _next_run_az(cfg),
         "channel_id": cfg.channel_id,
-        "survey_url": cfg.survey_url,
     }
 
 
@@ -217,8 +216,6 @@ def admin_update_automation(job_name: str):
             cfg.schedule_minute = m
         if "channel_id" in data:
             cfg.channel_id = data["channel_id"] or None
-        if "survey_url" in data:
-            cfg.survey_url = data["survey_url"] or None
 
     with session_scope() as db_session:
         cfg = (

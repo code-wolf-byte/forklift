@@ -37,7 +37,6 @@ export default function Automations() {
             schedule_hour: j.schedule_hour,
             schedule_minute: j.schedule_minute,
             channel_id: j.channel_id ?? "",
-            survey_url: j.survey_url ?? "",
           };
         });
         setEdits(init);
@@ -180,28 +179,6 @@ export default function Automations() {
                 <div className="text-muted small mt-1">
                   Pings members who verified exactly 3 weeks ago and are still in the server.
                 </div>
-              </div>
-              <div className="mb-3">
-                <label
-                  className="form-label small mb-1 fw-semibold"
-                  htmlFor={`survey-url-${job.job_name}`}
-                >
-                  Survey URL
-                </label>
-                <input
-                  id={`survey-url-${job.job_name}`}
-                  type="url"
-                  className="form-control form-control-sm"
-                  style={{ maxWidth: "480px" }}
-                  placeholder="https://..."
-                  value={edit.survey_url ?? ""}
-                  onChange={(e) =>
-                    setEdits((prev) => ({
-                      ...prev,
-                      [job.job_name]: { ...prev[job.job_name], survey_url: e.target.value },
-                    }))
-                  }
-                />
               </div>
             )}
 

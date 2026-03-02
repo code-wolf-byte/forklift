@@ -12,6 +12,7 @@ from utils.database import CronJobConfig, User, session_scope
 from utils.settings import CONFIG, SFTP_CONFIG, SftpUploadConfig
 
 AZ_TZ = ZoneInfo("America/Phoenix")
+_SURVEY_URL = "https://enterpriseasu.qualtrics.com/jfe/form/SV_003BoaJdaKI7ZR4"
 
 logger = logging.getLogger(__name__)
 
@@ -175,14 +176,9 @@ def send_survey_messages() -> None:
             .one_or_none()
         )
         channel_id = cfg.channel_id if cfg else None
-        survey_url = cfg.survey_url if cfg else None
 
     if not channel_id:
         logger.warning("send_survey_messages: no channel configured; skipping")
-        return
-
-    if not survey_url:
-        logger.warning("send_survey_messages: no survey_url configured; skipping")
         return
 
     # Build a UTC window covering the full AZ day that was exactly 21 days ago.
@@ -225,7 +221,7 @@ def send_survey_messages() -> None:
         message = (
             f"<@{discord_id}> Hey! It's been 3 weeks since you joined Devil2Devil. "
             "We'd love to hear about your experience so far — "
-            f"please take a moment to fill out our survey here: {survey_url}"
+            f"please take a moment to fill out [our survey](<{_SURVEY_URL}>)!"
         )
         try:
             send_channel_message(channel_id, message)
