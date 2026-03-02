@@ -252,20 +252,34 @@ def remove_roles_from_profile(user_id: str, student_profile: Dict[str, Any]) -> 
         ) from exc
 
 
+_DISCORD_TEXT_CHANNEL_TYPES = {0, 5}  # GUILD_TEXT, GUILD_ANNOUNCEMENT
+
+
 def get_guild_channels() -> list[dict]:
-    """Return text channels in the guild as a list of {id, name} dicts."""
-    bot = get_running_bot()
-    if bot is None:
-        return []
+    """Return text channels in the guild as a list of {id, name} dicts.
+
+    Uses the Discord REST API directly so it works whether or not the bot
+    process is running.
+    """
     cfg = _config()
-    guild = bot.get_guild(int(cfg.guild_id))
-    if guild is None:
+    url = f"{cfg.api_base}/guilds/{cfg.guild_id}/channels"
+    headers = {"Authorization": f"Bot {cfg.bot_token}"}
+    try:
+        response = requests.get(url, headers=headers, timeout=DEFAULT_TIMEOUT)
+    except requests.RequestException as exc:
+        logger.error("Failed to fetch guild channels from Discord API: %s", exc)
         return []
+
+    if response.status_code >= 400:
+        logger.error("Discord API returned %s fetching guild channels", response.status_code)
+        return []
+
+    channels = response.json() if isinstance(response.json(), list) else []
     return sorted(
         [
-            {"id": str(ch.id), "name": ch.name}
-            for ch in guild.channels
-            if isinstance(ch, discord.TextChannel)
+            {"id": ch["id"], "name": ch["name"]}
+            for ch in channels
+            if ch.get("type") in _DISCORD_TEXT_CHANNEL_TYPES
         ],
         key=lambda c: c["name"],
     )
