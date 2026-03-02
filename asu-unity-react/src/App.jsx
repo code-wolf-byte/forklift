@@ -1,7 +1,10 @@
 import { useState, useEffect } from "react";
 import Header from "./components/Header.jsx";
 import Footer from "./components/Footer.jsx";
+import Admin from "./pages/Admin.jsx";
 import Home from "./pages/Home.jsx";
+
+const isAdminPath = window.location.pathname.startsWith("/admin");
 
 const DEFAULT_STATUS = {
   cas_complete: false,
@@ -75,6 +78,8 @@ export default function App() {
               <span className="visually-hidden">Loading...</span>
             </div>
           </div>
+        ) : isAdminPath ? (
+          <Admin />
         ) : (
           <Home status={status} />
         )}

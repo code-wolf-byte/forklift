@@ -49,6 +49,7 @@ class User(Base):
     joined_at = Column(DateTime, nullable=True)
     left_at = Column(DateTime, nullable=True)
     banned = Column(Boolean, default=False, nullable=False)
+    is_admin = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,
@@ -159,6 +160,11 @@ def _ensure_user_columns() -> None:
         ddl_statements.append("ALTER TABLE users ADD COLUMN joined_at DATETIME")
     if "left_at" not in columns:
         ddl_statements.append("ALTER TABLE users ADD COLUMN left_at DATETIME")
+    if "is_admin" not in columns:
+        ddl = "ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"
+        if engine.dialect.name == "postgresql":
+            ddl = "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"
+        ddl_statements.append(ddl)
 
     if not ddl_statements:
         return
