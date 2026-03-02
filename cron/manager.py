@@ -10,7 +10,7 @@ from utils.settings import CONFIG, SFTP_CONFIG
 # Cron job call signature.
 CronJob = Callable[..., None]
 
-_UPLOAD_JOB: Sequence[str] = ("upload_emails_to_sftp", "upload_departed_to_sftp")
+_UPLOAD_JOB: Sequence[str] = ("upload_emails_to_sftp", "upload_departed_to_sftp", "send_survey_messages")
 logger = logging.getLogger(__name__)
 
 
@@ -151,17 +151,14 @@ class CronManager:
 
 
 def start_upload_scheduler(cron_manager: "CronManager") -> bool:
-    """Start the time-of-day upload scheduler."""
+    """Start the time-of-day scheduler for all cron jobs."""
     if CONFIG.DEV_MODE:
-        logger.info("FORKLIFT_DEV_MODE enabled; skipping SFTP scheduler")
-        return False
-    if SFTP_CONFIG is None:
-        logger.info("SFTP uploads not configured; skipping scheduler")
+        logger.info("FORKLIFT_DEV_MODE enabled; skipping cron scheduler")
         return False
 
     return cron_manager.start_scheduler(
         job_names=_UPLOAD_JOB,
-        thread_name="upload-emails-scheduler",
+        thread_name="cron-scheduler",
     )
 
 

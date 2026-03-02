@@ -12,7 +12,6 @@ from utils.database import CronJobConfig, User, session_scope
 from utils.settings import CONFIG, SFTP_CONFIG, SftpUploadConfig
 
 AZ_TZ = ZoneInfo("America/Phoenix")
-_SURVEY_BATCH_SIZE = 50  # max mentions per Discord message
 
 logger = logging.getLogger(__name__)
 
@@ -176,9 +175,14 @@ def send_survey_messages() -> None:
             .one_or_none()
         )
         channel_id = cfg.channel_id if cfg else None
+        survey_url = cfg.survey_url if cfg else None
 
     if not channel_id:
         logger.warning("send_survey_messages: no channel configured; skipping")
+        return
+
+    if not survey_url:
+        logger.warning("send_survey_messages: no survey_url configured; skipping")
         return
 
     # Build a UTC window covering the full AZ day that was exactly 21 days ago.
@@ -216,21 +220,21 @@ def send_survey_messages() -> None:
 
     from asu_discord.api import DiscordAPIError, send_channel_message
 
-    survey_text = (
-        "Hey! It's been 3 weeks since you joined Devil2Devil. "
-        "We'd love to hear about your experience so far — "
-        "please take a moment to fill out our survey here: "
-    )
-
-    # Send in batches to stay within Discord's 2000-character message limit.
-    for i in range(0, len(discord_ids), _SURVEY_BATCH_SIZE):
-        batch = discord_ids[i : i + _SURVEY_BATCH_SIZE]
-        mentions = " ".join(f"<@{uid}>" for uid in batch)
+    failed = 0
+    for discord_id in discord_ids:
+        message = (
+            f"<@{discord_id}> Hey! It's been 3 weeks since you joined Devil2Devil. "
+            "We'd love to hear about your experience so far — "
+            f"please take a moment to fill out our survey here: {survey_url}"
+        )
         try:
-            send_channel_message(channel_id, f"{mentions}\n\n{survey_text}")
+            send_channel_message(channel_id, message)
         except DiscordAPIError as exc:
-            logger.error("send_survey_messages: failed to send batch %d: %s", i // _SURVEY_BATCH_SIZE, exc)
-            raise
+            logger.error("send_survey_messages: failed to ping user %s: %s", discord_id, exc)
+            failed += 1
+
+    if failed:
+        raise RuntimeError(f"send_survey_messages: {failed}/{len(discord_ids)} messages failed")
 
     _set_last_run(job_name, now)
     logger.info("send_survey_messages: sent survey pings to %d users in channel %s", len(discord_ids), channel_id)

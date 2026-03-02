@@ -151,6 +151,7 @@ class CronJobConfig(Base):
     schedule_minute = Column(Integer, default=0, nullable=False)  # 0–59
     last_run_at = Column(DateTime, nullable=True)                 # naive UTC
     channel_id = Column(String(64), nullable=True)               # Discord channel snowflake
+    survey_url = Column(String(2048), nullable=True)             # URL sent in survey messages
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
@@ -204,6 +205,10 @@ def _ensure_cron_job_config_columns() -> None:
     if "channel_id" not in columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE cron_job_config ADD COLUMN channel_id VARCHAR(64)"))
+
+    if "survey_url" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE cron_job_config ADD COLUMN survey_url VARCHAR(2048)"))
 
 
 def _ensure_user_columns() -> None:
