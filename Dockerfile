@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # ─── Stage 1: React build ─────────────────────────────────────────────────────
 FROM node:20-alpine AS react-build
 
@@ -9,15 +10,16 @@ COPY asu-unity-react/package.json asu-unity-react/package-lock.json* ./
 # Copy .npmrc for @asu scoped registry auth
 COPY asu-unity-react/.npmrc ./
 
-# Install JS dependencies (NPM_AUTH_TOKEN must be passed as a build arg)
-ARG NPM_AUTH_TOKEN
-RUN NPM_AUTH_TOKEN=${NPM_AUTH_TOKEN} npm install
+# Install JS dependencies using a secret mount so the token is never stored in a layer.
+# Build with: docker build --secret id=npm_token,env=NPM_AUTH_TOKEN .
+RUN --mount=type=secret,id=npm_token \
+    NPM_AUTH_TOKEN=$(cat /run/secrets/npm_token) npm install
 
 # Copy the rest of the React source
 COPY asu-unity-react/ .
 
-# Build the production bundle
-RUN NPM_AUTH_TOKEN=${NPM_AUTH_TOKEN} npm run build
+# Build the production bundle (no token needed — packages are already installed)
+RUN npm run build
 
 # ─── Stage 2: Python production ───────────────────────────────────────────────
 FROM python:3.12-slim AS base
