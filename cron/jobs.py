@@ -3,12 +3,16 @@ from __future__ import annotations
 import csv
 import io
 import logging
-from datetime import datetime, timezone
-from typing import Any, Callable, Iterable, List, Tuple
+from datetime import datetime, timedelta, timezone
+from typing import Callable, Iterable, List, Tuple
+from zoneinfo import ZoneInfo
 
 from clients.sftp_client import SftpClient
 from utils.database import CronJobConfig, User, session_scope
 from utils.settings import CONFIG, SFTP_CONFIG, SftpUploadConfig
+
+AZ_TZ = ZoneInfo("America/Phoenix")
+_SURVEY_BATCH_SIZE = 50  # max mentions per Discord message
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +165,79 @@ def upload_departed_to_sftp() -> None:
     logger.info("Uploaded %d departed users to SFTP at %s", len(rows), remote_path)
 
 
+def send_survey_messages() -> None:
+    """Ping users verified exactly 3 weeks ago who are still in the server."""
+    job_name = "send_survey_messages"
+
+    with session_scope() as db_session:
+        cfg = (
+            db_session.query(CronJobConfig)
+            .filter(CronJobConfig.job_name == job_name)
+            .one_or_none()
+        )
+        channel_id = cfg.channel_id if cfg else None
+
+    if not channel_id:
+        logger.warning("send_survey_messages: no channel configured; skipping")
+        return
+
+    # Build a UTC window covering the full AZ day that was exactly 21 days ago.
+    now_az = datetime.now(AZ_TZ)
+    target_az_date = (now_az - timedelta(days=21)).date()
+    window_start = (
+        datetime(target_az_date.year, target_az_date.month, target_az_date.day, 0, 0, 0, tzinfo=AZ_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+    window_end = (
+        datetime(target_az_date.year, target_az_date.month, target_az_date.day, 23, 59, 59, tzinfo=AZ_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+
+    with session_scope() as db_session:
+        users = (
+            db_session.query(User)
+            .filter(User.verified.is_(True))
+            .filter(User.verified_at >= window_start)
+            .filter(User.verified_at <= window_end)
+            .filter(User.left_at.is_(None))
+            .filter(User.discord_user_id.isnot(None))
+            .all()
+        )
+        discord_ids = [u.discord_user_id for u in users]
+
+    now = datetime.now(timezone.utc)
+
+    if not discord_ids:
+        logger.info("send_survey_messages: no users verified 3 weeks ago still in server")
+        _set_last_run(job_name, now)
+        return
+
+    from asu_discord.api import DiscordAPIError, send_channel_message
+
+    survey_text = (
+        "Hey! It's been 3 weeks since you joined Devil2Devil. "
+        "We'd love to hear about your experience so far — "
+        "please take a moment to [fill out our survey](<https://enterpriseasu.qualtrics.com/jfe/form/SV_003BoaJdaKI7ZR4>)!"
+    )
+
+    # Send in batches to stay within Discord's 2000-character message limit.
+    for i in range(0, len(discord_ids), _SURVEY_BATCH_SIZE):
+        batch = discord_ids[i : i + _SURVEY_BATCH_SIZE]
+        mentions = " ".join(f"<@{uid}>" for uid in batch)
+        try:
+            send_channel_message(channel_id, f"{mentions}\n\n{survey_text}")
+        except DiscordAPIError as exc:
+            logger.error("send_survey_messages: failed to send batch %d: %s", i // _SURVEY_BATCH_SIZE, exc)
+            raise
+
+    _set_last_run(job_name, now)
+    logger.info("send_survey_messages: sent survey pings to %d users in channel %s", len(discord_ids), channel_id)
+
+
 AVAILABLE_JOBS: dict[str, CronJob] = {
     "upload_emails_to_sftp": upload_emails_to_sftp,
     "upload_departed_to_sftp": upload_departed_to_sftp,
+    "send_survey_messages": send_survey_messages,
 }

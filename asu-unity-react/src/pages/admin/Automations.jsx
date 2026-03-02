@@ -23,6 +23,7 @@ export default function Automations() {
   const [triggering, setTriggering] = useState({});
   const [errors, setErrors] = useState({});
   const [triggerStatus, setTriggerStatus] = useState({});
+  const [channels, setChannels] = useState([]);
 
   useEffect(() => {
     fetch("/api/admin/automations")
@@ -35,10 +36,16 @@ export default function Automations() {
             enabled: j.enabled,
             schedule_hour: j.schedule_hour,
             schedule_minute: j.schedule_minute,
+            channel_id: j.channel_id ?? "",
           };
         });
         setEdits(init);
       })
+      .catch(() => {});
+
+    fetch("/api/admin/discord-channels")
+      .then((r) => r.json())
+      .then(setChannels)
       .catch(() => {});
   }, []);
 
@@ -117,6 +124,7 @@ export default function Automations() {
         const isTriggering = triggering[job.job_name];
         const error = errors[job.job_name];
         const tStatus = triggerStatus[job.job_name];
+        const isSurveyJob = job.job_name === "send_survey_messages";
 
         return (
           <div key={job.job_name} className="card mb-3 p-3">
@@ -144,6 +152,35 @@ export default function Automations() {
                 </label>
               </div>
             </div>
+
+            {isSurveyJob && (
+              <div className="mb-3">
+                <label className="form-label small mb-1 fw-semibold">
+                  Admin Channel
+                </label>
+                <select
+                  className="form-select form-select-sm"
+                  style={{ maxWidth: "320px" }}
+                  value={edit.channel_id ?? ""}
+                  onChange={(e) =>
+                    setEdits((prev) => ({
+                      ...prev,
+                      [job.job_name]: { ...prev[job.job_name], channel_id: e.target.value },
+                    }))
+                  }
+                >
+                  <option value="">— Select a channel —</option>
+                  {channels.map((ch) => (
+                    <option key={ch.id} value={ch.id}>
+                      #{ch.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="text-muted small mt-1">
+                  Pings members who verified exactly 3 weeks ago and are still in the server.
+                </div>
+              </div>
+            )}
 
             <div className="row g-3 align-items-end">
               <div className="col-auto">

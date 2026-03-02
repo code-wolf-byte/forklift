@@ -252,6 +252,50 @@ def remove_roles_from_profile(user_id: str, student_profile: Dict[str, Any]) -> 
         ) from exc
 
 
+def get_guild_channels() -> list[dict]:
+    """Return text channels in the guild as a list of {id, name} dicts."""
+    bot = get_running_bot()
+    if bot is None:
+        return []
+    cfg = _config()
+    guild = bot.get_guild(int(cfg.guild_id))
+    if guild is None:
+        return []
+    return sorted(
+        [
+            {"id": str(ch.id), "name": ch.name}
+            for ch in guild.channels
+            if isinstance(ch, discord.TextChannel)
+        ],
+        key=lambda c: c["name"],
+    )
+
+
+def send_channel_message(channel_id: str, content: str) -> None:
+    """Send a message to a Discord text channel (called from a non-async thread)."""
+    bot = get_running_bot()
+    loop = get_running_loop()
+    if bot is None or loop is None or loop.is_closed():
+        raise DiscordAPIError("Discord bot is not running; unable to send channel message")
+
+    async def _send() -> None:
+        channel = bot.get_channel(int(channel_id))
+        if channel is None:
+            raise DiscordAPIError(f"Channel {channel_id} not found in bot cache")
+        await channel.send(content)
+
+    future = asyncio.run_coroutine_threadsafe(_send(), loop)
+    try:
+        future.result(timeout=DEFAULT_TIMEOUT)
+    except asyncio.TimeoutError as exc:
+        future.cancel()
+        raise DiscordAPIError("Timed out sending Discord channel message") from exc
+    except DiscordAPIError:
+        raise
+    except Exception as exc:
+        raise DiscordAPIError(f"Failed to send Discord channel message: {exc}") from exc
+
+
 def check_member_is_admin(discord_user_id: str) -> bool:
     """Return True if the Discord user has Administrator permission in the guild."""
     bot = get_running_bot()
@@ -285,4 +329,6 @@ __all__ = [
     "check_member_is_admin",
     "exchange_code_for_token",
     "fetch_user_profile",
+    "get_guild_channels",
+    "send_channel_message",
 ]

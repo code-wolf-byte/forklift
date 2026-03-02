@@ -176,6 +176,7 @@ def _serialize_cron_config(cfg: CronJobConfig) -> dict:
         "schedule_minute": cfg.schedule_minute,
         "last_run_at": last_run_str,
         "next_run_at": _next_run_az(cfg),
+        "channel_id": cfg.channel_id,
     }
 
 
@@ -213,6 +214,8 @@ def admin_update_automation(job_name: str):
             if not 0 <= m <= 59:
                 return jsonify({"error": "schedule_minute must be 0–59"}), 400
             cfg.schedule_minute = m
+        if "channel_id" in data:
+            cfg.channel_id = data["channel_id"] or None
 
     with session_scope() as db_session:
         cfg = (
@@ -233,6 +236,17 @@ def admin_trigger_automation(job_name: str):
 
     success = cron_manager.run_jobs(job_names=[job_name], raise_on_error=False)
     return jsonify({"status": "triggered" if success else "failed", "job_name": job_name})
+
+
+@admin_bp.route("/api/admin/discord-channels")
+@require_admin
+def admin_discord_channels():
+    try:
+        from asu_discord.api import get_guild_channels
+        channels = get_guild_channels()
+    except Exception:
+        channels = []
+    return jsonify(channels)
 
 
 # ─── Roles ────────────────────────────────────────────────────────────────────

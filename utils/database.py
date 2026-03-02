@@ -150,6 +150,7 @@ class CronJobConfig(Base):
     schedule_hour = Column(Integer, default=0, nullable=False)    # 0–23 in AZ time
     schedule_minute = Column(Integer, default=0, nullable=False)  # 0–59
     last_run_at = Column(DateTime, nullable=True)                 # naive UTC
+    channel_id = Column(String(64), nullable=True)               # Discord channel snowflake
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
@@ -165,6 +166,12 @@ _CRON_JOB_DEFAULTS = [
     {
         "job_name": "upload_departed_to_sftp",
         "display_name": "Upload Departed Users to SFTP",
+    },
+    {
+        "job_name": "send_survey_messages",
+        "display_name": "Send Survey Messages",
+        "schedule_hour": 11,
+        "schedule_minute": 0,
     },
 ]
 
@@ -182,7 +189,21 @@ _LEGACY_STATE_FILES: dict[str, Path] = {
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_user_columns()
+    _ensure_cron_job_config_columns()
     _seed_cron_job_config()
+
+
+def _ensure_cron_job_config_columns() -> None:
+    """Add columns to cron_job_config that were introduced after the initial schema."""
+    inspector = inspect(engine)
+    if not inspector.has_table(CronJobConfig.__tablename__):
+        return
+
+    columns = {col["name"] for col in inspector.get_columns(CronJobConfig.__tablename__)}
+
+    if "channel_id" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE cron_job_config ADD COLUMN channel_id VARCHAR(64)"))
 
 
 def _ensure_user_columns() -> None:
