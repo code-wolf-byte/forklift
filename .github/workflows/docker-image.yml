@@ -42,7 +42,7 @@ jobs:
           tags: |
             codewolfbyte/forklift:latest
             codewolfbyte/forklift:${{ steps.meta.outputs.sha_short }}
-          build-args: |
-            NPM_AUTH_TOKEN=${{ secrets.NPM_AUTH_TOKEN }}
+          secrets: |
+            npm_token=${{ secrets.NPM_AUTH_TOKEN }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
