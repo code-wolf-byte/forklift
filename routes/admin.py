@@ -158,7 +158,7 @@ def _next_run_az(cfg: CronJobConfig) -> str:
         last_az = cfg.last_run_at.replace(tzinfo=timezone.utc).astimezone(AZ_TZ)
         already_ran_today = last_az.date() >= now_az.date()
 
-    if not already_ran_today:
+    if not already_ran_today and scheduled_today > now_az:
         return scheduled_today.isoformat()
     return (scheduled_today + timedelta(days=1)).isoformat()
 
