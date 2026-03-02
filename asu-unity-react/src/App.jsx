@@ -19,6 +19,7 @@ const DEFAULT_STATUS = {
   cas_enabled: true,
   student_profile: null,
   verification_state: {},
+  is_admin: false,
 };
 
 export default function App() {

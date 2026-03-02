@@ -76,6 +76,7 @@ function VerificationSection({
   verificationError,
   verificationState,
   discordUser,
+  isAdmin,
 }) {
   const step2Enabled = casComplete;
   const step3Enabled = discordComplete;
@@ -233,13 +234,20 @@ function VerificationSection({
           </div>
         </div>
 
-        {discordComplete && logoutUrl && (
-          <div className="d-flex justify-content-center mt-4">
-            <form method="POST" action={logoutUrl}>
-              <button type="submit" className="btn btn-maroon text-white btn-no-hover">
-                Log out of My ASU and Discord
-              </button>
-            </form>
+        {discordComplete && (
+          <div className="d-flex justify-content-center gap-3 mt-4 flex-wrap">
+            {isAdmin && (
+              <a href="/admin" className="btn btn-maroon text-white">
+                Admin Dashboard
+              </a>
+            )}
+            {logoutUrl && (
+              <form method="POST" action={logoutUrl}>
+                <button type="submit" className="btn btn-maroon text-white btn-no-hover">
+                  Log out of My ASU and Discord
+                </button>
+              </form>
+            )}
           </div>
         )}
       </div>
@@ -307,6 +315,7 @@ export default function Home({ status }) {
     verification_error,
     verification_state,
     discord_user,
+    is_admin,
   } = status;
 
   return (
@@ -322,6 +331,7 @@ export default function Home({ status }) {
         verificationError={verification_error}
         verificationState={verification_state}
         discordUser={discord_user}
+        isAdmin={is_admin}
       />
       <AboutSection />
     </>

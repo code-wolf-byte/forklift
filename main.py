@@ -151,6 +151,7 @@ def _verification_context() -> dict:
         "logout_url": logout_url,
         "cas_enabled": CONFIG.CAS_ENABLED,
         "student_profile": student_profile,
+        "is_admin": bool(session.get("is_admin")),
     }
     return context
 
