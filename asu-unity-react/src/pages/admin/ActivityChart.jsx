@@ -1,14 +1,24 @@
 import { useRef, useEffect } from "react";
 import {
   Chart,
-  BarController,
-  BarElement,
+  LineController,
+  LineElement,
+  PointElement,
   CategoryScale,
   LinearScale,
   Tooltip,
+  Filler,
 } from "chart.js";
 
-Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip);
+Chart.register(
+  LineController,
+  LineElement,
+  PointElement,
+  CategoryScale,
+  LinearScale,
+  Tooltip,
+  Filler
+);
 
 function fmtLabel(isoDate) {
   const [y, m, d] = isoDate.split("-").map(Number);
@@ -26,46 +36,71 @@ export default function ActivityChart({ data, label, isDark }) {
     if (!data || !canvasRef.current) return;
     if (chartRef.current) chartRef.current.destroy();
 
-    const tickColor  = isDark ? "#909296" : "#6c757d";
-    const gridColor  = isDark ? "#2b2d31" : "#e9ecef";
-    const barColor   = isDark ? "rgba(140,29,64,0.75)" : "rgba(140,29,64,0.65)";
-    const barBorder  = "#8c1d40";
+    const ctx = canvasRef.current.getContext("2d");
+    const chartHeight = canvasRef.current.offsetHeight || 220;
 
-    chartRef.current = new Chart(canvasRef.current, {
-      type: "bar",
+    // Statbot-style gradient fill
+    const gradient = ctx.createLinearGradient(0, 0, 0, chartHeight);
+    if (isDark) {
+      gradient.addColorStop(0, "rgba(140,29,64,0.45)");
+      gradient.addColorStop(1, "rgba(140,29,64,0)");
+    } else {
+      gradient.addColorStop(0, "rgba(140,29,64,0.3)");
+      gradient.addColorStop(1, "rgba(140,29,64,0)");
+    }
+
+    const tickColor = isDark ? "#909296" : "#6c757d";
+    const gridColor = isDark ? "#2b2d31" : "#e9ecef";
+
+    chartRef.current = new Chart(ctx, {
+      type: "line",
       data: {
         labels: data.map((d) => fmtLabel(d.date)),
         datasets: [
           {
             label,
             data: data.map((d) => d.count),
-            backgroundColor: barColor,
-            borderColor: barBorder,
-            borderWidth: 1,
-            borderRadius: 3,
+            borderColor: "#8c1d40",
+            borderWidth: 2,
+            backgroundColor: gradient,
+            fill: true,
+            tension: 0.4,
+            pointRadius: 0,
+            pointHoverRadius: 5,
+            pointHoverBackgroundColor: "#8c1d40",
+            pointHoverBorderColor: "#fff",
+            pointHoverBorderWidth: 2,
           },
         ],
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: {
+          intersect: false,
+          mode: "index",
+        },
         plugins: {
           legend: { display: false },
           tooltip: {
+            displayColors: false,
             callbacks: {
               title: (items) => data[items[0].dataIndex]?.date ?? items[0].label,
+              label: (item) => `${item.parsed.y} ${label.toLowerCase()}`,
             },
           },
         },
         scales: {
           x: {
-            grid: { color: gridColor },
-            ticks: { color: tickColor, maxTicksLimit: 14, maxRotation: 0 },
+            grid: { color: gridColor, drawBorder: false },
+            ticks: { color: tickColor, maxTicksLimit: 10, maxRotation: 0 },
+            border: { display: false },
           },
           y: {
             beginAtZero: true,
-            grid: { color: gridColor },
-            ticks: { color: tickColor, stepSize: 1, precision: 0 },
+            grid: { color: gridColor, drawBorder: false },
+            ticks: { color: tickColor, precision: 0 },
+            border: { display: false },
           },
         },
       },
@@ -79,17 +114,14 @@ export default function ActivityChart({ data, label, isDark }) {
 
   if (!data || data.length === 0) {
     return (
-      <div
-        className="d-flex align-items-center justify-content-center text-muted small"
-        style={{ height: 180 }}
-      >
+      <div className="admin-chart-container d-flex align-items-center justify-content-center text-muted small">
         No data for selected range.
       </div>
     );
   }
 
   return (
-    <div style={{ height: 200, position: "relative" }}>
+    <div className="admin-chart-container">
       <canvas ref={canvasRef} />
     </div>
   );

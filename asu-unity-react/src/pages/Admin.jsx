@@ -125,7 +125,7 @@ export default function Admin() {
   };
 
   return (
-    <div className="admin-layout">
+    <div className="admin-layout" style={{ minHeight: `calc(100vh - ${sidebarTop}px)` }}>
       {/* ── Sidebar ── */}
       <aside
         className="admin-sidebar"

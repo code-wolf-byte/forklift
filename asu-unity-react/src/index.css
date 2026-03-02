@@ -55,7 +55,14 @@
 
 .admin-layout {
   display: flex;
-  min-height: 100vh;
+  /* height set via inline style in Admin.jsx — keeps layout flush with header/footer */
+}
+
+.admin-chart-container {
+  position: relative;
+  height: 220px;
+  width: 100%;
+  overflow: hidden;
 }
 
 .admin-sidebar {
