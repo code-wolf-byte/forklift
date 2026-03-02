@@ -50,3 +50,241 @@
   text-decoration: none;
   box-shadow: none;
 }
+
+/* ─── Admin layout (Discord-style sidebar) ────────────────────────────────── */
+
+.admin-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.admin-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background-color: #f2f3f5;
+  border-right: 1px solid #e3e5e8;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  overflow-y: auto;
+}
+
+.admin-main {
+  flex: 1;
+  padding: 2rem;
+  min-width: 0;
+}
+
+.admin-sidebar-header {
+  padding: 14px 16px;
+  border-bottom: 1px solid #e3e5e8;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #313338;
+  flex-shrink: 0;
+}
+
+.admin-sidebar-section {
+  padding: 16px 8px 4px;
+}
+
+.admin-sidebar-section-label {
+  padding: 0 8px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #80848e;
+}
+
+.admin-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: #4e5058;
+  border-radius: 4px;
+  text-align: left;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 500;
+  transition: background 80ms ease, color 80ms ease;
+  margin-bottom: 1px;
+}
+
+.admin-nav-item .admin-nav-icon {
+  width: 18px;
+  text-align: center;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+
+.admin-nav-item:hover {
+  background-color: #e3e5e8;
+  color: #2e3035;
+}
+
+.admin-nav-item.active {
+  background-color: #e0e1e5;
+  color: #060607;
+  font-weight: 600;
+}
+
+.admin-sidebar-footer {
+  margin-top: auto;
+  padding: 10px 12px;
+  border-top: 1px solid #e3e5e8;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* dark mode sidebar */
+body.admin-dark .admin-sidebar {
+  background-color: #1e1f22;
+  border-right-color: #2b2d31;
+}
+
+body.admin-dark .admin-sidebar-header {
+  color: #f2f3f5;
+  border-bottom-color: #2b2d31;
+}
+
+body.admin-dark .admin-nav-item {
+  color: #96989d;
+}
+
+body.admin-dark .admin-nav-item:hover {
+  background-color: #35373c;
+  color: #dcddde;
+}
+
+body.admin-dark .admin-nav-item.active {
+  background-color: #404249;
+  color: #ffffff;
+}
+
+body.admin-dark .admin-sidebar-footer {
+  border-top-color: #2b2d31;
+  color: #dbdee1;
+}
+
+/* ─── Admin dark theme ─────────────────────────────────────────────────────── */
+
+body.admin-dark {
+  background-color: #0f1117;
+  color: #e0e0e0;
+}
+
+body.admin-dark .card {
+  background-color: #1e2028;
+  border-color: #373a40;
+  color: #e0e0e0;
+}
+
+body.admin-dark .text-muted {
+  color: #909296 !important;
+}
+
+body.admin-dark .form-control,
+body.admin-dark .form-select {
+  background-color: #25262b;
+  border-color: #4a4d55;
+  color: #e0e0e0;
+}
+
+body.admin-dark .form-control:focus,
+body.admin-dark .form-select:focus {
+  background-color: #25262b;
+  border-color: #8c1d40;
+  color: #e0e0e0;
+  box-shadow: 0 0 0 0.25rem rgba(140, 29, 64, 0.25);
+}
+
+body.admin-dark .form-check-input {
+  background-color: #25262b;
+  border-color: #4a4d55;
+}
+
+body.admin-dark .form-check-input:checked {
+  background-color: #8c1d40;
+  border-color: #8c1d40;
+}
+
+body.admin-dark .alert-info {
+  background-color: #1a2744;
+  border-color: #1e3a5f;
+  color: #74c0fc;
+}
+
+body.admin-dark .alert-success {
+  background-color: #1a3a28;
+  border-color: #1e4a35;
+  color: #69db7c;
+}
+
+body.admin-dark .alert-warning {
+  background-color: #3a2a08;
+  border-color: #4a3a10;
+  color: #ffd43b;
+}
+
+body.admin-dark .alert-danger {
+  background-color: #3a1818;
+  border-color: #4a2020;
+  color: #ff8787;
+}
+
+body.admin-dark .btn-outline-secondary {
+  color: #adb5bd;
+  border-color: #4a4d55;
+}
+
+body.admin-dark .btn-outline-secondary:hover {
+  background-color: #25262b;
+  border-color: #6c757d;
+  color: #e0e0e0;
+}
+
+body.admin-dark code {
+  color: #adb5bd;
+}
+
+body.admin-dark .table {
+  color: #e0e0e0;
+  --bs-table-bg: transparent;
+  --bs-table-border-color: #373a40;
+}
+
+body.admin-dark .table > :not(caption) > * > * {
+  border-bottom-color: #373a40;
+  background-color: transparent;
+  color: #e0e0e0;
+}
+
+body.admin-dark .table thead > tr > th {
+  border-bottom-color: #4a4d55;
+  color: #909296;
+  font-weight: 600;
+}
+
+body.admin-dark .table-hover > tbody > tr:hover > * {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+body.admin-dark {
+  --join-divider: #2b2d31;
+}
+
+body.admin-dark input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+}

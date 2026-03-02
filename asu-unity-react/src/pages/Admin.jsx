@@ -1,233 +1,96 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useLayoutEffect } from "react";
+import Dashboard from "./admin/Dashboard.jsx";
+import Automations from "./admin/Automations.jsx";
+import Users from "./admin/Users.jsx";
+import Joins from "./admin/Joins.jsx";
+import ServerJoins from "./admin/ServerJoins.jsx";
+import Leaves from "./admin/Leaves.jsx";
 
-// ─── Automations ──────────────────────────────────────────────────────────────
+// ─── Sidebar navigation config ────────────────────────────────────────────────
 
-function formatAZ(isoStr) {
-  if (!isoStr) return "Never";
-  try {
-    return new Date(isoStr).toLocaleString("en-US", {
-      timeZone: "America/Phoenix",
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return isoStr;
-  }
-}
+const NAV = [
+  {
+    label: "General",
+    items: [
+      { id: "dashboard", icon: "fa-chart-bar", label: "Overview" },
+    ],
+  },
+  {
+    label: "Management",
+    items: [
+      { id: "members",      icon: "fa-users",        label: "Members"       },
+      { id: "joins",        icon: "fa-user-check",   label: "Verifications" },
+    ],
+  },
+  {
+    label: "Activity",
+    items: [
+      { id: "server-joins", icon: "fa-sign-in-alt",  label: "Joins"         },
+      { id: "leaves",       icon: "fa-sign-out-alt", label: "Leaves"        },
+    ],
+  },
+  {
+    label: "System",
+    items: [
+      { id: "automations",  icon: "fa-robot",        label: "Automations"   },
+    ],
+  },
+];
 
-function AutomationsSection() {
-  const [jobs, setJobs] = useState(null);
-  const [edits, setEdits] = useState({});
-  const [saving, setSaving] = useState({});
-  const [triggering, setTriggering] = useState({});
-  const [errors, setErrors] = useState({});
-  const [triggerStatus, setTriggerStatus] = useState({});
-
-  useEffect(() => {
-    fetch("/api/admin/automations")
-      .then((r) => r.json())
-      .then((data) => {
-        setJobs(data);
-        const init = {};
-        data.forEach((j) => {
-          init[j.job_name] = {
-            enabled: j.enabled,
-            schedule_hour: j.schedule_hour,
-            schedule_minute: j.schedule_minute,
-          };
-        });
-        setEdits(init);
-      })
-      .catch(() => {});
-  }, []);
-
-  const refreshJobs = () =>
-    fetch("/api/admin/automations")
-      .then((r) => r.json())
-      .then(setJobs)
-      .catch(() => {});
-
-  const handleTimeChange = (job_name, value) => {
-    // value from <input type="time"> is "HH:MM"
-    const [h, m] = value.split(":").map(Number);
-    setEdits((prev) => ({
-      ...prev,
-      [job_name]: {
-        ...prev[job_name],
-        schedule_hour: isNaN(h) ? 0 : h,
-        schedule_minute: isNaN(m) ? 0 : m,
-      },
-    }));
-  };
-
-  const handleSave = (job_name) => {
-    setSaving((s) => ({ ...s, [job_name]: true }));
-    setErrors((e) => ({ ...e, [job_name]: null }));
-    fetch(`/api/admin/automations/${job_name}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(edits[job_name]),
-    })
-      .then((r) => r.json())
-      .then((updated) => {
-        if (updated.error) throw new Error(updated.error);
-        setJobs((prev) => prev.map((j) => (j.job_name === job_name ? updated : j)));
-      })
-      .catch((e) =>
-        setErrors((prev) => ({ ...prev, [job_name]: e.message || "Save failed" }))
-      )
-      .finally(() => setSaving((s) => ({ ...s, [job_name]: false })));
-  };
-
-  const handleTrigger = (job_name) => {
-    setTriggering((t) => ({ ...t, [job_name]: true }));
-    setTriggerStatus((s) => ({ ...s, [job_name]: null }));
-    fetch(`/api/admin/automations/${job_name}/trigger`, { method: "POST" })
-      .then((r) => r.json())
-      .then((result) => {
-        setTriggerStatus((s) => ({ ...s, [job_name]: result.status }));
-        return refreshJobs();
-      })
-      .catch(() => setTriggerStatus((s) => ({ ...s, [job_name]: "failed" })))
-      .finally(() => setTriggering((t) => ({ ...t, [job_name]: false })));
-  };
-
-  if (!jobs) {
-    return (
-      <div className="text-center py-3">
-        <div className="spinner-border spinner-border-sm" role="status" style={{ color: "#8c1d40" }}>
-          <span className="visually-hidden">Loading automations…</span>
-        </div>
-      </div>
-    );
-  }
-
+function NavItem({ id, icon, label, active, onClick }) {
   return (
-    <div className="mb-4">
-      <h2 className="mb-1" style={{ color: "#8c1d40" }}>
-        Automations
-      </h2>
-      <p className="text-muted small mb-3">
-        All times are in Arizona Time (AZ / MST, UTC−7). Jobs run once per day at
-        the scheduled time.
-      </p>
-
-      {jobs.map((job) => {
-        const edit = edits[job.job_name] || {};
-        const timeValue = `${String(edit.schedule_hour ?? job.schedule_hour).padStart(2, "0")}:${String(edit.schedule_minute ?? job.schedule_minute).padStart(2, "0")}`;
-        const isSaving = saving[job.job_name];
-        const isTriggering = triggering[job.job_name];
-        const error = errors[job.job_name];
-        const tStatus = triggerStatus[job.job_name];
-
-        return (
-          <div key={job.job_name} className="card mb-3 p-3">
-            <div className="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
-              <div>
-                <h5 className="mb-0">{job.display_name}</h5>
-                <code className="text-muted small">{job.job_name}</code>
-              </div>
-              <div className="form-check form-switch mb-0 pt-1">
-                <input
-                  className="form-check-input"
-                  type="checkbox"
-                  role="switch"
-                  id={`enabled-${job.job_name}`}
-                  checked={edit.enabled ?? job.enabled}
-                  onChange={(e) =>
-                    setEdits((prev) => ({
-                      ...prev,
-                      [job.job_name]: { ...prev[job.job_name], enabled: e.target.checked },
-                    }))
-                  }
-                />
-                <label className="form-check-label" htmlFor={`enabled-${job.job_name}`}>
-                  {(edit.enabled ?? job.enabled) ? "Enabled" : "Disabled"}
-                </label>
-              </div>
-            </div>
-
-            <div className="row g-3 align-items-end">
-              <div className="col-auto">
-                <label className="form-label small mb-1 fw-semibold">
-                  Daily schedule (AZ time)
-                </label>
-                <input
-                  type="time"
-                  className="form-control form-control-sm"
-                  style={{ width: "130px" }}
-                  value={timeValue}
-                  onChange={(e) => handleTimeChange(job.job_name, e.target.value)}
-                />
-              </div>
-              <div className="col">
-                <div className="text-muted small lh-lg">
-                  <div>
-                    Last run:{" "}
-                    <strong>{formatAZ(job.last_run_at)}</strong>
-                  </div>
-                  <div>
-                    Next run:{" "}
-                    <strong>{formatAZ(job.next_run_at)}</strong>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {error && (
-              <div className="alert alert-danger mt-2 mb-0 py-1 small">{error}</div>
-            )}
-            {tStatus === "triggered" && (
-              <div className="alert alert-success mt-2 mb-0 py-1 small">
-                Job triggered successfully.
-              </div>
-            )}
-            {tStatus === "failed" && (
-              <div className="alert alert-warning mt-2 mb-0 py-1 small">
-                Job ran but reported a failure — check server logs.
-              </div>
-            )}
-
-            <div className="d-flex gap-2 mt-3">
-              <button
-                className="btn btn-sm btn-maroon text-white"
-                onClick={() => handleSave(job.job_name)}
-                disabled={isSaving}
-              >
-                {isSaving ? "Saving…" : "Save"}
-              </button>
-              <button
-                className="btn btn-sm btn-outline-secondary"
-                onClick={() => handleTrigger(job.job_name)}
-                disabled={isTriggering}
-              >
-                {isTriggering ? "Running…" : "Run Now"}
-              </button>
-            </div>
-          </div>
-        );
-      })}
-    </div>
+    <button
+      className={`admin-nav-item${active ? " active" : ""}`}
+      onClick={() => onClick(id)}
+    >
+      <span className="admin-nav-icon">
+        <i className={`fas ${icon}`} />
+      </span>
+      {label}
+    </button>
   );
 }
 
-// ─── Admin panel ──────────────────────────────────────────────────────────────
+// ─── Admin shell ──────────────────────────────────────────────────────────────
 
 export default function Admin() {
+  const [activeView, setActiveView] = useState("dashboard");
   const [adminUser, setAdminUser] = useState(null);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [sidebarTop, setSidebarTop] = useState(0);
+  const [darkMode, setDarkMode] = useState(
+    () => localStorage.getItem("admin_theme") === "dark"
+  );
 
+  // Apply dark class before paint to avoid flash
+  useLayoutEffect(() => {
+    if (darkMode) {
+      document.body.classList.add("admin-dark");
+    } else {
+      document.body.classList.remove("admin-dark");
+    }
+    return () => document.body.classList.remove("admin-dark");
+  }, [darkMode]);
+
+  // Measure fixed ASU header so sidebar sticks just below it
+  useEffect(() => {
+    const el = document.querySelector(".asuHeader") || document.querySelector("header");
+    if (el) setSidebarTop(el.offsetHeight);
+  }, []);
+
+  const toggleDark = () =>
+    setDarkMode((prev) => {
+      const next = !prev;
+      localStorage.setItem("admin_theme", next ? "dark" : "light");
+      return next;
+    });
+
+  // Auth check + initial stats fetch
   useEffect(() => {
     fetch("/api/admin/me")
       .then((r) => {
-        if (r.status === 403) {
-          window.location.href = "/";
-          return null;
-        }
+        if (r.status === 403) { window.location.href = "/"; return null; }
         return r.json();
       })
       .then((data) => {
@@ -235,65 +98,88 @@ export default function Admin() {
         setAdminUser(data);
         return fetch("/api/admin/stats").then((r) => r.json());
       })
-      .then((data) => {
-        if (data) setStats(data);
-        setLoading(false);
-      })
+      .then((data) => { if (data) setStats(data); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
 
   if (loading) {
     return (
       <div className="container py-5 text-center">
-        <div
-          className="spinner-border"
-          role="status"
-          style={{ color: "#8c1d40" }}
-        >
+        <div className="spinner-border" role="status" style={{ color: "#8c1d40" }}>
           <span className="visually-hidden">Loading...</span>
         </div>
       </div>
     );
   }
 
+  const renderView = () => {
+    switch (activeView) {
+      case "dashboard":    return <Dashboard stats={stats} />;
+      case "members":      return <Users />;
+      case "joins":        return <Joins />;
+      case "server-joins": return <ServerJoins isDark={darkMode} />;
+      case "leaves":       return <Leaves isDark={darkMode} />;
+      case "automations":  return <Automations />;
+      default:             return null;
+    }
+  };
+
   return (
-    <div className="container py-5">
-      <div className="row mb-4">
-        <div className="col">
-          <h1 style={{ color: "#8c1d40" }}>Admin Panel</h1>
-          {adminUser && (
-            <p className="text-muted">
-              Logged in as <strong>{adminUser.asurite_id}</strong> (
-              {adminUser.discord_username})
-            </p>
-          )}
+    <div className="admin-layout">
+      {/* ── Sidebar ── */}
+      <aside
+        className="admin-sidebar"
+        style={{ top: sidebarTop, height: `calc(100vh - ${sidebarTop}px)` }}
+      >
+        {/* Server header */}
+        <div className="admin-sidebar-header">
+          <i className="fas fa-bolt" style={{ color: "#8c1d40" }} />
+          Forklift Admin
         </div>
+
+        {/* Nav sections */}
+        {NAV.map((section) => (
+          <div key={section.label} className="admin-sidebar-section">
+            <div className="admin-sidebar-section-label">{section.label}</div>
+            {section.items.map((item) => (
+              <NavItem
+                key={item.id}
+                {...item}
+                active={activeView === item.id}
+                onClick={setActiveView}
+              />
+            ))}
+          </div>
+        ))}
+
+        {/* Footer: user info + dark mode toggle */}
+        <div className="admin-sidebar-footer">
+          <div className="flex-grow-1 overflow-hidden">
+            {adminUser && (
+              <>
+                <div className="fw-semibold small text-truncate">
+                  {adminUser.asurite_id}
+                </div>
+                <div className="text-muted text-truncate" style={{ fontSize: 12 }}>
+                  {adminUser.discord_username}
+                </div>
+              </>
+            )}
+          </div>
+          <button
+            className="btn btn-sm btn-outline-secondary flex-shrink-0"
+            onClick={toggleDark}
+            title={darkMode ? "Light mode" : "Dark mode"}
+          >
+            <i className={`fas ${darkMode ? "fa-sun" : "fa-moon"}`} />
+          </button>
+        </div>
+      </aside>
+
+      {/* ── Main content ── */}
+      <div className="admin-main">
+        {renderView()}
       </div>
-
-      {stats && (
-        <div className="row g-3 mb-4">
-          <div className="col-md-4">
-            <div className="card text-center p-3">
-              <h2 style={{ color: "#8c1d40" }}>{stats.total_users}</h2>
-              <p className="mb-0 text-muted">Total Users</p>
-            </div>
-          </div>
-          <div className="col-md-4">
-            <div className="card text-center p-3">
-              <h2 style={{ color: "#8c1d40" }}>{stats.verified_count}</h2>
-              <p className="mb-0 text-muted">Verified Users</p>
-            </div>
-          </div>
-          <div className="col-md-4">
-            <div className="card text-center p-3">
-              <h2 style={{ color: "#8c1d40" }}>{stats.today_verifications}</h2>
-              <p className="mb-0 text-muted">Verified Today</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <AutomationsSection />
     </div>
   );
 }

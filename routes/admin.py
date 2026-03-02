@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import logging
 import os
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from zoneinfo import ZoneInfo
 
 from flask import Blueprint, abort, jsonify, redirect, request, send_from_directory, session
+from sqlalchemy import func
 
-from utils.database import CronJobConfig, User, session_scope
+from utils.database import CronJobConfig, User, UserRole, session_scope
 
 AZ_TZ = ZoneInfo("America/Phoenix")
 
@@ -231,6 +233,190 @@ def admin_trigger_automation(job_name: str):
 
     success = cron_manager.run_jobs(job_names=[job_name], raise_on_error=False)
     return jsonify({"status": "triggered" if success else "failed", "job_name": job_name})
+
+
+# ─── Roles ────────────────────────────────────────────────────────────────────
+
+@admin_bp.route("/api/admin/roles")
+@require_admin
+def admin_roles():
+    with session_scope() as db_session:
+        rows = (
+            db_session.query(UserRole.role_name, func.count(UserRole.id).label("cnt"))
+            .group_by(UserRole.role_name)
+            .order_by(UserRole.role_name.asc())
+            .all()
+        )
+    return jsonify([{"role_name": r, "count": c} for r, c in rows])
+
+
+# ─── Activity helpers ─────────────────────────────────────────────────────────
+
+def _parse_az_date(date_str: str | None, *, end_of_day: bool = False) -> datetime | None:
+    """Parse a YYYY-MM-DD string in AZ time and return a naive UTC datetime."""
+    if not date_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(date_str)
+        if end_of_day:
+            dt = dt.replace(hour=23, minute=59, second=59)
+        return dt.replace(tzinfo=AZ_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def _activity_query(db_session, date_col, from_dt, to_dt, role: str | None):
+    """Filtered User query on the given date column, optionally restricted to a role."""
+    q = db_session.query(User).filter(date_col.isnot(None))
+    if from_dt:
+        q = q.filter(date_col >= from_dt)
+    if to_dt:
+        q = q.filter(date_col <= to_dt)
+    if role:
+        q = (
+            q.join(UserRole, UserRole.user_id == User.id)
+            .filter(UserRole.role_name == role)
+            .distinct()
+        )
+    return q
+
+
+def _chart_data(dates: list, from_dt, to_dt) -> list:
+    """Aggregate naive-UTC datetimes by AZ date, zero-filling the full range."""
+    counter: Counter = Counter()
+    for dt in dates:
+        if dt is not None:
+            az_date = dt.replace(tzinfo=timezone.utc).astimezone(AZ_TZ).date()
+            counter[az_date] += 1
+
+    if from_dt and to_dt:
+        start = from_dt.replace(tzinfo=timezone.utc).astimezone(AZ_TZ).date()
+        end = to_dt.replace(tzinfo=timezone.utc).astimezone(AZ_TZ).date()
+    elif counter:
+        start, end = min(counter), max(counter)
+    else:
+        return []
+
+    result, cur = [], start
+    while cur <= end:
+        result.append({"date": cur.isoformat(), "count": counter.get(cur, 0)})
+        cur += timedelta(days=1)
+    return result
+
+
+def _serialize_activity(u: User, date_field: str) -> dict:
+    dt = getattr(u, date_field)
+    dt_az = dt.replace(tzinfo=timezone.utc).astimezone(AZ_TZ).isoformat() if dt else None
+    return {
+        "id": u.id,
+        "asurite_id": u.asurite_id,
+        "discord_username": u.discord_username,
+        "discord_user_id": u.discord_user_id,
+        "discord_avatar": u.discord_avatar,
+        date_field: dt_az,
+    }
+
+
+def _paginated_activity(date_col, date_field: str):
+    from_dt  = _parse_az_date(request.args.get("from_date"))
+    to_dt    = _parse_az_date(request.args.get("to_date"), end_of_day=True)
+    role     = request.args.get("role") or None
+    page     = max(1, request.args.get("page", 1, type=int))
+    per_page = min(100, max(1, request.args.get("per_page", 25, type=int)))
+    offset   = (page - 1) * per_page
+
+    with session_scope() as db_session:
+        q = _activity_query(db_session, date_col, from_dt, to_dt, role)
+        total = q.count()
+        users = q.order_by(date_col.desc()).offset(offset).limit(per_page).all()
+        result = [_serialize_activity(u, date_field) for u in users]
+
+    return jsonify({
+        "users": result,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": max(1, (total + per_page - 1) // per_page),
+    })
+
+
+def _chart_activity(date_col):
+    from_dt = _parse_az_date(request.args.get("from_date"))
+    to_dt   = _parse_az_date(request.args.get("to_date"), end_of_day=True)
+    role    = request.args.get("role") or None
+
+    with session_scope() as db_session:
+        dates = [u.joined_at if date_col is User.joined_at else u.left_at
+                 for u in _activity_query(db_session, date_col, from_dt, to_dt, role).all()]
+
+    return jsonify(_chart_data(dates, from_dt, to_dt))
+
+
+# ─── Server joins ─────────────────────────────────────────────────────────────
+
+@admin_bp.route("/api/admin/server-joins")
+@require_admin
+def admin_server_joins():
+    return _paginated_activity(User.joined_at, "joined_at")
+
+
+@admin_bp.route("/api/admin/server-joins/chart")
+@require_admin
+def admin_server_joins_chart():
+    from_dt = _parse_az_date(request.args.get("from_date"))
+    to_dt   = _parse_az_date(request.args.get("to_date"), end_of_day=True)
+    role    = request.args.get("role") or None
+    with session_scope() as db_session:
+        dates = [u.joined_at for u in
+                 _activity_query(db_session, User.joined_at, from_dt, to_dt, role).all()]
+    return jsonify(_chart_data(dates, from_dt, to_dt))
+
+
+# ─── Server leaves ────────────────────────────────────────────────────────────
+
+@admin_bp.route("/api/admin/server-leaves")
+@require_admin
+def admin_server_leaves():
+    return _paginated_activity(User.left_at, "left_at")
+
+
+@admin_bp.route("/api/admin/server-leaves/chart")
+@require_admin
+def admin_server_leaves_chart():
+    from_dt = _parse_az_date(request.args.get("from_date"))
+    to_dt   = _parse_az_date(request.args.get("to_date"), end_of_day=True)
+    role    = request.args.get("role") or None
+    with session_scope() as db_session:
+        dates = [u.left_at for u in
+                 _activity_query(db_session, User.left_at, from_dt, to_dt, role).all()]
+    return jsonify(_chart_data(dates, from_dt, to_dt))
+
+
+@admin_bp.route("/api/admin/joins")
+@require_admin
+def admin_joins():
+    limit = min(100, max(1, request.args.get("limit", 50, type=int)))
+    with session_scope() as db_session:
+        users = (
+            db_session.query(User)
+            .filter(User.verified == True)  # noqa: E712
+            .filter(User.verified_at.isnot(None))
+            .order_by(User.verified_at.desc())
+            .limit(limit)
+            .all()
+        )
+        result = [
+            {
+                "id": u.id,
+                "asurite_id": u.asurite_id,
+                "discord_username": u.discord_username,
+                "discord_user_id": u.discord_user_id,
+                "discord_avatar": u.discord_avatar,
+                "verified_at": u.verified_at.isoformat() if u.verified_at else None,
+            }
+            for u in users
+        ]
+    return jsonify(result)
 
 
 @admin_bp.route("/admin")
