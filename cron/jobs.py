@@ -4,7 +4,7 @@ import csv
 import io
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Iterable, List, Tuple
+from typing import Any, Callable, Iterable, List, Tuple
 from zoneinfo import ZoneInfo
 
 from clients.sftp_client import SftpClient
@@ -219,7 +219,7 @@ def send_survey_messages() -> None:
     survey_text = (
         "Hey! It's been 3 weeks since you joined Devil2Devil. "
         "We'd love to hear about your experience so far — "
-        "please take a moment to [fill out our survey](<https://enterpriseasu.qualtrics.com/jfe/form/SV_003BoaJdaKI7ZR4>)!"
+        "please take a moment to fill out our survey here: "
     )
 
     # Send in batches to stay within Discord's 2000-character message limit.
