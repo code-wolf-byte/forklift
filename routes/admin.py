@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import wraps
+from zoneinfo import ZoneInfo
 
 from flask import Blueprint, abort, jsonify, redirect, request, send_from_directory, session
 
-from utils.database import User, session_scope
+from utils.database import CronJobConfig, User, session_scope
+
+AZ_TZ = ZoneInfo("America/Phoenix")
 
 admin_bp = Blueprint("admin", __name__)
 logger = logging.getLogger(__name__)
@@ -140,6 +143,94 @@ def admin_users():
             "pages": (total + per_page - 1) // per_page,
         }
     )
+
+
+def _next_run_az(cfg: CronJobConfig) -> str:
+    """Return next scheduled run time as an AZ-aware ISO string."""
+    now_az = datetime.now(AZ_TZ)
+    scheduled_today = now_az.replace(
+        hour=cfg.schedule_hour, minute=cfg.schedule_minute, second=0, microsecond=0
+    )
+    already_ran_today = False
+    if cfg.last_run_at is not None:
+        last_az = cfg.last_run_at.replace(tzinfo=timezone.utc).astimezone(AZ_TZ)
+        already_ran_today = last_az.date() >= now_az.date()
+
+    if not already_ran_today:
+        return scheduled_today.isoformat()
+    return (scheduled_today + timedelta(days=1)).isoformat()
+
+
+def _serialize_cron_config(cfg: CronJobConfig) -> dict:
+    last_run_str = None
+    if cfg.last_run_at is not None:
+        last_az = cfg.last_run_at.replace(tzinfo=timezone.utc).astimezone(AZ_TZ)
+        last_run_str = last_az.isoformat()
+    return {
+        "job_name": cfg.job_name,
+        "display_name": cfg.display_name,
+        "enabled": cfg.enabled,
+        "schedule_hour": cfg.schedule_hour,
+        "schedule_minute": cfg.schedule_minute,
+        "last_run_at": last_run_str,
+        "next_run_at": _next_run_az(cfg),
+    }
+
+
+@admin_bp.route("/api/admin/automations")
+@require_admin
+def admin_automations():
+    with session_scope() as db_session:
+        configs = db_session.query(CronJobConfig).order_by(CronJobConfig.id.asc()).all()
+    return jsonify([_serialize_cron_config(c) for c in configs])
+
+
+@admin_bp.route("/api/admin/automations/<job_name>", methods=["PUT"])
+@require_admin
+def admin_update_automation(job_name: str):
+    data = request.get_json(silent=True) or {}
+
+    with session_scope() as db_session:
+        cfg = (
+            db_session.query(CronJobConfig)
+            .filter(CronJobConfig.job_name == job_name)
+            .one_or_none()
+        )
+        if cfg is None:
+            return jsonify({"error": "Not found"}), 404
+
+        if "enabled" in data:
+            cfg.enabled = bool(data["enabled"])
+        if "schedule_hour" in data:
+            h = int(data["schedule_hour"])
+            if not 0 <= h <= 23:
+                return jsonify({"error": "schedule_hour must be 0–23"}), 400
+            cfg.schedule_hour = h
+        if "schedule_minute" in data:
+            m = int(data["schedule_minute"])
+            if not 0 <= m <= 59:
+                return jsonify({"error": "schedule_minute must be 0–59"}), 400
+            cfg.schedule_minute = m
+
+    with session_scope() as db_session:
+        cfg = (
+            db_session.query(CronJobConfig)
+            .filter(CronJobConfig.job_name == job_name)
+            .one()
+        )
+        return jsonify(_serialize_cron_config(cfg))
+
+
+@admin_bp.route("/api/admin/automations/<job_name>/trigger", methods=["POST"])
+@require_admin
+def admin_trigger_automation(job_name: str):
+    from cron import cron_manager
+
+    if job_name not in cron_manager.job_names:
+        return jsonify({"error": "Unknown job"}), 404
+
+    success = cron_manager.run_jobs(job_names=[job_name], raise_on_error=False)
+    return jsonify({"status": "triggered" if success else "failed", "job_name": job_name})
 
 
 @admin_bp.route("/admin")

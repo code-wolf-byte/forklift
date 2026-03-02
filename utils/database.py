@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Iterator
 
 from sqlalchemy import (
@@ -137,9 +138,51 @@ class QnaModule(Base):
     )
 
 
+class CronJobConfig(Base):
+    """Per-job schedule configuration and last-run tracking."""
+
+    __tablename__ = "cron_job_config"
+
+    id = Column(Integer, primary_key=True)
+    job_name = Column(String(128), unique=True, nullable=False, index=True)
+    display_name = Column(String(255), nullable=False)
+    enabled = Column(Boolean, default=True, nullable=False)
+    schedule_hour = Column(Integer, default=0, nullable=False)    # 0–23 in AZ time
+    schedule_minute = Column(Integer, default=0, nullable=False)  # 0–59
+    last_run_at = Column(DateTime, nullable=True)                 # naive UTC
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
+# Default rows seeded on first startup.
+_CRON_JOB_DEFAULTS = [
+    {
+        "job_name": "upload_emails_to_sftp",
+        "display_name": "Upload Verified Emails to SFTP",
+    },
+    {
+        "job_name": "upload_departed_to_sftp",
+        "display_name": "Upload Departed Users to SFTP",
+    },
+]
+
+# Legacy state-file paths — read once during migration, then ignored.
+_LEGACY_STATE_FILES: dict[str, Path] = {
+    "upload_emails_to_sftp": Path(__file__).resolve().parent.parent
+    / "data"
+    / "upload_emails_to_sftp.state",
+    "upload_departed_to_sftp": Path(__file__).resolve().parent.parent
+    / "data"
+    / "upload_departed_to_sftp.state",
+}
+
+
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_user_columns()
+    _seed_cron_job_config()
 
 
 def _ensure_user_columns() -> None:
@@ -172,6 +215,37 @@ def _ensure_user_columns() -> None:
     with engine.begin() as conn:
         for ddl in ddl_statements:
             conn.execute(text(ddl))
+
+
+def _seed_cron_job_config() -> None:
+    """Insert default CronJobConfig rows; migrate last_run from legacy state files."""
+    with session_scope() as db_session:
+        for defaults in _CRON_JOB_DEFAULTS:
+            existing = (
+                db_session.query(CronJobConfig)
+                .filter(CronJobConfig.job_name == defaults["job_name"])
+                .one_or_none()
+            )
+            if existing is not None:
+                continue
+
+            row = CronJobConfig(**defaults)
+
+            # One-time migration: read last_run from legacy state file if present.
+            legacy_path = _LEGACY_STATE_FILES.get(defaults["job_name"])
+            if legacy_path and legacy_path.exists():
+                try:
+                    raw = legacy_path.read_text(encoding="utf-8").strip()
+                    parsed = datetime.fromisoformat(raw)
+                    # Normalize to naive UTC for DB storage.
+                    if parsed.tzinfo is not None:
+                        from datetime import timezone as _tz
+                        parsed = parsed.astimezone(_tz.utc).replace(tzinfo=None)
+                    row.last_run_at = parsed
+                except Exception:
+                    pass
+
+            db_session.add(row)
 
 
 def get_session() -> Session:

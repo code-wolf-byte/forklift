@@ -9,11 +9,8 @@ from cron.manager import (
 cron_manager = CronManager()
 
 
-def start_upload_scheduler(*, interval_seconds: float | None = None) -> bool:
-    kwargs = {}
-    if interval_seconds is not None:
-        kwargs["interval_seconds"] = interval_seconds
-    return _start_upload_scheduler(cron_manager, **kwargs)
+def start_upload_scheduler() -> bool:
+    return _start_upload_scheduler(cron_manager)
 
 
 def stop_upload_scheduler(*, timeout: float = 5.0) -> None:

@@ -4,11 +4,10 @@ import csv
 import io
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Callable, Iterable, List, Tuple
 
 from clients.sftp_client import SftpClient
-from utils.database import User, session_scope
+from utils.database import CronJobConfig, User, session_scope
 from utils.settings import CONFIG, SFTP_CONFIG, SftpUploadConfig
 
 logger = logging.getLogger(__name__)
@@ -25,20 +24,28 @@ def _normalize_dt(value: datetime | None) -> datetime | None:
     return value.astimezone(timezone.utc)
 
 
-def _load_last_run(state_path: Path) -> datetime | None:
-    if not state_path.exists():
-        return None
-    try:
-        raw = state_path.read_text(encoding="utf-8").strip()
-        return datetime.fromisoformat(raw)
-    except Exception:
-        logger.warning("Could not parse last SFTP upload timestamp; treating as first run")
-        return None
+def _get_last_run(job_name: str) -> datetime | None:
+    """Read last_run_at (naive UTC) from the cron_job_config table."""
+    with session_scope() as db_session:
+        row = (
+            db_session.query(CronJobConfig)
+            .filter(CronJobConfig.job_name == job_name)
+            .one_or_none()
+        )
+        return row.last_run_at if row else None
 
 
-def _save_last_run(state_path: Path, timestamp: datetime) -> None:
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(timestamp.isoformat(), encoding="utf-8")
+def _set_last_run(job_name: str, timestamp: datetime) -> None:
+    """Persist last_run_at as naive UTC in the cron_job_config table."""
+    naive_utc = timestamp.replace(tzinfo=None) if timestamp.tzinfo else timestamp
+    with session_scope() as db_session:
+        row = (
+            db_session.query(CronJobConfig)
+            .filter(CronJobConfig.job_name == job_name)
+            .one_or_none()
+        )
+        if row is not None:
+            row.last_run_at = naive_utc
 
 
 def _fetch_verified_users(since: datetime | None) -> List[Tuple[str, datetime]]:
@@ -80,12 +87,13 @@ def upload_emails_to_sftp() -> None:
         logger.warning("SFTP configuration missing or disabled; skipping upload_emails_to_sftp")
         return
 
+    job_name = "upload_emails_to_sftp"
     now = datetime.now(timezone.utc)
-    last_run = _load_last_run(SFTP_CONFIG.state_path)
+    last_run = _get_last_run(job_name)
     rows = _fetch_verified_users(last_run)
 
     if not rows:
-        _save_last_run(SFTP_CONFIG.state_path, now)
+        _set_last_run(job_name, now)
         logger.info("No verified users to upload; recorded last run at %s", now.isoformat())
         return
 
@@ -93,7 +101,7 @@ def upload_emails_to_sftp() -> None:
     filename = f"{SFTP_CONFIG.filename_prefix}-{now.strftime('%Y%m%d')}.csv"
     remote_path = _upload_csv(SFTP_CONFIG, csv_payload, filename)
 
-    _save_last_run(SFTP_CONFIG.state_path, now)
+    _set_last_run(job_name, now)
     logger.info("Uploaded %d emails to SFTP at %s", len(rows), remote_path)
 
 
@@ -102,9 +110,6 @@ def _upload_csv(config: SftpUploadConfig, payload: bytes, filename: str) -> str:
         return client.upload_bytes(payload, config.remote_dir, filename)
 
 
-_DEPARTED_STATE_PATH = (
-    Path(__file__).resolve().parent.parent / "data" / "upload_departed_to_sftp.state"
-)
 _DEPARTED_FILENAME_PREFIX = "Devil2Devil_Left"
 
 
@@ -138,12 +143,13 @@ def upload_departed_to_sftp() -> None:
         logger.warning("SFTP configuration missing or disabled; skipping upload_departed_to_sftp")
         return
 
+    job_name = "upload_departed_to_sftp"
     now = datetime.now(timezone.utc)
-    last_run = _load_last_run(_DEPARTED_STATE_PATH)
+    last_run = _get_last_run(job_name)
     rows = _fetch_departed_users(last_run)
 
     if not rows:
-        _save_last_run(_DEPARTED_STATE_PATH, now)
+        _set_last_run(job_name, now)
         logger.info("No departed users to upload; recorded last run at %s", now.isoformat())
         return
 
@@ -151,7 +157,7 @@ def upload_departed_to_sftp() -> None:
     filename = f"{_DEPARTED_FILENAME_PREFIX}-{now.strftime('%Y%m%d')}.csv"
     remote_path = _upload_csv(SFTP_CONFIG, csv_payload, filename)
 
-    _save_last_run(_DEPARTED_STATE_PATH, now)
+    _set_last_run(job_name, now)
     logger.info("Uploaded %d departed users to SFTP at %s", len(rows), remote_path)
 
 

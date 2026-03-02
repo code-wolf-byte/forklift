@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
+from datetime import datetime, timezone
 from typing import Callable, Iterable, Sequence
 
 from utils.settings import CONFIG, SFTP_CONFIG
@@ -11,7 +11,6 @@ from utils.settings import CONFIG, SFTP_CONFIG
 CronJob = Callable[..., None]
 
 _UPLOAD_JOB: Sequence[str] = ("upload_emails_to_sftp", "upload_departed_to_sftp")
-_UPLOAD_INTERVAL_SECONDS = 24 * 60 * 60
 logger = logging.getLogger(__name__)
 
 
@@ -78,10 +77,9 @@ class CronManager:
         self,
         *,
         job_names: Iterable[str],
-        interval_seconds: float,
         thread_name: str = "cron-scheduler",
     ) -> bool:
-        """Start a background scheduler thread for the given jobs."""
+        """Start a background time-of-day scheduler thread for the given jobs."""
 
         if self._scheduler_thread and self._scheduler_thread.is_alive():
             return False
@@ -90,16 +88,15 @@ class CronManager:
         self._stop_event.clear()
         self._scheduler_thread = threading.Thread(
             target=self._cron_loop,
-            args=(job_tuple, interval_seconds),
+            args=(job_tuple,),
             name=thread_name,
             daemon=True,
         )
         self._scheduler_thread.start()
         self._logger.info(
-            "Started %s for jobs %s (interval %.0fs)",
+            "Started %s for jobs %s (time-of-day scheduling, AZ time)",
             thread_name,
             ", ".join(job_tuple),
-            interval_seconds,
         )
         return True
 
@@ -113,29 +110,48 @@ class CronManager:
         self._scheduler_thread.join(timeout=timeout)
         self._scheduler_thread = None
 
-    def _cron_loop(
-        self,
-        job_names: Iterable[str],
-        interval_seconds: float,
-    ) -> None:
+    def _cron_loop(self, job_names: tuple[str, ...]) -> None:
+        """Poll every 30 s; fire each job at its configured AZ hour:minute once per day."""
+        from zoneinfo import ZoneInfo
+        from utils.database import CronJobConfig, session_scope
+
+        AZ_TZ = ZoneInfo("America/Phoenix")
+
         while not self._stop_event.is_set():
-            start = time.monotonic()
-            self.run_jobs(
-                job_names=job_names,
-                raise_on_error=False,
-            )
-            elapsed = time.monotonic() - start
-            delay = max(1.0, interval_seconds - elapsed)
-            if self._stop_event.wait(delay):
+            now_az = datetime.now(AZ_TZ)
+
+            for job_name in job_names:
+                try:
+                    with session_scope() as db_session:
+                        cfg = (
+                            db_session.query(CronJobConfig)
+                            .filter(CronJobConfig.job_name == job_name)
+                            .one_or_none()
+                        )
+
+                    if cfg is None or not cfg.enabled:
+                        continue
+
+                    if now_az.hour != cfg.schedule_hour or now_az.minute != cfg.schedule_minute:
+                        continue
+
+                    # Skip if already ran today (AZ date).
+                    if cfg.last_run_at is not None:
+                        last_az = cfg.last_run_at.replace(tzinfo=timezone.utc).astimezone(AZ_TZ)
+                        if last_az.date() >= now_az.date():
+                            continue
+
+                    self.run_jobs(job_names=[job_name], raise_on_error=False)
+
+                except Exception:
+                    self._logger.exception("Scheduler tick failed for job: %s", job_name)
+
+            if self._stop_event.wait(30):
                 break
 
 
-def start_upload_scheduler(
-    cron_manager: "CronManager",
-    *,
-    interval_seconds: float = _UPLOAD_INTERVAL_SECONDS,
-) -> bool:
-    """Start the daily upload_emails_to_sftp scheduler."""
+def start_upload_scheduler(cron_manager: "CronManager") -> bool:
+    """Start the time-of-day upload scheduler."""
     if CONFIG.DEV_MODE:
         logger.info("FORKLIFT_DEV_MODE enabled; skipping SFTP scheduler")
         return False
@@ -143,21 +159,14 @@ def start_upload_scheduler(
         logger.info("SFTP uploads not configured; skipping scheduler")
         return False
 
-    started = cron_manager.start_scheduler(
+    return cron_manager.start_scheduler(
         job_names=_UPLOAD_JOB,
-        interval_seconds=interval_seconds,
         thread_name="upload-emails-scheduler",
     )
-    if started:
-        logger.info(
-            "upload_emails_to_sftp scheduler active (interval %.0fs)",
-            interval_seconds,
-        )
-    return started
 
 
 def stop_upload_scheduler(cron_manager: "CronManager", *, timeout: float = 5.0) -> None:
-    """Stop the daily upload scheduler."""
+    """Stop the upload scheduler."""
     cron_manager.stop_scheduler(timeout=timeout)
 
 
