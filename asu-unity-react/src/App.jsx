@@ -85,7 +85,7 @@ export default function App() {
           <Home status={status} />
         )}
       </main>
-      <Footer />
+      {!isAdminPath && <Footer />}
     </>
   );
 }

@@ -7,6 +7,7 @@ import {
   CategoryScale,
   LinearScale,
   Tooltip,
+  Legend,
   Filler,
 } from "chart.js";
 
@@ -17,6 +18,7 @@ Chart.register(
   CategoryScale,
   LinearScale,
   Tooltip,
+  Legend,
   Filler
 );
 
@@ -28,65 +30,88 @@ function fmtLabel(isoDate) {
   });
 }
 
-export default function ActivityChart({ data, label, isDark }) {
+function hexToRgb(hex) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `${r},${g},${b}`;
+}
+
+// datasets: [{ data: [{date, count}], label, color }]
+export default function ActivityChart({ datasets, isDark }) {
   const canvasRef = useRef(null);
   const chartRef = useRef(null);
 
+  const hasData = datasets?.some((ds) => ds.data?.length > 0);
+
   useEffect(() => {
-    if (!data || !canvasRef.current) return;
+    if (!hasData || !canvasRef.current) return;
     if (chartRef.current) chartRef.current.destroy();
 
     const ctx = canvasRef.current.getContext("2d");
     const chartHeight = canvasRef.current.offsetHeight || 220;
+    const alpha = isDark ? 0.45 : 0.3;
 
-    // Statbot-style gradient fill
-    const gradient = ctx.createLinearGradient(0, 0, 0, chartHeight);
-    if (isDark) {
-      gradient.addColorStop(0, "rgba(140,29,64,0.45)");
-      gradient.addColorStop(1, "rgba(140,29,64,0)");
-    } else {
-      gradient.addColorStop(0, "rgba(140,29,64,0.3)");
-      gradient.addColorStop(1, "rgba(140,29,64,0)");
-    }
+    // Union of all dates across every series, sorted
+    const dateSet = new Set();
+    datasets.forEach((ds) => ds.data?.forEach((d) => dateSet.add(d.date)));
+    const allDates = [...dateSet].sort();
+
+    const chartDatasets = datasets.map((ds) => {
+      const map = Object.fromEntries((ds.data || []).map((d) => [d.date, d.count]));
+      const rgb = hexToRgb(ds.color);
+      const gradient = ctx.createLinearGradient(0, 0, 0, chartHeight);
+      gradient.addColorStop(0, `rgba(${rgb},${alpha})`);
+      gradient.addColorStop(1, `rgba(${rgb},0)`);
+      return {
+        label: ds.label,
+        data: allDates.map((date) => map[date] ?? 0),
+        borderColor: ds.color,
+        borderWidth: 2,
+        backgroundColor: gradient,
+        fill: true,
+        tension: 0.4,
+        pointRadius: 0,
+        pointHoverRadius: 5,
+        pointHoverBackgroundColor: ds.color,
+        pointHoverBorderColor: "#fff",
+        pointHoverBorderWidth: 2,
+      };
+    });
 
     const tickColor = isDark ? "#909296" : "#6c757d";
     const gridColor = isDark ? "#2b2d31" : "#e9ecef";
+    const multi = datasets.length > 1;
 
     chartRef.current = new Chart(ctx, {
       type: "line",
       data: {
-        labels: data.map((d) => fmtLabel(d.date)),
-        datasets: [
-          {
-            label,
-            data: data.map((d) => d.count),
-            borderColor: "#8c1d40",
-            borderWidth: 2,
-            backgroundColor: gradient,
-            fill: true,
-            tension: 0.4,
-            pointRadius: 0,
-            pointHoverRadius: 5,
-            pointHoverBackgroundColor: "#8c1d40",
-            pointHoverBorderColor: "#fff",
-            pointHoverBorderWidth: 2,
-          },
-        ],
+        labels: allDates.map(fmtLabel),
+        datasets: chartDatasets,
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        interaction: {
-          intersect: false,
-          mode: "index",
-        },
+        interaction: { intersect: false, mode: "index" },
         plugins: {
-          legend: { display: false },
+          legend: {
+            display: multi,
+            labels: {
+              color: isDark ? "#dcddde" : "#4e5058",
+              boxWidth: 12,
+              padding: 12,
+              usePointStyle: true,
+              pointStyleWidth: 10,
+            },
+          },
           tooltip: {
-            displayColors: false,
+            displayColors: multi,
             callbacks: {
-              title: (items) => data[items[0].dataIndex]?.date ?? items[0].label,
-              label: (item) => `${item.parsed.y} ${label.toLowerCase()}`,
+              title: (items) => allDates[items[0].dataIndex] ?? items[0].label,
+              label: (item) =>
+                multi
+                  ? `${item.dataset.label}: ${item.parsed.y}`
+                  : `${item.parsed.y}`,
             },
           },
         },
@@ -110,9 +135,9 @@ export default function ActivityChart({ data, label, isDark }) {
       chartRef.current?.destroy();
       chartRef.current = null;
     };
-  }, [data, label, isDark]);
+  }, [datasets, isDark, hasData]);
 
-  if (!data || data.length === 0) {
+  if (!hasData) {
     return (
       <div className="admin-chart-container d-flex align-items-center justify-content-center text-muted small">
         No data for selected range.

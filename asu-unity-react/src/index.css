@@ -51,6 +51,36 @@
   box-shadow: none;
 }
 
+/* ─── Maroon button ───────────────────────────────────────────────────────── */
+
+.btn-maroon {
+  background-color: #8c1d40;
+  border-color: #8c1d40;
+  color: #fff;
+}
+
+.btn-maroon:hover,
+.btn-maroon:focus {
+  background-color: #7a1836;
+  border-color: #7a1836;
+  color: #fff;
+}
+
+/* ─── Chart series builder ────────────────────────────────────────────────── */
+
+.chart-series-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.chart-series-remove {
+  padding: 2px 7px;
+  line-height: 1;
+}
+
 /* ─── Admin layout (Discord-style sidebar) ────────────────────────────────── */
 
 .admin-layout {
@@ -294,4 +324,17 @@ body.admin-dark {
 
 body.admin-dark input[type="date"]::-webkit-calendar-picker-indicator {
   filter: invert(0.7);
+}
+
+body.admin-dark .btn-maroon {
+  background-color: #8c1d40;
+  border-color: #8c1d40;
+  color: #fff;
+}
+
+body.admin-dark .btn-maroon:hover,
+body.admin-dark .btn-maroon:focus {
+  background-color: #a02048;
+  border-color: #a02048;
+  color: #fff;
 }
