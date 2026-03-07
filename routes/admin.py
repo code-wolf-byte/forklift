@@ -92,6 +92,27 @@ def admin_stats():
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     today_naive = today_start.replace(tzinfo=None)
 
+    # Period for retention/leaves stats — defaults to current month in AZ time
+    from_date_str = request.args.get("from_date")
+    to_date_str = request.args.get("to_date")
+
+    now_az = datetime.now(AZ_TZ)
+    if from_date_str:
+        from_dt = _parse_az_date(from_date_str)
+    else:
+        from_dt = (
+            now_az.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            .astimezone(timezone.utc)
+            .replace(tzinfo=None)
+        )
+        from_date_str = now_az.replace(day=1).date().isoformat()
+
+    if to_date_str:
+        to_dt = _parse_az_date(to_date_str, end_of_day=True)
+    else:
+        to_dt = now_az.astimezone(timezone.utc).replace(tzinfo=None)
+        to_date_str = now_az.date().isoformat()
+
     with session_scope() as db_session:
         total_users = db_session.query(User).count()
         verified_count = db_session.query(User).filter(User.verified == True).count()  # noqa: E712
@@ -101,11 +122,47 @@ def admin_stats():
             .count()
         )
 
+        # Verified users who left during the period
+        verified_leaves = (
+            db_session.query(User)
+            .filter(
+                User.verified == True,  # noqa: E712
+                User.left_at.isnot(None),
+                User.left_at >= from_dt,
+                User.left_at <= to_dt,
+            )
+            .count()
+        )
+
+        # Verified users as of start of period (verified before period began)
+        verified_at_start = (
+            db_session.query(User)
+            .filter(User.verified == True, User.verified_at < from_dt)  # noqa: E712
+            .count()
+        )
+
+        # Verified users as of end of period
+        verified_at_end = (
+            db_session.query(User)
+            .filter(User.verified == True, User.verified_at <= to_dt)  # noqa: E712
+            .count()
+        )
+
+    denominator = verified_at_end - verified_leaves
+    retention_rate = (
+        round((verified_at_start / denominator) * 100, 1) if denominator > 0 else None
+    )
+
     return jsonify(
         {
             "total_users": total_users,
             "verified_count": verified_count,
             "today_verifications": today_verifications,
+            "verified_leaves": verified_leaves,
+            "verified_at_start": verified_at_start,
+            "verified_at_end": verified_at_end,
+            "retention_rate": retention_rate,
+            "period": {"from_date": from_date_str, "to_date": to_date_str},
         }
     )
 

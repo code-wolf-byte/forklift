@@ -56,7 +56,6 @@ function NavItem({ id, icon, label, active, onClick }) {
 export default function Admin() {
   const [activeView, setActiveView] = useState("dashboard");
   const [adminUser, setAdminUser] = useState(null);
-  const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sidebarTop, setSidebarTop] = useState(0);
   const [darkMode, setDarkMode] = useState(
@@ -96,9 +95,8 @@ export default function Admin() {
       .then((data) => {
         if (!data) return;
         setAdminUser(data);
-        return fetch("/api/admin/stats").then((r) => r.json());
+        setLoading(false);
       })
-      .then((data) => { if (data) setStats(data); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
 
@@ -114,7 +112,7 @@ export default function Admin() {
 
   const renderView = () => {
     switch (activeView) {
-      case "dashboard":    return <Dashboard stats={stats} />;
+      case "dashboard":    return <Dashboard />;
       case "members":      return <Users />;
       case "joins":        return <Joins />;
       case "server-joins": return <ServerJoins isDark={darkMode} />;
