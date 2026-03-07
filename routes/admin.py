@@ -148,9 +148,10 @@ def admin_stats():
             .count()
         )
 
-    denominator = verified_at_end - verified_leaves
     retention_rate = (
-        round((verified_at_start / denominator) * 100, 1) if denominator > 0 else None
+        round(((verified_at_start - verified_leaves) / verified_at_start) * 100, 1)
+        if verified_at_start > 0
+        else None
     )
 
     return jsonify(
