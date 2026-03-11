@@ -5,6 +5,7 @@ import Users from "./admin/Users.jsx";
 import Joins from "./admin/Joins.jsx";
 import ServerJoins from "./admin/ServerJoins.jsx";
 import Leaves from "./admin/Leaves.jsx";
+import MemberStats from "./admin/MemberStats.jsx";
 
 // ─── Sidebar navigation config ────────────────────────────────────────────────
 
@@ -20,6 +21,7 @@ const NAV = [
     items: [
       { id: "members",      icon: "fa-users",        label: "Members"       },
       { id: "joins",        icon: "fa-user-check",   label: "Verifications" },
+      { id: "member-stats", icon: "fa-chart-pie",    label: "Member Stats"  },
     ],
   },
   {
@@ -112,13 +114,14 @@ export default function Admin() {
 
   const renderView = () => {
     switch (activeView) {
-      case "dashboard":    return <Dashboard />;
-      case "members":      return <Users />;
-      case "joins":        return <Joins />;
-      case "server-joins": return <ServerJoins isDark={darkMode} />;
-      case "leaves":       return <Leaves isDark={darkMode} />;
-      case "automations":  return <Automations />;
-      default:             return null;
+      case "dashboard":     return <Dashboard />;
+      case "members":       return <Users />;
+      case "joins":         return <Joins />;
+      case "member-stats":  return <MemberStats />;
+      case "server-joins":  return <ServerJoins isDark={darkMode} />;
+      case "leaves":        return <Leaves isDark={darkMode} />;
+      case "automations":   return <Automations />;
+      default:              return null;
     }
   };
 

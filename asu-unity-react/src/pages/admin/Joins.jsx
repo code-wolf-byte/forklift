@@ -34,16 +34,13 @@ function Avatar({ userId, avatarHash, username }) {
         src={src}
         alt={username}
         style={{
-          width: 40,
-          height: 40,
+          width: 36,
+          height: 36,
           borderRadius: "50%",
           objectFit: "cover",
           flexShrink: 0,
         }}
-        onError={(e) => {
-          e.target.style.display = "none";
-          e.target.nextSibling.style.display = "flex";
-        }}
+        onError={(e) => { e.target.style.display = "none"; }}
       />
     );
   }
@@ -51,8 +48,8 @@ function Avatar({ userId, avatarHash, username }) {
   return (
     <div
       style={{
-        width: 40,
-        height: 40,
+        width: 36,
+        height: 36,
         borderRadius: "50%",
         background: "#8c1d40",
         color: "#fff",
@@ -60,7 +57,7 @@ function Avatar({ userId, avatarHash, username }) {
         alignItems: "center",
         justifyContent: "center",
         fontWeight: 700,
-        fontSize: 16,
+        fontSize: 14,
         flexShrink: 0,
       }}
     >

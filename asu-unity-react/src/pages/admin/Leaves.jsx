@@ -27,7 +27,7 @@ function Avatar({ userId, avatarHash, username }) {
     />
   ) : (
     <div style={{
-      width: 36, height: 36, borderRadius: "50%", background: "#5c6370",
+      width: 36, height: 36, borderRadius: "50%", background: "#8c1d40",
       color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
       fontWeight: 700, fontSize: 14, flexShrink: 0,
     }}>
@@ -284,7 +284,7 @@ export default function Leaves({ isDark }) {
                     <div className="text-muted" style={{ fontSize: 12 }}>{u.asurite_id}</div>
                   </div>
                   <div className="text-muted small text-nowrap flex-shrink-0">
-                    <i className="fas fa-sign-out-alt me-1" style={{ color: "#5c6370" }} />
+                    <i className="fas fa-sign-out-alt me-1" style={{ color: "#8c1d40" }} />
                     {u.left_at
                       ? new Date(u.left_at).toLocaleDateString("en-US", {
                           timeZone: "America/Phoenix", month: "short", day: "numeric", year: "numeric",

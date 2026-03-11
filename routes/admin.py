@@ -309,6 +309,48 @@ def admin_discord_channels():
 
 # ─── Roles ────────────────────────────────────────────────────────────────────
 
+MEMBER_ROLE_CATEGORIES: dict[str, list[str]] = {
+    "Academic Level": [
+        "First Year",
+        "Transfer Student",
+        "Graduate Student",
+        "Upperclassmen",
+    ],
+    "College": [
+        "Barrett The Honors College",
+        "Ira A. Fulton Schools of Engineering",
+        "College of Liberal Arts and Sciences",
+        "College of Global Futures",
+        "Edson College of Nursing and Health Innovation",
+        "Herberger Institute for Design and the Arts",
+        "Thunderbird School of Global Management",
+        "Mary Lou Fulton Teachers College",
+        "New College of Interdisciplinary Arts and Sciences",
+        "College of Integrative Sciences and Arts",
+        "W.P. Carey School of Business",
+        "Walter Cronkite School of Journalism and Mass Communication",
+        "Watts College of Public Service and Community Solutions",
+        "University College",
+    ],
+    "Campus": [
+        "Tempe",
+        "Downtown Phoenix",
+        "Polytechnic",
+        "LA Center",
+        "West Valley",
+        "Online",
+    ],
+    "Residency": [
+        "Out of State",
+        "Arizona Resident",
+        "International Student",
+    ],
+    "Special": [
+        "First Generation Student",
+    ],
+}
+
+
 @admin_bp.route("/api/admin/roles")
 @require_admin
 def admin_roles():
@@ -320,6 +362,80 @@ def admin_roles():
             .all()
         )
     return jsonify([{"role_name": r, "count": c} for r, c in rows])
+
+
+@admin_bp.route("/api/admin/member-stats")
+@require_admin
+def admin_member_stats():
+    """Role distribution stats mirroring the get_studet_data.py script, queryable by date."""
+    from_dt = _parse_az_date(request.args.get("from_date"))
+    to_dt = _parse_az_date(request.args.get("to_date"), end_of_day=True)
+    from_date_str = request.args.get("from_date", "")
+    to_date_str = request.args.get("to_date", "")
+
+    with session_scope() as db_session:
+        # Base: verified users filtered by verified_at date range
+        base_q = db_session.query(User).filter(User.verified == True)  # noqa: E712
+        if from_dt:
+            base_q = base_q.filter(User.verified_at >= from_dt)
+        if to_dt:
+            base_q = base_q.filter(User.verified_at <= to_dt)
+        total_verified = base_q.count()
+
+        # Count of verified users who have left (left_at is set)
+        left_count = base_q.filter(User.left_at.isnot(None)).count()
+
+        # Role counts: how many verified users (in range) have each role
+        role_count_q = (
+            db_session.query(UserRole.role_name, func.count(UserRole.user_id.distinct()).label("cnt"))
+            .join(User, User.id == UserRole.user_id)
+            .filter(User.verified == True)  # noqa: E712
+        )
+        if from_dt:
+            role_count_q = role_count_q.filter(User.verified_at >= from_dt)
+        if to_dt:
+            role_count_q = role_count_q.filter(User.verified_at <= to_dt)
+        role_count_map = {name: cnt for name, cnt in role_count_q.group_by(UserRole.role_name).all()}
+
+        categories = []
+        for cat_name, role_list in MEMBER_ROLE_CATEGORIES.items():
+            # Users with at least one role in this category
+            users_with_q = (
+                db_session.query(func.count(UserRole.user_id.distinct()))
+                .join(User, User.id == UserRole.user_id)
+                .filter(
+                    User.verified == True,  # noqa: E712
+                    UserRole.role_name.in_(role_list),
+                )
+            )
+            if from_dt:
+                users_with_q = users_with_q.filter(User.verified_at >= from_dt)
+            if to_dt:
+                users_with_q = users_with_q.filter(User.verified_at <= to_dt)
+            users_with = users_with_q.scalar() or 0
+
+            role_breakdown = sorted(
+                [{"role": r, "count": role_count_map.get(r, 0)} for r in role_list],
+                key=lambda x: -x["count"],
+            )
+            categories.append(
+                {
+                    "name": cat_name,
+                    "roles": role_breakdown,
+                    "users_with": users_with,
+                    "users_missing": total_verified - users_with,
+                }
+            )
+
+    return jsonify(
+        {
+            "total_verified": total_verified,
+            "currently_in_server": total_verified - left_count,
+            "left_server": left_count,
+            "categories": categories,
+            "period": {"from_date": from_date_str, "to_date": to_date_str},
+        }
+    )
 
 
 # ─── Activity helpers ─────────────────────────────────────────────────────────

@@ -66,6 +66,80 @@
   color: #fff;
 }
 
+/* ─── Improved stat cards ─────────────────────────────────────────────────── */
+
+.stat-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  transition: box-shadow 160ms ease, transform 160ms ease;
+}
+
+.stat-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateY(-1px);
+}
+
+.stat-card-accent {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  border-radius: 10px 0 0 10px;
+}
+
+.stat-card-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.5px;
+}
+
+/* ─── Member stats page ───────────────────────────────────────────────────── */
+
+.member-stat-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.07);
+}
+
+.member-stat-roles {
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  padding-top: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+/* dark mode overrides */
+body.admin-dark .stat-card {
+  border-color: #373a40;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+body.admin-dark .stat-card:hover {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+
+body.admin-dark .member-stat-bar {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+body.admin-dark .member-stat-roles {
+  border-top-color: #373a40;
+}
+
 /* ─── Chart series builder ────────────────────────────────────────────────── */
 
 .chart-series-dot {
@@ -170,9 +244,13 @@
 }
 
 .admin-nav-item.active {
-  background-color: #e0e1e5;
-  color: #060607;
+  background-color: rgba(140, 29, 64, 0.1);
+  color: #8c1d40;
   font-weight: 600;
+}
+
+.admin-nav-item.active .admin-nav-icon {
+  color: #8c1d40;
 }
 
 .admin-sidebar-footer {
@@ -206,8 +284,12 @@ body.admin-dark .admin-nav-item:hover {
 }
 
 body.admin-dark .admin-nav-item.active {
-  background-color: #404249;
-  color: #ffffff;
+  background-color: rgba(140, 29, 64, 0.2);
+  color: #e07090;
+}
+
+body.admin-dark .admin-nav-item.active .admin-nav-icon {
+  color: #e07090;
 }
 
 body.admin-dark .admin-sidebar-footer {
