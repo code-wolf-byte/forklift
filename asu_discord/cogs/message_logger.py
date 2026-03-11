@@ -22,6 +22,12 @@ logger = logging.getLogger(__name__)
 BACKFILL_LOOKBACK_DAYS = 365
 _BATCH_SIZE = 200
 
+# Discord's history endpoint allows ~5 requests/5 s per channel bucket.
+# We deliberately yield control between batches so other bot tasks aren't starved
+# and the rate-limit headroom is shared more evenly across channels.
+_BATCH_SLEEP_S = 1.0   # pause between 200-msg flushes within a channel
+_CHANNEL_SLEEP_S = 2.0  # pause between channels
+
 
 class MessageLoggerCog(commands.Cog):
     def __init__(self, bot: commands.Bot, *, guild_id: int) -> None:
@@ -218,6 +224,7 @@ class MessageLoggerCog(commands.Cog):
                         logger.debug(
                             "Backfill #%s: %d messages saved so far", ch.name, fetched
                         )
+                        await asyncio.sleep(_BATCH_SLEEP_S)
 
                 if batch:
                     saved = await asyncio.get_running_loop().run_in_executor(
@@ -250,6 +257,9 @@ class MessageLoggerCog(commands.Cog):
             except Exception as exc:
                 logger.exception("Backfill failed for #%s", ch.name)
                 self._set_backfill_error(channel_id, str(exc)[:512])
+
+            # Yield between channels so the rate-limit bucket has time to recover
+            await asyncio.sleep(_CHANNEL_SLEEP_S)
 
         logger.info("Backfill complete for guild %s", self.guild_id)
 
