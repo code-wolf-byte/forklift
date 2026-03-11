@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import ActivityChart from "./ActivityChart.jsx";
+import SeriesBuilder, { seriesLabel, seriesParams } from "./SeriesBuilder.jsx";
 
 const COLORS = ["#8c1d40", "#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444"];
 const SCALE_PRESETS = [7, 14, 30, 90];
@@ -51,7 +52,7 @@ export default function Leaves({ isDark }) {
 
   // Chart series state
   const nextIdRef = useRef(2);
-  const [series, setSeries] = useState([{ id: 1, type: "all", role: "" }]);
+  const [series, setSeries] = useState([{ id: 1, hasRoles: [], notRoles: [] }]);
   const [chartDataMap, setChartDataMap] = useState({});
 
   useEffect(() => {
@@ -83,12 +84,9 @@ export default function Leaves({ isDark }) {
 
   // Fetch chart data for every series in parallel
   useEffect(() => {
-    const base = `from_date=${encodeURIComponent(applied.from_date)}&to_date=${encodeURIComponent(applied.to_date)}`;
     Promise.all(
       series.map((s) => {
-        let qs = base;
-        if (s.type === "has" && s.role) qs += `&role=${encodeURIComponent(s.role)}`;
-        if (s.type === "not" && s.role) qs += `&exclude_role=${encodeURIComponent(s.role)}`;
+        const qs = seriesParams(s, applied.from_date, applied.to_date);
         return fetch(`/api/admin/server-leaves/chart?${qs}`)
           .then((r) => r.json())
           .then((d) => ({ id: s.id, data: d }))
@@ -117,7 +115,7 @@ export default function Leaves({ isDark }) {
 
   const addSeries = () => {
     if (series.length >= COLORS.length) return;
-    setSeries((s) => [...s, { id: nextIdRef.current++, type: "all", role: "" }]);
+    setSeries((s) => [...s, { id: nextIdRef.current++, hasRoles: [], notRoles: [] }]);
   };
 
   const updateSeries = (id, patch) => {
@@ -128,13 +126,11 @@ export default function Leaves({ isDark }) {
     setSeries((s) => s.filter((item) => item.id !== id));
   };
 
-  const datasets = series.map((s, i) => {
-    let label;
-    if (s.type === "all") label = "All";
-    else if (s.type === "has") label = s.role ? `Has: ${s.role}` : "Has role";
-    else label = s.role ? `No: ${s.role}` : "No role";
-    return { data: chartDataMap[s.id] || [], label, color: COLORS[i % COLORS.length] };
-  });
+  const datasets = series.map((s, i) => ({
+    data: chartDataMap[s.id] || [],
+    label: seriesLabel(s),
+    color: COLORS[i % COLORS.length],
+  }));
 
   return (
     <>
@@ -208,55 +204,40 @@ export default function Leaves({ isDark }) {
         </div>
       </div>
 
-      {/* Chart with series builder */}
-      <div className="card p-3 mb-3">
-        <p className="small fw-semibold text-muted mb-2">Daily Leaves</p>
-
-        {/* Series builder */}
-        <div className="mb-3">
-          {series.map((s, i) => (
-            <div key={s.id} className="d-flex align-items-center gap-2 mb-2 flex-wrap">
-              <span className="chart-series-dot" style={{ background: COLORS[i % COLORS.length] }} />
-              <select
-                className="form-select form-select-sm w-auto"
-                value={s.type}
-                onChange={(e) => updateSeries(s.id, { type: e.target.value, role: "" })}
-              >
-                <option value="all">All members</option>
-                <option value="has">Has role</option>
-                <option value="not">Does not have role</option>
-              </select>
-              {s.type !== "all" && (
-                <select
-                  className="form-select form-select-sm w-auto"
-                  style={{ minWidth: 140 }}
-                  value={s.role}
-                  onChange={(e) => updateSeries(s.id, { role: e.target.value })}
-                >
-                  <option value="">Select role…</option>
-                  {roles.map((r) => (
-                    <option key={r.role_name} value={r.role_name}>{r.role_name}</option>
-                  ))}
-                </select>
-              )}
-              {series.length > 1 && (
-                <button
-                  className="btn btn-sm btn-outline-secondary chart-series-remove"
-                  onClick={() => removeSeries(s.id)}
-                >
-                  <i className="fas fa-times" />
-                </button>
-              )}
-            </div>
-          ))}
-          {series.length < COLORS.length && (
-            <button className="btn btn-sm btn-outline-secondary" onClick={addSeries}>
-              <i className="fas fa-plus me-1" />Add series
-            </button>
-          )}
+      {/* Chart card */}
+      <div className="chart-card mb-3">
+        <div className="chart-card-header">
+          <div>
+            <div className="chart-card-title">Daily Leaves</div>
+            {data && (
+              <div className="chart-card-subtitle">
+                {data.total.toLocaleString()} member{data.total !== 1 ? "s" : ""} left in range
+              </div>
+            )}
+          </div>
         </div>
 
-        <ActivityChart datasets={datasets} isDark={isDark} />
+        <div className="chart-card-body">
+          <ActivityChart datasets={datasets} isDark={isDark} />
+        </div>
+
+        <div className="chart-card-series">
+          <div className="chart-card-series-toolbar">
+            <span className="chart-series-section-label">Series</span>
+            {series.length < COLORS.length && (
+              <button className="btn btn-sm btn-outline-secondary" onClick={addSeries}>
+                <i className="fas fa-plus me-1" style={{ fontSize: 10 }} />Add series
+              </button>
+            )}
+          </div>
+          <SeriesBuilder
+            series={series}
+            roles={roles}
+            colors={COLORS}
+            onUpdate={updateSeries}
+            onRemove={removeSeries}
+          />
+        </div>
       </div>
 
       {/* List */}

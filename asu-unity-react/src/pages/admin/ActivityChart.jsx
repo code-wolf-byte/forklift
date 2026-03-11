@@ -49,7 +49,7 @@ export default function ActivityChart({ datasets, isDark }) {
     if (chartRef.current) chartRef.current.destroy();
 
     const ctx = canvasRef.current.getContext("2d");
-    const chartHeight = canvasRef.current.offsetHeight || 220;
+    const chartHeight = canvasRef.current.offsetHeight || 280;
     const alpha = isDark ? 0.45 : 0.3;
 
     // Union of all dates across every series, sorted

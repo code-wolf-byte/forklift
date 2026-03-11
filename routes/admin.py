@@ -453,23 +453,28 @@ def _parse_az_date(date_str: str | None, *, end_of_day: bool = False) -> datetim
         return None
 
 
-def _activity_query(db_session, date_col, from_dt, to_dt, role: str | None, exclude_role: str | None = None):
-    """Filtered User query on the given date column, optionally restricted to a role."""
+def _activity_query(db_session, date_col, from_dt, to_dt, roles=None, exclude_roles=None):
+    """Filtered User query on the given date column.
+
+    roles        – list of role names the user must ALL have (AND semantics).
+    exclude_roles – list of role names the user must NOT have.
+    """
     q = db_session.query(User).filter(date_col.isnot(None))
     if from_dt:
         q = q.filter(date_col >= from_dt)
     if to_dt:
         q = q.filter(date_col <= to_dt)
-    if role:
-        q = (
-            q.join(UserRole, UserRole.user_id == User.id)
-            .filter(UserRole.role_name == role)
-            .distinct()
-        )
-    if exclude_role:
+    for role in (roles or []):
         subq = (
             db_session.query(UserRole.user_id)
-            .filter(UserRole.role_name == exclude_role)
+            .filter(UserRole.role_name == role)
+            .subquery()
+        )
+        q = q.filter(User.id.in_(subq))
+    for excl in (exclude_roles or []):
+        subq = (
+            db_session.query(UserRole.user_id)
+            .filter(UserRole.role_name == excl)
             .subquery()
         )
         q = q.filter(~User.id.in_(subq))
@@ -515,13 +520,13 @@ def _serialize_activity(u: User, date_field: str) -> dict:
 def _paginated_activity(date_col, date_field: str):
     from_dt  = _parse_az_date(request.args.get("from_date"))
     to_dt    = _parse_az_date(request.args.get("to_date"), end_of_day=True)
-    role     = request.args.get("role") or None
+    roles    = request.args.getlist("role") or None
     page     = max(1, request.args.get("page", 1, type=int))
     per_page = min(100, max(1, request.args.get("per_page", 25, type=int)))
     offset   = (page - 1) * per_page
 
     with session_scope() as db_session:
-        q = _activity_query(db_session, date_col, from_dt, to_dt, role)
+        q = _activity_query(db_session, date_col, from_dt, to_dt, roles)
         total = q.count()
         users = q.order_by(date_col.desc()).offset(offset).limit(per_page).all()
         result = [_serialize_activity(u, date_field) for u in users]
@@ -538,11 +543,11 @@ def _paginated_activity(date_col, date_field: str):
 def _chart_activity(date_col):
     from_dt = _parse_az_date(request.args.get("from_date"))
     to_dt   = _parse_az_date(request.args.get("to_date"), end_of_day=True)
-    role    = request.args.get("role") or None
+    roles   = request.args.getlist("role") or None
 
     with session_scope() as db_session:
         dates = [u.joined_at if date_col is User.joined_at else u.left_at
-                 for u in _activity_query(db_session, date_col, from_dt, to_dt, role).all()]
+                 for u in _activity_query(db_session, date_col, from_dt, to_dt, roles).all()]
 
     return jsonify(_chart_data(dates, from_dt, to_dt))
 
@@ -558,13 +563,13 @@ def admin_server_joins():
 @admin_bp.route("/api/admin/server-joins/chart")
 @require_admin
 def admin_server_joins_chart():
-    from_dt      = _parse_az_date(request.args.get("from_date"))
-    to_dt        = _parse_az_date(request.args.get("to_date"), end_of_day=True)
-    role         = request.args.get("role") or None
-    exclude_role = request.args.get("exclude_role") or None
+    from_dt       = _parse_az_date(request.args.get("from_date"))
+    to_dt         = _parse_az_date(request.args.get("to_date"), end_of_day=True)
+    roles         = request.args.getlist("role") or None
+    exclude_roles = request.args.getlist("exclude_role") or None
     with session_scope() as db_session:
         dates = [u.joined_at for u in
-                 _activity_query(db_session, User.joined_at, from_dt, to_dt, role, exclude_role).all()]
+                 _activity_query(db_session, User.joined_at, from_dt, to_dt, roles, exclude_roles).all()]
     return jsonify(_chart_data(dates, from_dt, to_dt))
 
 
@@ -579,13 +584,13 @@ def admin_server_leaves():
 @admin_bp.route("/api/admin/server-leaves/chart")
 @require_admin
 def admin_server_leaves_chart():
-    from_dt      = _parse_az_date(request.args.get("from_date"))
-    to_dt        = _parse_az_date(request.args.get("to_date"), end_of_day=True)
-    role         = request.args.get("role") or None
-    exclude_role = request.args.get("exclude_role") or None
+    from_dt       = _parse_az_date(request.args.get("from_date"))
+    to_dt         = _parse_az_date(request.args.get("to_date"), end_of_day=True)
+    roles         = request.args.getlist("role") or None
+    exclude_roles = request.args.getlist("exclude_role") or None
     with session_scope() as db_session:
         dates = [u.left_at for u in
-                 _activity_query(db_session, User.left_at, from_dt, to_dt, role, exclude_role).all()]
+                 _activity_query(db_session, User.left_at, from_dt, to_dt, roles, exclude_roles).all()]
     return jsonify(_chart_data(dates, from_dt, to_dt))
 
 
