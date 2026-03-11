@@ -20,13 +20,13 @@ from utils.database import MessageBackfill, MessageLog, session_scope
 logger = logging.getLogger(__name__)
 
 BACKFILL_LOOKBACK_DAYS = 365
-_BATCH_SIZE = 200
 
 # Discord's history endpoint allows ~5 requests/5 s per channel bucket.
-# We deliberately yield control between batches so other bot tasks aren't starved
-# and the rate-limit headroom is shared more evenly across channels.
-_BATCH_SLEEP_S = 1.0   # pause between 200-msg flushes within a channel
-_CHANNEL_SLEEP_S = 2.0  # pause between channels
+# We manually paginate (100 msgs/page) with an explicit sleep between pages so
+# we never call the endpoint faster than the rate limit allows.
+_PAGE_SIZE = 100         # Discord's max per history request
+_PAGE_SLEEP_S = 1.1     # sleep between pages (~1 req/s, safely under 5 req/5 s)
+_CHANNEL_SLEEP_S = 2.0  # extra pause between channels
 
 
 class MessageLoggerCog(commands.Cog):
@@ -188,49 +188,59 @@ class MessageLoggerCog(commands.Cog):
                     continue
                 if row:
                     row.status = "running"
-                    row.started_at = datetime.utcnow()
+                    row.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     row.error = None
 
             logger.info("Backfilling #%s (%s)", ch.name, channel_id)
-            batch: list[tuple] = []
             fetched = 0
             oldest_dt: datetime | None = None
+            # Use the cutoff datetime as the initial anchor; after each page
+            # we advance the anchor to the last message so we get the next page.
+            anchor: datetime | discord.Message = cutoff
 
             try:
-                async for msg in ch.history(
-                    limit=None, after=cutoff, oldest_first=True
-                ):
-                    if msg.author.bot:
-                        continue
-                    batch.append(
+                while True:
+                    page = await ch.history(
+                        limit=_PAGE_SIZE, after=anchor, oldest_first=True
+                    ).flatten()
+
+                    if not page:
+                        break  # no more messages
+
+                    non_bot = [m for m in page if not m.author.bot]
+
+                    if oldest_dt is None and non_bot:
+                        oldest_dt = non_bot[0].created_at
+
+                    batch = [
                         (
-                            str(msg.id),
+                            str(m.id),
                             channel_id,
                             ch.name,
                             str(guild.id),
-                            str(msg.author.id),
-                            msg.created_at.replace(tzinfo=None),
+                            str(m.author.id),
+                            m.created_at.replace(tzinfo=None),
                         )
-                    )
-                    if oldest_dt is None:
-                        oldest_dt = msg.created_at
+                        for m in non_bot
+                    ]
 
-                    if len(batch) >= _BATCH_SIZE:
+                    if batch:
                         saved = await asyncio.get_running_loop().run_in_executor(
                             None, self._flush_batch, batch
                         )
                         fetched += saved
-                        batch = []
                         logger.debug(
-                            "Backfill #%s: %d messages saved so far", ch.name, fetched
+                            "Backfill #%s: page of %d fetched, %d total saved",
+                            ch.name, len(batch), fetched,
                         )
-                        await asyncio.sleep(_BATCH_SLEEP_S)
 
-                if batch:
-                    saved = await asyncio.get_running_loop().run_in_executor(
-                        None, self._flush_batch, batch
-                    )
-                    fetched += saved
+                    # Advance anchor to the last message in this page (including bots,
+                    # so we don't re-fetch the same page if all were bots)
+                    anchor = page[-1]
+
+                    # Only sleep if there may be more pages
+                    if len(page) == _PAGE_SIZE:
+                        await asyncio.sleep(_PAGE_SLEEP_S)
 
                 with session_scope() as db:
                     row = (
@@ -244,7 +254,7 @@ class MessageLoggerCog(commands.Cog):
                         row.oldest_fetched_at = (
                             oldest_dt.replace(tzinfo=None) if oldest_dt else None
                         )
-                        row.completed_at = datetime.utcnow()
+                        row.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
                 logger.info(
                     "Backfilled #%s (%s): %d new messages saved",
@@ -305,6 +315,6 @@ class MessageLoggerCog(commands.Cog):
                 if row:
                     row.status = "failed"
                     row.error = error
-                    row.completed_at = datetime.utcnow()
+                    row.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         except Exception:
             logger.exception("Failed to update backfill error for %s", channel_id)
