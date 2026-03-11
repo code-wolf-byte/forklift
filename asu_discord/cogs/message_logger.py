@@ -29,6 +29,45 @@ class MessageLoggerCog(commands.Cog):
         self.guild_id = guild_id
         self._backfill_task: Optional[asyncio.Task] = None
 
+    # ── Auto-start on ready ──────────────────────────────────────────────────
+
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        """Auto-trigger backfill once the bot is fully connected and guild data is available."""
+        logger.info(
+            "MessageLoggerCog ready — checking whether historical backfill is needed"
+        )
+
+        # Check if every known channel is already marked done
+        with session_scope() as db:
+            pending = (
+                db.query(MessageBackfill.channel_id)
+                .filter(MessageBackfill.status != "done")
+                .count()
+            )
+            total = db.query(MessageBackfill.channel_id).count()
+
+        if total > 0 and pending == 0:
+            logger.info(
+                "MessageLoggerCog: backfill already complete for all %d channels — skipping",
+                total,
+            )
+            return
+
+        if pending > 0:
+            logger.info(
+                "MessageLoggerCog: %d channel(s) not yet backfilled — resuming backfill",
+                pending,
+            )
+        else:
+            logger.info(
+                "MessageLoggerCog: no backfill records found — starting initial backfill"
+            )
+
+        started = self.start_backfill()
+        if not started:
+            logger.info("MessageLoggerCog: backfill already in progress")
+
     # ── Real-time logging ────────────────────────────────────────────────────
 
     @commands.Cog.listener()
@@ -94,7 +133,9 @@ class MessageLoggerCog(commands.Cog):
     def start_backfill(self) -> bool:
         """Schedule a backfill task. Returns False if one is already running."""
         if self.backfill_running:
+            logger.info("MessageLoggerCog: backfill already running — ignoring request")
             return False
+        logger.info("MessageLoggerCog: scheduling backfill task")
         self._backfill_task = asyncio.ensure_future(self._run_backfill())
         return True
 
@@ -174,6 +215,9 @@ class MessageLoggerCog(commands.Cog):
                         )
                         fetched += saved
                         batch = []
+                        logger.debug(
+                            "Backfill #%s: %d messages saved so far", ch.name, fetched
+                        )
 
                 if batch:
                     saved = await asyncio.get_running_loop().run_in_executor(
@@ -195,7 +239,10 @@ class MessageLoggerCog(commands.Cog):
                         )
                         row.completed_at = datetime.utcnow()
 
-                logger.info("Backfilled #%s: %d messages", ch.name, fetched)
+                logger.info(
+                    "Backfilled #%s (%s): %d new messages saved",
+                    ch.name, channel_id, fetched,
+                )
 
             except discord.Forbidden:
                 logger.warning("No permission to read #%s — skipping", ch.name)
