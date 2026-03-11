@@ -158,6 +158,37 @@ class CronJobConfig(Base):
     )
 
 
+class MessageLog(Base):
+    """One row per Discord message — metadata only, no content stored."""
+
+    __tablename__ = "message_logs"
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(String(64), unique=True, nullable=False, index=True)
+    channel_id = Column(String(64), nullable=False, index=True)
+    channel_name = Column(String(255), nullable=True)
+    guild_id = Column(String(64), nullable=False, index=True)
+    discord_user_id = Column(String(64), nullable=False, index=True)
+    sent_at = Column(DateTime, nullable=False, index=True)  # naive UTC
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class MessageBackfill(Base):
+    """Per-channel backfill progress tracking."""
+
+    __tablename__ = "message_backfill"
+
+    id = Column(Integer, primary_key=True)
+    channel_id = Column(String(64), unique=True, nullable=False, index=True)
+    channel_name = Column(String(255), nullable=True)
+    status = Column(String(32), default="pending", nullable=False)  # pending/running/done/failed
+    messages_fetched = Column(Integer, default=0, nullable=False)
+    oldest_fetched_at = Column(DateTime, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    error = Column(Text, nullable=True)
+
+
 # Default rows seeded on first startup.
 _CRON_JOB_DEFAULTS = [
     {

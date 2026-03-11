@@ -7,10 +7,13 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, abort, jsonify, redirect, request, send_from_directory, session
+from flask import Blueprint, Response, abort, jsonify, redirect, request, send_from_directory, session
 from sqlalchemy import func
 
-from utils.database import CronJobConfig, User, UserRole, session_scope
+import csv
+import io
+
+from utils.database import CronJobConfig, MessageBackfill, MessageLog, User, UserRole, session_scope
 
 AZ_TZ = ZoneInfo("America/Phoenix")
 
@@ -619,6 +622,258 @@ def admin_joins():
             for u in users
         ]
     return jsonify(result)
+
+
+# ─── Message logs ─────────────────────────────────────────────────────────────
+
+def _message_query(db_session, from_dt, to_dt, channel_ids, roles, exclude_roles):
+    """Base query for MessageLog with date, channel, and role filters."""
+    q = db_session.query(MessageLog)
+    if from_dt:
+        q = q.filter(MessageLog.sent_at >= from_dt)
+    if to_dt:
+        q = q.filter(MessageLog.sent_at <= to_dt)
+    if channel_ids:
+        q = q.filter(MessageLog.channel_id.in_(channel_ids))
+    for role in (roles or []):
+        subq = (
+            db_session.query(User.discord_user_id)
+            .join(UserRole, UserRole.user_id == User.id)
+            .filter(UserRole.role_name == role)
+            .subquery()
+        )
+        q = q.filter(MessageLog.discord_user_id.in_(subq))
+    for excl in (exclude_roles or []):
+        subq = (
+            db_session.query(User.discord_user_id)
+            .join(UserRole, UserRole.user_id == User.id)
+            .filter(UserRole.role_name == excl)
+            .subquery()
+        )
+        q = q.filter(~MessageLog.discord_user_id.in_(subq))
+    return q
+
+
+def _parse_message_filters():
+    """Parse shared query params for message log endpoints."""
+    from_dt      = _parse_az_date(request.args.get("from_date"))
+    to_dt        = _parse_az_date(request.args.get("to_date"), end_of_day=True)
+    channel_ids  = request.args.getlist("channel_id") or None
+    roles        = request.args.getlist("role") or None
+    exclude_roles = request.args.getlist("exclude_role") or None
+    return from_dt, to_dt, channel_ids, roles, exclude_roles
+
+
+@admin_bp.route("/api/admin/message-logs/channels")
+@require_admin
+def admin_message_channels():
+    """Distinct channels that have logged messages, with counts."""
+    with session_scope() as db_session:
+        rows = (
+            db_session.query(
+                MessageLog.channel_id,
+                MessageLog.channel_name,
+                func.count(MessageLog.id).label("cnt"),
+            )
+            .group_by(MessageLog.channel_id, MessageLog.channel_name)
+            .order_by(func.count(MessageLog.id).desc())
+            .all()
+        )
+    return jsonify(
+        [{"channel_id": cid, "channel_name": cname or cid, "count": cnt}
+         for cid, cname, cnt in rows]
+    )
+
+
+@admin_bp.route("/api/admin/message-logs/heatmap")
+@require_admin
+def admin_message_heatmap():
+    """Return a 7×24 activity heatmap (day-of-week × hour) in AZ time."""
+    from_dt, to_dt, channel_ids, roles, exclude_roles = _parse_message_filters()
+
+    with session_scope() as db_session:
+        q = _message_query(db_session, from_dt, to_dt, channel_ids, roles, exclude_roles)
+        timestamps = [row.sent_at for row in q.with_entities(MessageLog.sent_at).all()]
+
+    counts: dict[tuple[int, int], int] = {}
+    for ts in timestamps:
+        dt_az = ts.replace(tzinfo=timezone.utc).astimezone(AZ_TZ)
+        key = (dt_az.weekday(), dt_az.hour)  # (0=Mon … 6=Sun, 0–23)
+        counts[key] = counts.get(key, 0) + 1
+
+    total = sum(counts.values())
+    cells = [
+        {"dow": dow, "hour": hour, "count": counts.get((dow, hour), 0)}
+        for dow in range(7)
+        for hour in range(24)
+    ]
+    return jsonify({"cells": cells, "total": total})
+
+
+@admin_bp.route("/api/admin/message-logs/export")
+@require_admin
+def admin_message_export():
+    """Paginated message log with optional user info joined from users table."""
+    from_dt, to_dt, channel_ids, roles, exclude_roles = _parse_message_filters()
+    page     = max(1, request.args.get("page", 1, type=int))
+    per_page = min(200, max(1, request.args.get("per_page", 50, type=int)))
+    offset   = (page - 1) * per_page
+
+    with session_scope() as db_session:
+        q = _message_query(db_session, from_dt, to_dt, channel_ids, roles, exclude_roles)
+        total = q.count()
+        rows = q.order_by(MessageLog.sent_at.desc()).offset(offset).limit(per_page).all()
+
+        # Build a discord_user_id → User lookup for matched users
+        user_ids = list({r.discord_user_id for r in rows})
+        users_map = {
+            u.discord_user_id: u
+            for u in db_session.query(User)
+            .filter(User.discord_user_id.in_(user_ids))
+            .all()
+        }
+
+        result = []
+        for r in rows:
+            u = users_map.get(r.discord_user_id)
+            dt_az = r.sent_at.replace(tzinfo=timezone.utc).astimezone(AZ_TZ)
+            result.append({
+                "message_id": r.message_id,
+                "channel_id": r.channel_id,
+                "channel_name": r.channel_name,
+                "discord_user_id": r.discord_user_id,
+                "discord_username": u.discord_username if u else None,
+                "asurite_id": u.asurite_id if u else None,
+                "sent_at": dt_az.isoformat(),
+            })
+
+    return jsonify({
+        "rows": result,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": max(1, (total + per_page - 1) // per_page),
+    })
+
+
+@admin_bp.route("/api/admin/message-logs/export/csv")
+@require_admin
+def admin_message_export_csv():
+    """Stream all matching message logs as a CSV download."""
+    from_dt, to_dt, channel_ids, roles, exclude_roles = _parse_message_filters()
+
+    with session_scope() as db_session:
+        q = _message_query(db_session, from_dt, to_dt, channel_ids, roles, exclude_roles)
+        rows = q.order_by(MessageLog.sent_at.asc()).all()
+
+        user_ids = list({r.discord_user_id for r in rows})
+        users_map = {
+            u.discord_user_id: u
+            for u in db_session.query(User)
+            .filter(User.discord_user_id.in_(user_ids))
+            .all()
+        }
+
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "sent_at_az", "channel_name", "channel_id",
+            "discord_username", "asurite_id", "discord_user_id", "message_id",
+        ])
+        for r in rows:
+            u = users_map.get(r.discord_user_id)
+            dt_az = r.sent_at.replace(tzinfo=timezone.utc).astimezone(AZ_TZ)
+            writer.writerow([
+                dt_az.strftime("%Y-%m-%d %H:%M:%S"),
+                r.channel_name or "",
+                r.channel_id,
+                u.discord_username if u else "",
+                u.asurite_id if u else "",
+                r.discord_user_id,
+                r.message_id,
+            ])
+
+    filename = "message_logs.csv"
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@admin_bp.route("/api/admin/message-logs/backfill", methods=["POST"])
+@require_admin
+def admin_message_backfill_start():
+    """Trigger the one-year backfill on the running Discord bot."""
+    from asu_discord.shared import get_running_bot, get_running_loop
+    from asu_discord.cogs.message_logger import MessageLoggerCog
+
+    bot = get_running_bot()
+    if bot is None:
+        return jsonify({"error": "Discord bot is not running"}), 503
+
+    cog = bot.cogs.get("MessageLoggerCog")
+    if cog is None or not isinstance(cog, MessageLoggerCog):
+        return jsonify({"error": "MessageLoggerCog not loaded"}), 503
+
+    loop = get_running_loop()
+    if loop is None:
+        return jsonify({"error": "Bot event loop unavailable"}), 503
+
+    if cog.backfill_running:
+        return jsonify({"status": "already_running"})
+
+    # start_backfill() is synchronous (schedules an asyncio task); call it
+    # from the bot's event loop thread so ensure_future runs in the right loop.
+    loop.call_soon_threadsafe(cog.start_backfill)
+    return jsonify({"status": "started"})
+
+
+@admin_bp.route("/api/admin/message-logs/backfill/status")
+@require_admin
+def admin_message_backfill_status():
+    """Return per-channel backfill progress."""
+    from asu_discord.shared import get_running_bot
+    from asu_discord.cogs.message_logger import MessageLoggerCog
+
+    bot = get_running_bot()
+    cog = bot.cogs.get("MessageLoggerCog") if bot else None
+    backfill_running = isinstance(cog, MessageLoggerCog) and cog.backfill_running
+
+    with session_scope() as db_session:
+        rows = (
+            db_session.query(MessageBackfill)
+            .order_by(MessageBackfill.channel_name.asc())
+            .all()
+        )
+        total_messages = db_session.query(func.count(MessageLog.id)).scalar() or 0
+
+    def _fmt(dt):
+        if dt is None:
+            return None
+        return dt.replace(tzinfo=timezone.utc).astimezone(AZ_TZ).isoformat()
+
+    channels = [
+        {
+            "channel_id": r.channel_id,
+            "channel_name": r.channel_name,
+            "status": r.status,
+            "messages_fetched": r.messages_fetched,
+            "oldest_fetched_at": _fmt(r.oldest_fetched_at),
+            "started_at": _fmt(r.started_at),
+            "completed_at": _fmt(r.completed_at),
+            "error": r.error,
+        }
+        for r in rows
+    ]
+    done = sum(1 for r in rows if r.status == "done")
+    return jsonify({
+        "backfill_running": backfill_running,
+        "total_messages_logged": total_messages,
+        "channels_total": len(rows),
+        "channels_done": done,
+        "channels": channels,
+    })
 
 
 @admin_bp.route("/admin")

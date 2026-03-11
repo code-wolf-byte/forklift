@@ -7,9 +7,10 @@ import discord
 from discord.ext import commands
 
 from utils.settings import DISCORD_CONFIG
+from .cogs.message_logger import MessageLoggerCog
+from .cogs.qna import QnACog
 from .cogs.verification import VerificationCog
 from .shared import register_bot
-from .cogs.qna import QnACog
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +28,11 @@ class ForkliftBot(commands.Bot):
             intents = discord.Intents.default()
             intents.members = True
             intents.guilds = True
+            intents.guild_messages = True  # needed for on_message
         super().__init__(command_prefix=command_prefix, intents=intents)
         self._load_verification_cog()
         self._load_qna_cog()
+        self._load_message_logger_cog()
 
     def _load_verification_cog(self) -> None:
         """Attach the verification cog immediately after initialization."""
@@ -73,6 +76,21 @@ class ForkliftBot(commands.Bot):
             raise
 
         logger.info("Loaded QnACog")
+
+    def _load_message_logger_cog(self) -> None:
+        """Attach the message logger cog."""
+        if DISCORD_CONFIG is None:
+            logger.warning("Skipping MessageLoggerCog: DISCORD_CONFIG not set")
+            return
+        try:
+            self.add_cog(
+                MessageLoggerCog(self, guild_id=int(DISCORD_CONFIG.guild_id))
+            )
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to load MessageLoggerCog")
+            raise
+
+        logger.info("Loaded MessageLoggerCog")
 
     async def setup_hook(self) -> None:
         """Run after the bot connects to Discord."""
