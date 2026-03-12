@@ -22,6 +22,7 @@ export default function Automations() {
   const [saving, setSaving] = useState({});
   const [triggering, setTriggering] = useState({});
   const [resetting, setResetting] = useState({});
+  const [confirmReset, setConfirmReset] = useState({});
   const [errors, setErrors] = useState({});
   const [triggerStatus, setTriggerStatus] = useState({});
   const [channels, setChannels] = useState([]);
@@ -87,8 +88,8 @@ export default function Automations() {
       .finally(() => setSaving((s) => ({ ...s, [job_name]: false })));
   };
 
-  const handleReset = (job_name) => {
-    if (!window.confirm(`Reset "${job_name}"? The next run will export all records from the beginning, not just new ones since the last run.`)) return;
+  const handleResetConfirmed = (job_name) => {
+    setConfirmReset((c) => ({ ...c, [job_name]: false }));
     setResetting((r) => ({ ...r, [job_name]: true }));
     fetch(`/api/admin/automations/${job_name}/reset`, { method: "POST" })
       .then((r) => r.json())
@@ -134,6 +135,7 @@ export default function Automations() {
         const isSaving = saving[job.job_name];
         const isTriggering = triggering[job.job_name];
         const isResetting = resetting[job.job_name];
+        const isConfirmingReset = confirmReset[job.job_name];
         const error = errors[job.job_name];
         const tStatus = triggerStatus[job.job_name];
         const isSurveyJob = job.job_name === "send_survey_messages";
@@ -229,6 +231,31 @@ export default function Automations() {
               </div>
             )}
 
+            {isConfirmingReset && (
+              <div className="alert alert-warning mt-3 mb-0 d-flex align-items-center justify-content-between gap-3 flex-wrap">
+                <div className="small">
+                  <i className="fas fa-exclamation-triangle me-1" />
+                  <strong>Reset tracking?</strong> The next run will re-export{" "}
+                  <strong>all records from the beginning</strong>, not just new ones
+                  since the last run.
+                </div>
+                <div className="d-flex gap-2 flex-shrink-0">
+                  <button
+                    className="btn btn-sm btn-danger"
+                    onClick={() => handleResetConfirmed(job.job_name)}
+                  >
+                    Yes, reset
+                  </button>
+                  <button
+                    className="btn btn-sm btn-outline-secondary"
+                    onClick={() => setConfirmReset((c) => ({ ...c, [job.job_name]: false }))}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="d-flex gap-2 mt-3">
               <button
                 className="btn btn-sm btn-maroon text-white"
@@ -246,8 +273,8 @@ export default function Automations() {
               </button>
               <button
                 className="btn btn-sm btn-outline-danger"
-                onClick={() => handleReset(job.job_name)}
-                disabled={isResetting}
+                onClick={() => setConfirmReset((c) => ({ ...c, [job.job_name]: true }))}
+                disabled={isResetting || isConfirmingReset}
                 title="Clear last run timestamp so the next export starts from the beginning"
               >
                 {isResetting ? "Resetting…" : "Reset"}
