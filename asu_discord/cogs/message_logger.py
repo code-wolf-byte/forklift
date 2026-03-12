@@ -1,8 +1,7 @@
-"""MessageLoggerCog — logs Discord message metadata for activity analytics.
+"""MessageLoggerCog — logs Discord message metadata + content for activity analytics.
 
-No message content is stored; only the snowflake ID, channel, author, and
-timestamp are persisted. The cog also supports a one-time historical backfill
-going back up to BACKFILL_LOOKBACK_DAYS from the moment it is triggered.
+Supports TextChannels and ForumChannel threads (active + archived). The cog
+also performs a one-time historical backfill going back BACKFILL_LOOKBACK_DAYS.
 """
 
 from __future__ import annotations
@@ -82,7 +81,8 @@ class MessageLoggerCog(commands.Cog):
             return
         if message.guild.id != self.guild_id:
             return
-        if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
+        if not isinstance(message.channel, (discord.TextChannel, discord.Thread,
+                                              discord.ForumChannel)):
             return
 
         msg_id = str(message.id)
@@ -148,6 +148,35 @@ class MessageLoggerCog(commands.Cog):
         self._backfill_task = asyncio.ensure_future(self._run_backfill())
         return True
 
+    async def _collect_backfill_targets(
+        self, guild: discord.Guild
+    ) -> list[discord.TextChannel | discord.Thread]:
+        """Return all text channels plus every thread inside forum channels."""
+        targets: list[discord.TextChannel | discord.Thread] = []
+
+        for ch in guild.channels:
+            if isinstance(ch, discord.TextChannel):
+                targets.append(ch)
+            elif isinstance(ch, discord.ForumChannel):
+                # Active (cached) threads
+                targets.extend(ch.threads)
+                # Archived threads (require an API call per forum channel)
+                try:
+                    async for thread in ch.archived_threads(limit=None):
+                        targets.append(thread)
+                    await asyncio.sleep(_PAGE_SLEEP_S)  # be polite after listing
+                except discord.Forbidden:
+                    logger.warning(
+                        "No permission to list archived threads in #%s — skipping archived",
+                        ch.name,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to list archived threads in #%s", ch.name
+                    )
+
+        return targets
+
     async def _run_backfill(self) -> None:
         guild = self.bot.get_guild(self.guild_id)
         if guild is None:
@@ -155,9 +184,10 @@ class MessageLoggerCog(commands.Cog):
             return
 
         cutoff = datetime.now(timezone.utc) - timedelta(days=BACKFILL_LOOKBACK_DAYS)
-        channels = [c for c in guild.channels if isinstance(c, discord.TextChannel)]
+        channels = await self._collect_backfill_targets(guild)
         logger.info(
-            "Backfill started: %d channels, cutoff %s", len(channels), cutoff.date()
+            "Backfill started: %d channels/threads, cutoff %s",
+            len(channels), cutoff.date(),
         )
 
         # Ensure a status row exists for every channel
@@ -278,32 +308,51 @@ class MessageLoggerCog(commands.Cog):
         logger.info("Backfill complete for guild %s", self.guild_id)
 
     def _flush_batch(self, batch: list[tuple]) -> int:
-        """Insert a batch of messages, skipping duplicates. Returns number inserted."""
+        """Insert new messages; also backfill content on existing rows where it is NULL.
+
+        Returns the number of newly inserted rows.
+        """
         if not batch:
             return 0
         message_ids = [row[0] for row in batch]
         try:
             with session_scope() as db:
-                existing = {
-                    r.message_id
-                    for r in db.query(MessageLog.message_id)
+                existing_rows = (
+                    db.query(MessageLog)
                     .filter(MessageLog.message_id.in_(message_ids))
                     .all()
+                )
+                existing_with_content = {
+                    r.message_id for r in existing_rows if r.content is not None
                 }
-                new_rows = [
-                    MessageLog(
-                        message_id=mid,
-                        channel_id=cid,
-                        channel_name=cname,
-                        guild_id=gid,
-                        discord_user_id=uid,
-                        sent_at=ts,
-                        content=content,
+                existing_without_content = {
+                    r.message_id: r for r in existing_rows if r.content is None
+                }
+
+                new_rows = []
+                for mid, cid, cname, gid, uid, ts, content in batch:
+                    if mid in existing_with_content:
+                        # Already stored with content — nothing to do
+                        continue
+                    if mid in existing_without_content:
+                        # Row exists but content was NULL — patch it in
+                        if content:
+                            existing_without_content[mid].content = content
+                        continue
+                    new_rows.append(
+                        MessageLog(
+                            message_id=mid,
+                            channel_id=cid,
+                            channel_name=cname,
+                            guild_id=gid,
+                            discord_user_id=uid,
+                            sent_at=ts,
+                            content=content,
+                        )
                     )
-                    for mid, cid, cname, gid, uid, ts, content in batch
-                    if mid not in existing
-                ]
-                db.bulk_save_objects(new_rows)
+
+                if new_rows:
+                    db.bulk_save_objects(new_rows)
                 return len(new_rows)
         except Exception:
             logger.exception("Failed to flush batch of %d messages", len(batch))
