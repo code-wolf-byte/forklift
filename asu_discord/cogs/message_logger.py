@@ -91,12 +91,13 @@ class MessageLoggerCog(commands.Cog):
         guild_id = str(message.guild.id)
         user_id = str(message.author.id)
         sent_at = message.created_at.replace(tzinfo=None)  # store as naive UTC
+        content = message.content or None
 
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(
             None,
             self._save_message,
-            msg_id, channel_id, channel_name, guild_id, user_id, sent_at,
+            msg_id, channel_id, channel_name, guild_id, user_id, sent_at, content,
         )
 
     def _save_message(
@@ -107,6 +108,7 @@ class MessageLoggerCog(commands.Cog):
         guild_id: str,
         discord_user_id: str,
         sent_at: datetime,
+        content: str | None = None,
     ) -> None:
         try:
             with session_scope() as db:
@@ -125,6 +127,7 @@ class MessageLoggerCog(commands.Cog):
                         guild_id=guild_id,
                         discord_user_id=discord_user_id,
                         sent_at=sent_at,
+                        content=content,
                     )
                 )
         except Exception:
@@ -220,6 +223,7 @@ class MessageLoggerCog(commands.Cog):
                             str(guild.id),
                             str(m.author.id),
                             m.created_at.replace(tzinfo=None),
+                            m.content or None,
                         )
                         for m in non_bot
                     ]
@@ -294,8 +298,9 @@ class MessageLoggerCog(commands.Cog):
                         guild_id=gid,
                         discord_user_id=uid,
                         sent_at=ts,
+                        content=content,
                     )
-                    for mid, cid, cname, gid, uid, ts in batch
+                    for mid, cid, cname, gid, uid, ts, content in batch
                     if mid not in existing
                 ]
                 db.bulk_save_objects(new_rows)

@@ -299,6 +299,29 @@ def admin_trigger_automation(job_name: str):
     return jsonify({"status": "triggered" if success else "failed", "job_name": job_name})
 
 
+@admin_bp.route("/api/admin/automations/<job_name>/reset", methods=["POST"])
+@require_admin
+def admin_reset_automation(job_name: str):
+    """Clear last_run_at so the next run fetches all records from the beginning."""
+    from cron import cron_manager
+
+    if job_name not in cron_manager.job_names:
+        return jsonify({"error": "Unknown job"}), 404
+
+    with session_scope() as db_session:
+        cfg = (
+            db_session.query(CronJobConfig)
+            .filter(CronJobConfig.job_name == job_name)
+            .one_or_none()
+        )
+        if cfg is None:
+            return jsonify({"error": "Job config not found"}), 404
+        cfg.last_run_at = None
+
+    logger.info("Reset last_run_at for job %s", job_name)
+    return jsonify({"status": "reset", "job_name": job_name})
+
+
 @admin_bp.route("/api/admin/discord-channels")
 @require_admin
 def admin_discord_channels():
@@ -778,7 +801,7 @@ def admin_message_export_csv():
         writer = csv.writer(buf)
         writer.writerow([
             "sent_at_az", "channel_name", "channel_id",
-            "discord_username", "asurite_id", "discord_user_id", "message_id",
+            "discord_username", "asurite_id", "discord_user_id", "message_id", "content",
         ])
         for r in rows:
             u = users_map.get(r.discord_user_id)
@@ -791,6 +814,7 @@ def admin_message_export_csv():
                 u.asurite_id if u else "",
                 r.discord_user_id,
                 r.message_id,
+                r.content or "",
             ])
 
     filename = "message_logs.csv"

@@ -28,7 +28,8 @@ class ForkliftBot(commands.Bot):
             intents = discord.Intents.default()
             intents.members = True
             intents.guilds = True
-            intents.guild_messages = True  # needed for on_message
+            intents.guild_messages = True    # needed for on_message
+            intents.message_content = True   # privileged — needed to read message text
         super().__init__(command_prefix=command_prefix, intents=intents)
         self._load_verification_cog()
         self._load_qna_cog()

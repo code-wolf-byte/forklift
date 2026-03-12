@@ -21,6 +21,7 @@ export default function Automations() {
   const [edits, setEdits] = useState({});
   const [saving, setSaving] = useState({});
   const [triggering, setTriggering] = useState({});
+  const [resetting, setResetting] = useState({});
   const [errors, setErrors] = useState({});
   const [triggerStatus, setTriggerStatus] = useState({});
   const [channels, setChannels] = useState([]);
@@ -86,6 +87,16 @@ export default function Automations() {
       .finally(() => setSaving((s) => ({ ...s, [job_name]: false })));
   };
 
+  const handleReset = (job_name) => {
+    if (!window.confirm(`Reset "${job_name}"? The next run will export all records from the beginning, not just new ones since the last run.`)) return;
+    setResetting((r) => ({ ...r, [job_name]: true }));
+    fetch(`/api/admin/automations/${job_name}/reset`, { method: "POST" })
+      .then((r) => r.json())
+      .then(() => refreshJobs())
+      .catch(() => setErrors((prev) => ({ ...prev, [job_name]: "Reset failed" })))
+      .finally(() => setResetting((r) => ({ ...r, [job_name]: false })));
+  };
+
   const handleTrigger = (job_name) => {
     setTriggering((t) => ({ ...t, [job_name]: true }));
     setTriggerStatus((s) => ({ ...s, [job_name]: null }));
@@ -122,6 +133,7 @@ export default function Automations() {
         const timeValue = `${String(edit.schedule_hour ?? job.schedule_hour).padStart(2, "0")}:${String(edit.schedule_minute ?? job.schedule_minute).padStart(2, "0")}`;
         const isSaving = saving[job.job_name];
         const isTriggering = triggering[job.job_name];
+        const isResetting = resetting[job.job_name];
         const error = errors[job.job_name];
         const tStatus = triggerStatus[job.job_name];
         const isSurveyJob = job.job_name === "send_survey_messages";
@@ -231,6 +243,14 @@ export default function Automations() {
                 disabled={isTriggering}
               >
                 {isTriggering ? "Running…" : "Run Now"}
+              </button>
+              <button
+                className="btn btn-sm btn-outline-danger"
+                onClick={() => handleReset(job.job_name)}
+                disabled={isResetting}
+                title="Clear last run timestamp so the next export starts from the beginning"
+              >
+                {isResetting ? "Resetting…" : "Reset"}
               </button>
             </div>
           </div>

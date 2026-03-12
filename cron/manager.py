@@ -10,7 +10,12 @@ from utils.settings import CONFIG, SFTP_CONFIG
 # Cron job call signature.
 CronJob = Callable[..., None]
 
-_UPLOAD_JOB: Sequence[str] = ("upload_emails_to_sftp", "upload_departed_to_sftp", "send_survey_messages")
+_UPLOAD_JOB: Sequence[str] = (
+    "upload_emails_to_sftp",
+    "upload_incomplete_verifications_to_sftp",
+    "upload_departed_to_sftp",
+    "send_survey_messages",
+)
 logger = logging.getLogger(__name__)
 
 

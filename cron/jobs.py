@@ -114,6 +114,7 @@ def _upload_csv(config: SftpUploadConfig, payload: bytes, filename: str) -> str:
         return client.upload_bytes(payload, config.remote_dir, filename)
 
 
+_INCOMPLETE_VERIFICATION_FILENAME_PREFIX = "Devil2Devil_Incomplete"
 _DEPARTED_FILENAME_PREFIX = "Devil2Devil_Left"
 
 
@@ -135,6 +136,56 @@ def _fetch_departed_users(since: datetime | None) -> List[Tuple[str, datetime]]:
                 continue
             rows.append((user.email, left_at))
     return rows
+
+
+def _fetch_incomplete_verification_users(since: datetime | None) -> List[Tuple[str, datetime]]:
+    """Return users who completed CAS (step 1) but never linked Discord (step 2)."""
+    since = _normalize_dt(since)
+    with session_scope() as session:
+        query = (
+            session.query(User)
+            .filter(User.email != "")
+            .filter(User.verified.is_(False))
+            .filter(User.discord_user_id.is_(None))
+        )
+        if since is not None:
+            query = query.filter(User.created_at >= since)
+
+        rows: List[Tuple[str, datetime]] = []
+        for user in query.order_by(User.created_at.asc()).all():
+            created_at = _normalize_dt(user.created_at)
+            if created_at is None:
+                continue
+            rows.append((user.email, created_at))
+    return rows
+
+
+def upload_incomplete_verifications_to_sftp() -> None:
+    """Upload emails of users who completed SSO but never linked Discord, incremental since last run."""
+    if CONFIG.DEV_MODE:
+        logger.info("FORKLIFT_DEV_MODE enabled; skipping SFTP upload")
+        return
+
+    if SFTP_CONFIG is None:
+        logger.warning("SFTP configuration missing or disabled; skipping upload_incomplete_verifications_to_sftp")
+        return
+
+    job_name = "upload_incomplete_verifications_to_sftp"
+    now = datetime.now(timezone.utc)
+    last_run = _get_last_run(job_name)
+    rows = _fetch_incomplete_verification_users(last_run)
+
+    if not rows:
+        _set_last_run(job_name, now)
+        logger.info("No incomplete verifications to upload; recorded last run at %s", now.isoformat())
+        return
+
+    csv_payload = _build_csv(rows, dt_column="sso_completed_at")
+    filename = f"{_INCOMPLETE_VERIFICATION_FILENAME_PREFIX}-{now.strftime('%Y%m%d')}.csv"
+    remote_path = _upload_csv(SFTP_CONFIG, csv_payload, filename)
+
+    _set_last_run(job_name, now)
+    logger.info("Uploaded %d incomplete verification emails to SFTP at %s", len(rows), remote_path)
 
 
 def upload_departed_to_sftp() -> None:
@@ -238,6 +289,7 @@ def send_survey_messages() -> None:
 
 AVAILABLE_JOBS: dict[str, CronJob] = {
     "upload_emails_to_sftp": upload_emails_to_sftp,
+    "upload_incomplete_verifications_to_sftp": upload_incomplete_verifications_to_sftp,
     "upload_departed_to_sftp": upload_departed_to_sftp,
     "send_survey_messages": send_survey_messages,
 }

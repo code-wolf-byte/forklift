@@ -159,7 +159,7 @@ class CronJobConfig(Base):
 
 
 class MessageLog(Base):
-    """One row per Discord message — metadata only, no content stored."""
+    """One row per Discord message — metadata + content."""
 
     __tablename__ = "message_logs"
 
@@ -169,6 +169,7 @@ class MessageLog(Base):
     channel_name = Column(String(255), nullable=True)
     guild_id = Column(String(64), nullable=False, index=True)
     discord_user_id = Column(String(64), nullable=False, index=True)
+    content = Column(Text, nullable=True)
     sent_at = Column(DateTime, nullable=False, index=True)  # naive UTC
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -194,6 +195,10 @@ _CRON_JOB_DEFAULTS = [
     {
         "job_name": "upload_emails_to_sftp",
         "display_name": "Upload Verified Emails to SFTP",
+    },
+    {
+        "job_name": "upload_incomplete_verifications_to_sftp",
+        "display_name": "Upload Incomplete Verifications to SFTP",
     },
     {
         "job_name": "upload_departed_to_sftp",
@@ -222,7 +227,21 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_user_columns()
     _ensure_cron_job_config_columns()
+    _ensure_message_log_columns()
     _seed_cron_job_config()
+
+
+def _ensure_message_log_columns() -> None:
+    """Add columns to message_logs introduced after the initial schema."""
+    inspector = inspect(engine)
+    if not inspector.has_table(MessageLog.__tablename__):
+        return
+
+    columns = {col["name"] for col in inspector.get_columns(MessageLog.__tablename__)}
+
+    if "content" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE message_logs ADD COLUMN content TEXT"))
 
 
 def _ensure_cron_job_config_columns() -> None:
