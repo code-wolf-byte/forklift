@@ -817,7 +817,9 @@ def admin_message_export_csv():
                 r.content or "",
             ])
 
-    filename = "message_logs.csv"
+    from_label = from_dt.strftime("%Y-%m-%d") if from_dt else "start"
+    to_label = to_dt.strftime("%Y-%m-%d") if to_dt else "end"
+    filename = f"message_logs_{from_label}_to_{to_label}.csv"
     return Response(
         buf.getvalue(),
         mimetype="text/csv",

@@ -320,19 +320,17 @@ export default function MessageLogs() {
   // Shared filter state
   const [fromDate, setFromDate] = useState(daysAgoISO(30));
   const [toDate, setToDate] = useState(todayISO());
-  const [selectedChannels, setSelectedChannels] = useState([]);
   const [hasRoles, setHasRoles] = useState([]);
   const [notRoles, setNotRoles] = useState([]);
   const [activePreset, setActivePreset] = useState(30);
 
   // Applied (fetched) state
   const [applied, setApplied] = useState({
-    from: daysAgoISO(30), to: todayISO(), channels: [], hasRoles: [], notRoles: [],
+    from: daysAgoISO(30), to: todayISO(), hasRoles: [], notRoles: [],
   });
 
   // Data
   const [roles, setRoles] = useState([]);
-  const [channels, setChannels] = useState([]);
   const [heatmapData, setHeatmapData] = useState(null);
   const [heatmapLoading, setHeatmapLoading] = useState(true);
   const [exportData, setExportData] = useState(null);
@@ -342,7 +340,6 @@ export default function MessageLogs() {
   // Load selectors once
   useEffect(() => {
     fetch("/api/admin/roles").then((r) => r.json()).then(setRoles).catch(() => {});
-    fetch("/api/admin/message-logs/channels").then((r) => r.json()).then(setChannels).catch(() => {});
   }, []);
 
   // Build query string from applied state
@@ -350,7 +347,6 @@ export default function MessageLogs() {
     const p = new URLSearchParams();
     if (applied.from) p.set("from_date", applied.from);
     if (applied.to)   p.set("to_date", applied.to);
-    applied.channels.forEach((c) => p.append("channel_id", c));
     applied.hasRoles.forEach((r) => p.append("role", r));
     applied.notRoles.forEach((r) => p.append("exclude_role", r));
     Object.entries(extra).forEach(([k, v]) => p.set(k, v));
@@ -380,7 +376,7 @@ export default function MessageLogs() {
   useEffect(() => { setExportPage(1); }, [tab, applied]);
 
   const handleApply = () => {
-    setApplied({ from: fromDate, to: toDate, channels: selectedChannels, hasRoles, notRoles });
+    setApplied({ from: fromDate, to: toDate, hasRoles, notRoles });
     setActivePreset(null);
   };
 
@@ -391,12 +387,7 @@ export default function MessageLogs() {
     setActivePreset(days);
   };
 
-  const toggleChannel = (cid) => {
-    setSelectedChannels((prev) =>
-      prev.includes(cid) ? prev.filter((c) => c !== cid) : [...prev, cid]
-    );
-  };
-
+  const csvFilename = `message_logs_${applied.from || "start"}_to_${applied.to || "end"}.csv`;
   const csvHref = `/api/admin/message-logs/export/csv?${buildQS()}`;
 
   return (
@@ -458,40 +449,6 @@ export default function MessageLogs() {
                 Apply
               </button>
             </div>
-
-            {/* Channel selector */}
-            {channels.length > 0 && (
-              <div className="mb-3">
-                <div className="form-label small fw-semibold mb-2">Channels</div>
-                <div className="d-flex flex-wrap gap-1">
-                  {channels.map((ch) => {
-                    const active = selectedChannels.includes(ch.channel_id);
-                    return (
-                      <button
-                        key={ch.channel_id}
-                        className={`btn btn-sm ${active ? "btn-maroon text-white" : "btn-outline-secondary"}`}
-                        style={{ fontSize: 12 }}
-                        onClick={() => toggleChannel(ch.channel_id)}
-                      >
-                        #{ch.channel_name}
-                        <span className="ms-1 opacity-50" style={{ fontSize: 10 }}>
-                          {ch.count.toLocaleString()}
-                        </span>
-                      </button>
-                    );
-                  })}
-                  {selectedChannels.length > 0 && (
-                    <button
-                      className="btn btn-sm btn-outline-secondary"
-                      style={{ fontSize: 12 }}
-                      onClick={() => setSelectedChannels([])}
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
 
             {/* Role filter */}
             <div>
@@ -555,7 +512,7 @@ export default function MessageLogs() {
               </span>
               <a
                 href={csvHref}
-                download="message_logs.csv"
+                download={csvFilename}
                 className="btn btn-sm btn-outline-secondary"
               >
                 <i className="fas fa-download me-1" />Download CSV
