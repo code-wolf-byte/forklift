@@ -4,17 +4,25 @@
 //   hasRoles  = user must have ALL of these roles (AND)
 //   notRoles  = user must have NONE of these roles
 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
 function RoleChip({ name, color, onRemove }) {
   return (
     <span
-      className="series-chip d-inline-flex align-items-center gap-1"
+      className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-[5px] leading-snug max-w-[180px] whitespace-nowrap"
       style={{ background: `${color}18`, color, border: `1px solid ${color}35` }}
       title={name}
     >
-      <span className="series-chip-label">{name}</span>
+      <span className="overflow-hidden text-ellipsis whitespace-nowrap max-w-[150px]">{name}</span>
       <button
         type="button"
-        className="series-chip-remove"
+        className="bg-transparent border-0 p-0 pl-0.5 leading-none cursor-pointer opacity-55 flex items-center shrink-0 hover:opacity-100"
         onClick={onRemove}
         aria-label={`Remove ${name}`}
       >
@@ -27,16 +35,18 @@ function RoleChip({ name, color, onRemove }) {
 function RoleAdder({ availableRoles, onAdd, placeholder }) {
   if (availableRoles.length === 0) return null;
   return (
-    <select
-      className="series-add-select"
-      value=""
-      onChange={(e) => { if (e.target.value) onAdd(e.target.value); }}
-    >
-      <option value="">{placeholder}</option>
-      {availableRoles.map((r) => (
-        <option key={r.role_name} value={r.role_name}>{r.role_name}</option>
-      ))}
-    </select>
+    <Select value="" onValueChange={(val) => { if (val) onAdd(val); }}>
+      <SelectTrigger className="h-6 text-xs px-2 w-auto min-w-[110px] border-dashed">
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        {availableRoles.map((r) => (
+          <SelectItem key={r.role_name} value={r.role_name} className="text-xs">
+            {r.role_name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -58,12 +68,11 @@ export function seriesParams(s, fromDate, toDate) {
   return p.toString();
 }
 
-// onAdd is handled by the parent (in the card toolbar), not here
 export default function SeriesBuilder({ series, roles, colors, onUpdate, onRemove }) {
   if (!series.length) return null;
 
   return (
-    <div className="series-builder-list">
+    <div className="flex flex-col gap-1.5">
       {series.map((s, i) => {
         const color = colors[i % colors.length];
         const availableForHas = roles.filter((r) => !s.hasRoles.includes(r.role_name));
@@ -72,18 +81,21 @@ export default function SeriesBuilder({ series, roles, colors, onUpdate, onRemov
         return (
           <div
             key={s.id}
-            className="series-builder-row"
+            className="flex items-start gap-2.5 p-2.5 rounded-lg border border-black/[0.06] border-l-[3px]"
             style={{ borderLeftColor: color, background: `${color}0a` }}
           >
             {/* Color indicator */}
-            <span className="series-dot flex-shrink-0" style={{ background: color }} />
+            <span
+              className="w-2.5 h-2.5 rounded-full shrink-0 mt-1"
+              style={{ background: color }}
+            />
 
             {/* Conditions */}
-            <div className="series-conditions flex-grow-1">
+            <div className="flex flex-col gap-1.5 flex-1 min-w-0">
               {/* Has row */}
-              <div className="series-condition-row">
-                <span className="series-cond-label">Has</span>
-                <div className="series-chips-wrap">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-bold uppercase tracking-[0.04em] text-muted-foreground min-w-[30px] shrink-0">Has</span>
+                <div className="flex items-center gap-1 flex-wrap">
                   {s.hasRoles.map((r) => (
                     <RoleChip
                       key={r}
@@ -101,9 +113,9 @@ export default function SeriesBuilder({ series, roles, colors, onUpdate, onRemov
               </div>
 
               {/* Excl row */}
-              <div className="series-condition-row">
-                <span className="series-cond-label series-cond-excl">Excl</span>
-                <div className="series-chips-wrap">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-bold uppercase tracking-[0.04em] text-muted-foreground/60 min-w-[30px] shrink-0">Excl</span>
+                <div className="flex items-center gap-1 flex-wrap">
                   {s.notRoles.map((r) => (
                     <RoleChip
                       key={r}
@@ -124,7 +136,7 @@ export default function SeriesBuilder({ series, roles, colors, onUpdate, onRemov
             {/* Remove */}
             {series.length > 1 && (
               <button
-                className="series-remove-btn flex-shrink-0"
+                className="bg-transparent border-0 p-1 rounded text-muted-foreground/60 cursor-pointer text-xs leading-none mt-0.5 shrink-0 hover:bg-destructive/10 hover:text-destructive transition-colors"
                 onClick={() => onRemove(s.id)}
                 title="Remove series"
               >

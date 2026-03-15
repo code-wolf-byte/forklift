@@ -1,4 +1,17 @@
 import { useState, useEffect } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 function formatAZ(isoStr) {
   if (!isoStr) return "Never";
@@ -113,7 +126,7 @@ export default function Automations() {
 
   if (!jobs) {
     return (
-      <div className="text-center py-5">
+      <div className="flex justify-center py-20">
         <div className="spinner-border" role="status" style={{ color: "#8c1d40" }}>
           <span className="visually-hidden">Loading automations…</span>
         </div>
@@ -123,8 +136,8 @@ export default function Automations() {
 
   return (
     <>
-      <h2 className="mb-1">Automations</h2>
-      <p className="text-muted small mb-4">
+      <h2 className="text-2xl font-bold mb-1">Automations</h2>
+      <p className="text-sm text-muted-foreground mb-6">
         All times are in Arizona Time (AZ / MST, UTC−7). Jobs run once per day at
         the scheduled time.
       </p>
@@ -141,146 +154,146 @@ export default function Automations() {
         const isSurveyJob = job.job_name === "send_survey_messages";
 
         return (
-          <div key={job.job_name} className="card mb-3 p-3">
-            <div className="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
-              <div>
-                <h5 className="mb-0">{job.display_name}</h5>
-                <code className="text-muted small">{job.job_name}</code>
-              </div>
-              <div className="form-check form-switch mb-0 pt-1">
-                <input
-                  className="form-check-input"
-                  type="checkbox"
-                  role="switch"
-                  id={`enabled-${job.job_name}`}
-                  checked={edit.enabled ?? job.enabled}
-                  onChange={(e) =>
-                    setEdits((prev) => ({
-                      ...prev,
-                      [job.job_name]: { ...prev[job.job_name], enabled: e.target.checked },
-                    }))
-                  }
-                />
-                <label className="form-check-label" htmlFor={`enabled-${job.job_name}`}>
-                  {(edit.enabled ?? job.enabled) ? "Enabled" : "Disabled"}
-                </label>
-              </div>
-            </div>
-
-            {isSurveyJob && (
-              <div className="mb-3">
-                <label className="form-label small mb-1 fw-semibold">
-                  Admin Channel
-                </label>
-                <select
-                  className="form-select form-select-sm"
-                  style={{ maxWidth: "320px" }}
-                  value={edit.channel_id ?? ""}
-                  onChange={(e) =>
-                    setEdits((prev) => ({
-                      ...prev,
-                      [job.job_name]: { ...prev[job.job_name], channel_id: e.target.value },
-                    }))
-                  }
-                >
-                  <option value="">— Select a channel —</option>
-                  {channels.map((ch) => (
-                    <option key={ch.id} value={ch.id}>
-                      #{ch.name}
-                    </option>
-                  ))}
-                </select>
-                <div className="text-muted small mt-1">
-                  Pings members who verified exactly 3 weeks ago and are still in the server.
+          <Card key={job.job_name} className="mb-3">
+            <CardContent className="p-4">
+              <div className="flex justify-between items-start flex-wrap gap-2 mb-3">
+                <div>
+                  <h5 className="text-base font-semibold mb-0">{job.display_name}</h5>
+                  <code className="text-sm text-muted-foreground">{job.job_name}</code>
+                </div>
+                <div className="flex items-center gap-2 pt-1">
+                  <Switch
+                    id={`enabled-${job.job_name}`}
+                    checked={edit.enabled ?? job.enabled}
+                    onCheckedChange={(checked) =>
+                      setEdits((prev) => ({
+                        ...prev,
+                        [job.job_name]: { ...prev[job.job_name], enabled: checked },
+                      }))
+                    }
+                  />
+                  <Label htmlFor={`enabled-${job.job_name}`} className="cursor-pointer">
+                    {(edit.enabled ?? job.enabled) ? "Enabled" : "Disabled"}
+                  </Label>
                 </div>
               </div>
-            )}
 
-            <div className="row g-3 align-items-end">
-              <div className="col-auto">
-                <label className="form-label small mb-1 fw-semibold">
-                  Daily schedule (AZ time)
-                </label>
-                <input
-                  type="time"
-                  className="form-control form-control-sm"
-                  style={{ width: "130px" }}
-                  value={timeValue}
-                  onChange={(e) => handleTimeChange(job.job_name, e.target.value)}
-                />
-              </div>
-              <div className="col">
-                <div className="text-muted small lh-lg">
+              {isSurveyJob && (
+                <div className="mb-4">
+                  <Label className="text-xs font-semibold mb-1.5 block">Admin Channel</Label>
+                  <Select
+                    value={edit.channel_id ?? ""}
+                    onValueChange={(val) =>
+                      setEdits((prev) => ({
+                        ...prev,
+                        [job.job_name]: { ...prev[job.job_name], channel_id: val },
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="max-w-xs h-8 text-sm">
+                      <SelectValue placeholder="— Select a channel —" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {channels.map((ch) => (
+                        <SelectItem key={ch.id} value={ch.id}>
+                          #{ch.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Pings members who verified exactly 3 weeks ago and are still in the server.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex gap-4 items-end flex-wrap">
+                <div>
+                  <Label className="text-xs font-semibold mb-1.5 block">Daily schedule (AZ time)</Label>
+                  <Input
+                    type="time"
+                    className="w-32 h-8 text-sm"
+                    value={timeValue}
+                    onChange={(e) => handleTimeChange(job.job_name, e.target.value)}
+                  />
+                </div>
+                <div className="text-sm text-muted-foreground leading-relaxed">
                   <div>Last run: <strong>{formatAZ(job.last_run_at)}</strong></div>
                   <div>Next run: <strong>{formatAZ(job.next_run_at)}</strong></div>
                 </div>
               </div>
-            </div>
 
-            {error && (
-              <div className="alert alert-danger mt-2 mb-0 py-1 small">{error}</div>
-            )}
-            {tStatus === "triggered" && (
-              <div className="alert alert-success mt-2 mb-0 py-1 small">
-                Job triggered successfully.
-              </div>
-            )}
-            {tStatus === "failed" && (
-              <div className="alert alert-warning mt-2 mb-0 py-1 small">
-                Job ran but reported a failure — check server logs.
-              </div>
-            )}
+              {error && (
+                <Alert variant="destructive" className="mt-3 py-2">
+                  <AlertDescription className="text-xs">{error}</AlertDescription>
+                </Alert>
+              )}
+              {tStatus === "triggered" && (
+                <Alert variant="success" className="mt-3 py-2">
+                  <AlertDescription className="text-xs">Job triggered successfully.</AlertDescription>
+                </Alert>
+              )}
+              {tStatus === "failed" && (
+                <Alert variant="warning" className="mt-3 py-2">
+                  <AlertDescription className="text-xs">Job ran but reported a failure — check server logs.</AlertDescription>
+                </Alert>
+              )}
 
-            {isConfirmingReset && (
-              <div className="alert alert-warning mt-3 mb-0 d-flex align-items-center justify-content-between gap-3 flex-wrap">
-                <div className="small">
-                  <i className="fas fa-exclamation-triangle me-1" />
-                  <strong>Reset tracking?</strong> The next run will re-export{" "}
-                  <strong>all records from the beginning</strong>, not just new ones
-                  since the last run.
-                </div>
-                <div className="d-flex gap-2 flex-shrink-0">
-                  <button
-                    className="btn btn-sm btn-danger"
-                    onClick={() => handleResetConfirmed(job.job_name)}
-                  >
-                    Yes, reset
-                  </button>
-                  <button
-                    className="btn btn-sm btn-outline-secondary"
-                    onClick={() => setConfirmReset((c) => ({ ...c, [job.job_name]: false }))}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
+              {isConfirmingReset && (
+                <Alert variant="warning" className="mt-4 flex items-center justify-between gap-3 flex-wrap">
+                  <AlertDescription className="text-xs flex-1">
+                    <i className="fas fa-exclamation-triangle mr-1" />
+                    <strong>Reset tracking?</strong> The next run will re-export{" "}
+                    <strong>all records from the beginning</strong>, not just new ones
+                    since the last run.
+                  </AlertDescription>
+                  <div className="flex gap-2 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => handleResetConfirmed(job.job_name)}
+                    >
+                      Yes, reset
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setConfirmReset((c) => ({ ...c, [job.job_name]: false }))}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </Alert>
+              )}
 
-            <div className="d-flex gap-2 mt-3">
-              <button
-                className="btn btn-sm btn-maroon text-white"
-                onClick={() => handleSave(job.job_name)}
-                disabled={isSaving}
-              >
-                {isSaving ? "Saving…" : "Save"}
-              </button>
-              <button
-                className="btn btn-sm btn-outline-secondary"
-                onClick={() => handleTrigger(job.job_name)}
-                disabled={isTriggering}
-              >
-                {isTriggering ? "Running…" : "Run Now"}
-              </button>
-              <button
-                className="btn btn-sm btn-outline-danger"
-                onClick={() => setConfirmReset((c) => ({ ...c, [job.job_name]: true }))}
-                disabled={isResetting || isConfirmingReset}
-                title="Clear last run timestamp so the next export starts from the beginning"
-              >
-                {isResetting ? "Resetting…" : "Reset"}
-              </button>
-            </div>
-          </div>
+              <div className="flex gap-2 mt-4">
+                <Button
+                  size="sm"
+                  onClick={() => handleSave(job.job_name)}
+                  disabled={isSaving}
+                >
+                  {isSaving ? "Saving…" : "Save"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleTrigger(job.job_name)}
+                  disabled={isTriggering}
+                >
+                  {isTriggering ? "Running…" : "Run Now"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => setConfirmReset((c) => ({ ...c, [job.job_name]: true }))}
+                  disabled={isResetting || isConfirmingReset}
+                  title="Clear last run timestamp so the next export starts from the beginning"
+                >
+                  {isResetting ? "Resetting…" : "Reset"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         );
       })}
     </>

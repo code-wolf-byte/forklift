@@ -1,4 +1,6 @@
+import "@/admin.css";
 import { useState, useEffect, useLayoutEffect } from "react";
+import { Button } from "@/components/ui/button";
 import Dashboard from "./admin/Dashboard.jsx";
 import Automations from "./admin/Automations.jsx";
 import Users from "./admin/Users.jsx";
@@ -44,10 +46,15 @@ const NAV = [
 function NavItem({ id, icon, label, active, onClick }) {
   return (
     <button
-      className={`admin-nav-item${active ? " active" : ""}`}
+      className={[
+        "flex items-center gap-2.5 w-full px-2.5 py-1.5 rounded text-left cursor-pointer text-[15px] font-medium transition-colors mb-px border-0",
+        active
+          ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold"
+          : "bg-transparent text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
+      ].join(" ")}
       onClick={() => onClick(id)}
     >
-      <span className="admin-nav-icon">
+      <span className="w-[18px] text-center text-[15px] shrink-0">
         <i className={`fas ${icon}`} />
       </span>
       {label}
@@ -65,16 +72,6 @@ export default function Admin() {
   const [darkMode, setDarkMode] = useState(
     () => localStorage.getItem("admin_theme") === "dark"
   );
-
-  // Apply dark class before paint to avoid flash
-  useLayoutEffect(() => {
-    if (darkMode) {
-      document.body.classList.add("admin-dark");
-    } else {
-      document.body.classList.remove("admin-dark");
-    }
-    return () => document.body.classList.remove("admin-dark");
-  }, [darkMode]);
 
   // Measure fixed ASU header so sidebar sticks just below it
   useEffect(() => {
@@ -106,7 +103,7 @@ export default function Admin() {
 
   if (loading) {
     return (
-      <div className="container py-5 text-center">
+      <div className="flex items-center justify-center py-20">
         <div className="spinner-border" role="status" style={{ color: "#8c1d40" }}>
           <span className="visually-hidden">Loading...</span>
         </div>
@@ -129,22 +126,38 @@ export default function Admin() {
   };
 
   return (
-    <div className="admin-layout" style={{ minHeight: `calc(100vh - ${sidebarTop}px)` }}>
+    <div
+      className={["admin-layout flex", darkMode ? "admin-dark" : ""].join(" ")}
+      style={{ minHeight: `calc(100vh - ${sidebarTop}px)`, background: "hsl(var(--background))", color: "hsl(var(--foreground))" }}
+    >
       {/* ── Sidebar ── */}
       <aside
-        className="admin-sidebar"
-        style={{ top: sidebarTop, height: `calc(100vh - ${sidebarTop}px)` }}
+        className="w-60 shrink-0 flex flex-col sticky overflow-y-auto"
+        style={{
+          top: sidebarTop,
+          height: `calc(100vh - ${sidebarTop}px)`,
+          background: "hsl(var(--sidebar-background))",
+          borderRight: "1px solid hsl(var(--sidebar-border))",
+        }}
       >
         {/* Server header */}
-        <div className="admin-sidebar-header">
+        <div
+          className="flex items-center gap-2.5 px-4 py-3.5 font-bold text-sm uppercase tracking-wider shrink-0"
+          style={{ borderBottom: "1px solid hsl(var(--sidebar-border))", color: "hsl(var(--sidebar-foreground))" }}
+        >
           <i className="fas fa-bolt" style={{ color: "#8c1d40" }} />
           Forklift Admin
         </div>
 
         {/* Nav sections */}
         {NAV.map((section) => (
-          <div key={section.label} className="admin-sidebar-section">
-            <div className="admin-sidebar-section-label">{section.label}</div>
+          <div key={section.label} className="px-2 pt-4 pb-1">
+            <div
+              className="px-2 pb-1 text-[11px] font-bold uppercase tracking-[0.06em]"
+              style={{ color: "hsl(var(--muted-foreground))" }}
+            >
+              {section.label}
+            </div>
             {section.items.map((item) => (
               <NavItem
                 key={item.id}
@@ -157,31 +170,36 @@ export default function Admin() {
         ))}
 
         {/* Footer: user info + dark mode toggle */}
-        <div className="admin-sidebar-footer">
-          <div className="flex-grow-1 overflow-hidden">
+        <div
+          className="mt-auto flex items-center gap-2 px-3 py-2.5 shrink-0"
+          style={{ borderTop: "1px solid hsl(var(--sidebar-border))", color: "hsl(var(--sidebar-foreground))" }}
+        >
+          <div className="flex-1 overflow-hidden">
             {adminUser && (
               <>
-                <div className="fw-semibold small text-truncate">
+                <div className="font-semibold text-sm truncate">
                   {adminUser.asurite_id}
                 </div>
-                <div className="text-muted text-truncate" style={{ fontSize: 12 }}>
+                <div className="text-[12px] truncate" style={{ color: "hsl(var(--muted-foreground))" }}>
                   {adminUser.discord_username}
                 </div>
               </>
             )}
           </div>
-          <button
-            className="btn btn-sm btn-outline-secondary flex-shrink-0"
+          <Button
+            size="icon"
+            variant="outline"
+            className="shrink-0 h-8 w-8"
             onClick={toggleDark}
             title={darkMode ? "Light mode" : "Dark mode"}
           >
             <i className={`fas ${darkMode ? "fa-sun" : "fa-moon"}`} />
-          </button>
+          </Button>
         </div>
       </aside>
 
       {/* ── Main content ── */}
-      <div className="admin-main">
+      <div className="flex-1 p-8 min-w-0">
         {renderView()}
       </div>
     </div>

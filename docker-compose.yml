@@ -17,6 +17,20 @@ services:
       - "com.centurylinklabs.watchtower.enable=true"
       - "com.centurylinklabs.watchtower.scope=forklift"
 
+  lookup-members:
+    image: codewolfbyte/forklift:latest
+    build:
+      context: .
+      args:
+        NPM_AUTH_TOKEN: ${NPM_AUTH_TOKEN}
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    entrypoint: ["python", "scripts/lookup_members.py"]
+    profiles:
+      - tools
+
   watchtower:
     image: containrrr/watchtower:1.7.1
     restart: unless-stopped

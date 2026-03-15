@@ -1,0 +1,56 @@
+@import "./admin-heatmap.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.admin-layout {
+  --background: 0 0% 100%;
+  --foreground: 224 71.4% 4.1%;
+  --card: 0 0% 100%;
+  --card-foreground: 224 71.4% 4.1%;
+  --border: 220 13% 91%;
+  --input: 220 13% 91%;
+  --ring: 346 77% 33%;
+  --primary: 346 77% 33%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 220 14.3% 95.9%;
+  --secondary-foreground: 220.9 39.3% 11%;
+  --muted: 220 14.3% 95.9%;
+  --muted-foreground: 220 8.9% 46.1%;
+  --accent: 220 14.3% 95.9%;
+  --accent-foreground: 220.9 39.3% 11%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 98%;
+  --sidebar-background: 0 0% 98%;
+  --sidebar-foreground: 224 71.4% 4.1%;
+  --sidebar-border: 220 13% 91%;
+  --sidebar-accent: 346 30% 95%;
+  --sidebar-accent-foreground: 346 77% 33%;
+  --radius: 0.5rem;
+}
+
+.admin-layout.admin-dark {
+  --background: 224 71.4% 4.1%;
+  --foreground: 210 20% 98%;
+  --card: 224 71.4% 6%;
+  --card-foreground: 210 20% 98%;
+  --border: 215 27.9% 16.9%;
+  --input: 215 27.9% 16.9%;
+  --ring: 346 77% 50%;
+  --primary: 346 77% 50%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 215 27.9% 16.9%;
+  --secondary-foreground: 210 20% 98%;
+  --muted: 215 27.9% 16.9%;
+  --muted-foreground: 217.9 10.6% 64.9%;
+  --accent: 215 27.9% 16.9%;
+  --accent-foreground: 210 20% 98%;
+  --destructive: 0 62.8% 50%;
+  --destructive-foreground: 210 20% 98%;
+  --sidebar-background: 224 71.4% 6%;
+  --sidebar-foreground: 210 20% 98%;
+  --sidebar-border: 215 27.9% 16.9%;
+  --sidebar-accent: 346 30% 15%;
+  --sidebar-accent-foreground: 346 77% 70%;
+}

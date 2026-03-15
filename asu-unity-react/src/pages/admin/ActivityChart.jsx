@@ -52,7 +52,6 @@ export default function ActivityChart({ datasets, isDark }) {
     const chartHeight = canvasRef.current.offsetHeight || 280;
     const alpha = isDark ? 0.45 : 0.3;
 
-    // Union of all dates across every series, sorted
     const dateSet = new Set();
     datasets.forEach((ds) => ds.data?.forEach((d) => dateSet.add(d.date)));
     const allDates = [...dateSet].sort();
@@ -139,14 +138,14 @@ export default function ActivityChart({ datasets, isDark }) {
 
   if (!hasData) {
     return (
-      <div className="admin-chart-container d-flex align-items-center justify-content-center text-muted small">
+      <div className="relative h-[280px] w-full overflow-hidden flex items-center justify-center text-sm text-muted-foreground">
         No data for selected range.
       </div>
     );
   }
 
   return (
-    <div className="admin-chart-container">
+    <div className="relative h-[280px] w-full overflow-hidden">
       <canvas ref={canvasRef} />
     </div>
   );

@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
+import { Card } from "@/components/ui/card";
 
 function timeAgo(isoStr) {
   if (!isoStr) return "—";
-  // Treat naive ISO string as UTC
   const date = new Date(
     isoStr.endsWith("Z") || isoStr.includes("+") ? isoStr : isoStr + "Z"
   );
@@ -78,7 +78,7 @@ export default function Joins() {
 
   if (!joins) {
     return (
-      <div className="text-center py-5">
+      <div className="flex justify-center py-20">
         <div className="spinner-border" role="status" style={{ color: "#8c1d40" }}>
           <span className="visually-hidden">Loading…</span>
         </div>
@@ -88,21 +88,21 @@ export default function Joins() {
 
   return (
     <>
-      <h2 className="mb-1">Verifications</h2>
-      <p className="text-muted small mb-4">
+      <h2 className="text-2xl font-bold mb-1">Verifications</h2>
+      <p className="text-sm text-muted-foreground mb-6">
         Most recent {joins.length} verified members.
       </p>
 
       {joins.length === 0 ? (
-        <p className="text-muted">No verified members yet.</p>
+        <p className="text-muted-foreground">No verified members yet.</p>
       ) : (
-        <div className="card p-0" style={{ overflow: "hidden" }}>
+        <Card className="overflow-hidden p-0">
           {joins.map((user, i) => (
             <div
               key={user.id}
-              className="d-flex align-items-center gap-3 px-3 py-2"
+              className="flex items-center gap-3 px-3 py-2"
               style={{
-                borderBottom: i < joins.length - 1 ? "1px solid var(--join-divider, #e3e5e8)" : "none",
+                borderBottom: i < joins.length - 1 ? "1px solid hsl(var(--border))" : "none",
               }}
             >
               <Avatar
@@ -110,24 +110,24 @@ export default function Joins() {
                 avatarHash={user.discord_avatar}
                 username={user.discord_username}
               />
-              <div className="flex-grow-1 overflow-hidden">
-                <div className="d-flex align-items-center gap-2 flex-wrap">
-                  <span className="fw-semibold text-truncate" style={{ maxWidth: 200 }}>
+              <div className="flex-1 overflow-hidden">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold truncate max-w-[200px]">
                     {user.discord_username || "Unknown"}
                   </span>
-                  <span className="text-muted small text-truncate">{user.asurite_id}</span>
+                  <span className="text-sm text-muted-foreground truncate">{user.asurite_id}</span>
                 </div>
               </div>
               <div
-                className="text-muted small text-nowrap flex-shrink-0"
+                className="text-sm text-muted-foreground whitespace-nowrap shrink-0"
                 title={user.verified_at}
               >
-                <i className="fas fa-user-check me-1" style={{ color: "#8c1d40" }} />
+                <i className="fas fa-user-check mr-1" style={{ color: "#8c1d40" }} />
                 {timeAgo(user.verified_at)}
               </div>
             </div>
           ))}
-        </div>
+        </Card>
       )}
     </>
   );

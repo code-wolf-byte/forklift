@@ -1,4 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import ActivityChart from "./ActivityChart.jsx";
 import SeriesBuilder, { seriesLabel, seriesParams } from "./SeriesBuilder.jsx";
 
@@ -50,12 +54,10 @@ export default function ServerJoins({ isDark }) {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
 
-  // Chart series state
   const nextIdRef = useRef(2);
   const [series, setSeries] = useState([{ id: 1, hasRoles: [], notRoles: [] }]);
   const [chartDataMap, setChartDataMap] = useState({});
 
-  // Load role options once
   useEffect(() => {
     fetch("/api/admin/roles")
       .then((r) => r.json())
@@ -74,7 +76,6 @@ export default function ServerJoins({ isDark }) {
     [applied, page]
   );
 
-  // Fetch paginated list
   useEffect(() => {
     setLoading(true);
     fetch(`/api/admin/server-joins?${buildQS({ per_page: 25 })}`)
@@ -83,7 +84,6 @@ export default function ServerJoins({ isDark }) {
       .catch(() => setLoading(false));
   }, [buildQS]);
 
-  // Fetch chart data for every series in parallel
   useEffect(() => {
     Promise.all(
       series.map((s) => {
@@ -135,100 +135,102 @@ export default function ServerJoins({ isDark }) {
 
   return (
     <>
-      <h2 className="mb-1">Server Joins</h2>
-      <p className="text-muted small mb-3">
+      <h2 className="text-2xl font-bold mb-1">Server Joins</h2>
+      <p className="text-sm text-muted-foreground mb-4">
         {data ? `${data.total.toLocaleString()} members joined in this range.` : "Loading…"}
       </p>
 
       {/* Filters */}
-      <div className="card p-3 mb-3">
-        <div className="row g-2 align-items-end flex-wrap">
-          <div className="col-auto">
-            <label className="form-label small mb-1 fw-semibold">From</label>
-            <input
-              type="date"
-              className="form-control form-control-sm"
-              value={filters.from_date}
-              onChange={(e) => {
-                setFilters((f) => ({ ...f, from_date: e.target.value }));
-                setActiveScale(null);
-              }}
-            />
-          </div>
-          <div className="col-auto">
-            <label className="form-label small mb-1 fw-semibold">To</label>
-            <input
-              type="date"
-              className="form-control form-control-sm"
-              value={filters.to_date}
-              onChange={(e) => {
-                setFilters((f) => ({ ...f, to_date: e.target.value }));
-                setActiveScale(null);
-              }}
-            />
-          </div>
-          <div className="col-auto">
-            <label className="form-label small mb-1 fw-semibold">Scale</label>
-            <div className="d-flex gap-1">
-              {SCALE_PRESETS.map((d) => (
-                <button
-                  key={d}
-                  className={`btn btn-sm ${activeScale === d ? "btn-maroon text-white" : "btn-outline-secondary"}`}
-                  onClick={() => handleScaleClick(d)}
-                >
-                  {d}d
-                </button>
-              ))}
+      <Card className="mb-3">
+        <CardContent className="p-3">
+          <div className="flex gap-2 items-end flex-wrap">
+            <div>
+              <Label className="text-xs font-semibold mb-1 block">From</Label>
+              <Input
+                type="date"
+                className="h-8 text-sm w-36"
+                value={filters.from_date}
+                onChange={(e) => {
+                  setFilters((f) => ({ ...f, from_date: e.target.value }));
+                  setActiveScale(null);
+                }}
+              />
             </div>
+            <div>
+              <Label className="text-xs font-semibold mb-1 block">To</Label>
+              <Input
+                type="date"
+                className="h-8 text-sm w-36"
+                value={filters.to_date}
+                onChange={(e) => {
+                  setFilters((f) => ({ ...f, to_date: e.target.value }));
+                  setActiveScale(null);
+                }}
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-semibold mb-1 block">Scale</Label>
+              <div className="flex gap-1">
+                {SCALE_PRESETS.map((d) => (
+                  <Button
+                    key={d}
+                    size="sm"
+                    variant={activeScale === d ? "default" : "outline"}
+                    onClick={() => handleScaleClick(d)}
+                  >
+                    {d}d
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs font-semibold mb-1 block">Role</Label>
+              <select
+                className="series-add-select h-8 rounded-md border border-input bg-background px-2 text-sm"
+                style={{ minWidth: 160 }}
+                value={filters.role}
+                onChange={(e) => setFilters((f) => ({ ...f, role: e.target.value }))}
+              >
+                <option value="">All roles</option>
+                {roles.map((r) => (
+                  <option key={r.role_name} value={r.role_name}>
+                    {r.role_name} ({r.count})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <Button size="sm" onClick={handleApply}>Apply</Button>
           </div>
-          <div className="col-auto">
-            <label className="form-label small mb-1 fw-semibold">Role</label>
-            <select
-              className="form-select form-select-sm"
-              style={{ minWidth: 160 }}
-              value={filters.role}
-              onChange={(e) => setFilters((f) => ({ ...f, role: e.target.value }))}
-            >
-              <option value="">All roles</option>
-              {roles.map((r) => (
-                <option key={r.role_name} value={r.role_name}>
-                  {r.role_name} ({r.count})
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="col-auto">
-            <button className="btn btn-sm btn-maroon text-white" onClick={handleApply}>
-              Apply
-            </button>
-          </div>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
 
       {/* Chart card */}
-      <div className="chart-card mb-3">
-        <div className="chart-card-header">
+      <Card className="mb-3 overflow-hidden">
+        <div
+          className="flex items-end justify-between gap-3 px-5 py-4"
+          style={{ borderBottom: "1px solid hsl(var(--border))" }}
+        >
           <div>
-            <div className="chart-card-title">Daily Joins</div>
+            <div className="text-sm font-bold tracking-tight">Daily Joins</div>
             {data && (
-              <div className="chart-card-subtitle">
+              <div className="text-xs text-muted-foreground mt-0.5">
                 {data.total.toLocaleString()} member{data.total !== 1 ? "s" : ""} joined in range
               </div>
             )}
           </div>
         </div>
 
-        <div className="chart-card-body">
+        <div className="p-5 pb-2">
           <ActivityChart datasets={datasets} isDark={isDark} />
         </div>
 
-        <div className="chart-card-series">
-          <div className="chart-card-series-toolbar">
-            <span className="chart-series-section-label">Series</span>
+        <div className="px-4 py-3" style={{ borderTop: "1px solid hsl(var(--border))" }}>
+          <div className="flex items-center justify-between mb-2.5">
+            <span className="text-[11px] font-bold uppercase tracking-[0.07em] text-muted-foreground">Series</span>
             {series.length < COLORS.length && (
-              <button className="btn btn-sm btn-outline-secondary" onClick={addSeries}>
-                <i className="fas fa-plus me-1" style={{ fontSize: 10 }} />Add series
-              </button>
+              <Button size="sm" variant="outline" onClick={addSeries}>
+                <i className="fas fa-plus mr-1" style={{ fontSize: 10 }} />Add series
+              </Button>
             )}
           </div>
           <SeriesBuilder
@@ -239,34 +241,34 @@ export default function ServerJoins({ isDark }) {
             onRemove={removeSeries}
           />
         </div>
-      </div>
+      </Card>
 
       {/* List */}
       {loading ? (
-        <div className="text-center py-4">
+        <div className="flex justify-center py-4">
           <div className="spinner-border spinner-border-sm" role="status" style={{ color: "#8c1d40" }}>
             <span className="visually-hidden">Loading…</span>
           </div>
         </div>
       ) : (
         <>
-          <div className="card p-0" style={{ overflow: "hidden" }}>
+          <Card className="overflow-hidden p-0">
             {!data?.users?.length ? (
-              <p className="text-muted small p-3 mb-0">No joins in this range.</p>
+              <p className="text-sm text-muted-foreground p-3 mb-0">No joins in this range.</p>
             ) : (
               data.users.map((u, i) => (
                 <div
                   key={u.id}
-                  className="d-flex align-items-center gap-3 px-3 py-2"
-                  style={{ borderBottom: i < data.users.length - 1 ? "1px solid var(--join-divider,#e3e5e8)" : "none" }}
+                  className="flex items-center gap-3 px-3 py-2"
+                  style={{ borderBottom: i < data.users.length - 1 ? "1px solid hsl(var(--border))" : "none" }}
                 >
                   <Avatar userId={u.discord_user_id} avatarHash={u.discord_avatar} username={u.discord_username} />
-                  <div className="flex-grow-1 overflow-hidden">
-                    <div className="fw-semibold small text-truncate">{u.discord_username || "—"}</div>
-                    <div className="text-muted" style={{ fontSize: 12 }}>{u.asurite_id}</div>
+                  <div className="flex-1 overflow-hidden">
+                    <div className="font-semibold text-sm truncate">{u.discord_username || "—"}</div>
+                    <div className="text-muted-foreground text-xs">{u.asurite_id}</div>
                   </div>
-                  <div className="text-muted small text-nowrap flex-shrink-0">
-                    <i className="fas fa-sign-in-alt me-1" style={{ color: "#8c1d40" }} />
+                  <div className="text-sm text-muted-foreground whitespace-nowrap shrink-0">
+                    <i className="fas fa-sign-in-alt mr-1" style={{ color: "#8c1d40" }} />
                     {u.joined_at
                       ? new Date(u.joined_at).toLocaleDateString("en-US", {
                           timeZone: "America/Phoenix", month: "short", day: "numeric", year: "numeric",
@@ -276,17 +278,17 @@ export default function ServerJoins({ isDark }) {
                 </div>
               ))
             )}
-          </div>
+          </Card>
 
           {data?.pages > 1 && (
-            <div className="d-flex align-items-center gap-3 mt-3">
-              <button className="btn btn-sm btn-outline-secondary" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
-                <i className="fas fa-chevron-left me-1" />Prev
-              </button>
-              <span className="text-muted small">Page {page} of {data.pages}</span>
-              <button className="btn btn-sm btn-outline-secondary" disabled={page === data.pages} onClick={() => setPage((p) => p + 1)}>
-                Next<i className="fas fa-chevron-right ms-1" />
-              </button>
+            <div className="flex items-center gap-3 mt-3">
+              <Button size="sm" variant="outline" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
+                <i className="fas fa-chevron-left mr-1" />Prev
+              </Button>
+              <span className="text-sm text-muted-foreground">Page {page} of {data.pages}</span>
+              <Button size="sm" variant="outline" disabled={page === data.pages} onClick={() => setPage((p) => p + 1)}>
+                Next<i className="fas fa-chevron-right ml-1" />
+              </Button>
             </div>
           )}
         </>

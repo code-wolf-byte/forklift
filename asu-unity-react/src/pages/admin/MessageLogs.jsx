@@ -1,4 +1,17 @@
 import { useState, useEffect, useCallback } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "@/components/ui/table";
 import RoleFilter from "./RoleFilter.jsx";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -10,11 +23,6 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 const daysAgoISO = (n) => {
   const d = new Date();
   d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
-};
-const monthStartISO = () => {
-  const d = new Date();
-  d.setDate(1);
   return d.toISOString().slice(0, 10);
 };
 
@@ -40,7 +48,7 @@ function fmtDate(isoStr) {
 function Heatmap({ cells, total, loading }) {
   if (loading) {
     return (
-      <div className="text-center py-5">
+      <div className="flex justify-center py-20">
         <div className="spinner-border spinner-border-sm" role="status" style={{ color: "#8c1d40" }}>
           <span className="visually-hidden">Loading…</span>
         </div>
@@ -56,7 +64,6 @@ function Heatmap({ cells, total, loading }) {
     );
   }
 
-  // Build a lookup: counts[dow][hour]
   const lookup = {};
   let maxCount = 0;
   for (const c of cells) {
@@ -67,20 +74,18 @@ function Heatmap({ cells, total, loading }) {
 
   const cellColor = (count) => {
     if (!count) return undefined;
-    const intensity = Math.pow(count / maxCount, 0.5); // sqrt scale looks better
+    const intensity = Math.pow(count / maxCount, 0.5);
     return `rgba(140,29,64,${(0.08 + intensity * 0.88).toFixed(2)})`;
   };
 
   return (
     <div className="heatmap-wrapper">
       <div className="heatmap-grid">
-        {/* Corner + hour labels */}
         <div className="heatmap-corner" />
         {HOURS.map((h) => (
           <div key={h} className="heatmap-hour-label">{fmtHour(h)}</div>
         ))}
 
-        {/* Day rows */}
         {DAYS.map((day, dow) => (
           <>
             <div key={`label-${dow}`} className="heatmap-day-label">{day}</div>
@@ -99,9 +104,8 @@ function Heatmap({ cells, total, loading }) {
         ))}
       </div>
 
-      {/* Legend */}
       <div className="heatmap-legend">
-        <span className="text-muted small">Less</span>
+        <span className="text-muted-foreground text-xs">Less</span>
         <div className="heatmap-legend-scale">
           {[0, 0.2, 0.4, 0.65, 0.85, 1].map((v) => (
             <div
@@ -111,8 +115,8 @@ function Heatmap({ cells, total, loading }) {
             />
           ))}
         </div>
-        <span className="text-muted small">More</span>
-        <span className="text-muted small ms-3">
+        <span className="text-muted-foreground text-xs">More</span>
+        <span className="text-muted-foreground text-xs ml-3">
           {total.toLocaleString()} total messages
         </span>
       </div>
@@ -125,7 +129,7 @@ function Heatmap({ cells, total, loading }) {
 function ExportTable({ data, page, setPage, loading }) {
   if (loading && !data) {
     return (
-      <div className="text-center py-5">
+      <div className="flex justify-center py-20">
         <div className="spinner-border spinner-border-sm" role="status" style={{ color: "#8c1d40" }}>
           <span className="visually-hidden">Loading…</span>
         </div>
@@ -137,65 +141,65 @@ function ExportTable({ data, page, setPage, loading }) {
 
   return (
     <>
-      <div className="card p-0" style={{ overflow: "hidden" }}>
+      <Card className="overflow-hidden p-0">
         {!rows.length ? (
-          <p className="text-muted small p-3 mb-0">No messages match the current filters.</p>
+          <p className="text-sm text-muted-foreground p-3 mb-0">No messages match the current filters.</p>
         ) : (
-          <div className="table-responsive">
-            <table className="table table-hover mb-0" style={{ fontSize: 13 }}>
-              <thead>
-                <tr>
-                  <th className="ps-3">Time (AZ)</th>
-                  <th>Channel</th>
-                  <th>User</th>
-                  <th>ASURITE</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.message_id}>
-                    <td className="ps-3 align-middle text-muted small text-nowrap">
-                      {fmtDate(r.sent_at)}
-                    </td>
-                    <td className="align-middle">
-                      <span className="fw-semibold small">#{r.channel_name || r.channel_id}</span>
-                    </td>
-                    <td className="align-middle text-muted small text-truncate" style={{ maxWidth: 180 }}>
-                      {r.discord_username || (
-                        <span className="fst-italic opacity-50">{r.discord_user_id}</span>
-                      )}
-                    </td>
-                    <td className="align-middle text-muted small">
-                      {r.asurite_id || "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="pl-4">Time (AZ)</TableHead>
+                <TableHead>Channel</TableHead>
+                <TableHead>User</TableHead>
+                <TableHead>ASURITE</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => (
+                <TableRow key={r.message_id}>
+                  <TableCell className="pl-4 text-muted-foreground text-xs whitespace-nowrap">
+                    {fmtDate(r.sent_at)}
+                  </TableCell>
+                  <TableCell>
+                    <span className="font-semibold text-xs">#{r.channel_name || r.channel_id}</span>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-xs truncate max-w-[180px]">
+                    {r.discord_username || (
+                      <span className="italic opacity-50">{r.discord_user_id}</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-xs">
+                    {r.asurite_id || "—"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         )}
-      </div>
+      </Card>
 
       {data?.pages > 1 && (
-        <div className="d-flex align-items-center gap-3 mt-3">
-          <button
-            className="btn btn-sm btn-outline-secondary"
+        <div className="flex items-center gap-3 mt-3">
+          <Button
+            size="sm"
+            variant="outline"
             disabled={page === 1}
             onClick={() => setPage((p) => p - 1)}
           >
-            <i className="fas fa-chevron-left me-1" />Prev
-          </button>
-          <span className="text-muted small">
+            <i className="fas fa-chevron-left mr-1" />Prev
+          </Button>
+          <span className="text-sm text-muted-foreground">
             Page {page} of {data.pages}
-            <span className="ms-2 opacity-50">({data.total.toLocaleString()} total)</span>
+            <span className="ml-2 opacity-50">({data.total.toLocaleString()} total)</span>
           </span>
-          <button
-            className="btn btn-sm btn-outline-secondary"
+          <Button
+            size="sm"
+            variant="outline"
             disabled={page === data.pages}
             onClick={() => setPage((p) => p + 1)}
           >
-            Next<i className="fas fa-chevron-right ms-1" />
-          </button>
+            Next<i className="fas fa-chevron-right ml-1" />
+          </Button>
         </div>
       )}
     </>
@@ -232,75 +236,77 @@ function BackfillPanel({ onClose }) {
   const STATUS_COLORS = { done: "#10b981", running: "#3b82f6", failed: "#ef4444", pending: "#6c757d" };
 
   return (
-    <div className="card p-3 mb-4">
-      <div className="d-flex align-items-start justify-content-between mb-3">
-        <div>
-          <h6 className="mb-1">Historical Backfill</h6>
-          <p className="text-muted small mb-0">
-            Fetches up to 1 year of message metadata from all text channels.
-            No message content is stored.
-          </p>
+    <Card className="mb-6">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between mb-3">
+          <div>
+            <h6 className="text-sm font-semibold mb-1">Historical Backfill</h6>
+            <p className="text-xs text-muted-foreground mb-0">
+              Fetches up to 1 year of message metadata from all text channels.
+              No message content is stored.
+            </p>
+          </div>
+          <Button size="sm" variant="outline" onClick={onClose}>
+            <i className="fas fa-times" />
+          </Button>
         </div>
-        <button className="btn btn-sm btn-outline-secondary" onClick={onClose}>
-          <i className="fas fa-times" />
-        </button>
-      </div>
 
-      {status && (
-        <div className="d-flex align-items-center gap-3 mb-3 flex-wrap">
-          <span className="small">
-            <strong>{status.total_messages_logged?.toLocaleString()}</strong> messages logged
-          </span>
-          <span className="small text-muted">
-            {status.channels_done}/{status.channels_total} channels done
-          </span>
-          {status.backfill_running && (
-            <span className="badge" style={{ background: "#3b82f6" }}>
-              <i className="fas fa-sync fa-spin me-1" style={{ fontSize: 10 }} />Running
+        {status && (
+          <div className="flex items-center gap-3 mb-3 flex-wrap">
+            <span className="text-sm">
+              <strong>{status.total_messages_logged?.toLocaleString()}</strong> messages logged
             </span>
-          )}
-        </div>
-      )}
+            <span className="text-xs text-muted-foreground">
+              {status.channels_done}/{status.channels_total} channels done
+            </span>
+            {status.backfill_running && (
+              <Badge style={{ background: "#3b82f6", color: "#fff" }}>
+                <i className="fas fa-sync fa-spin mr-1" style={{ fontSize: 10 }} />Running
+              </Badge>
+            )}
+          </div>
+        )}
 
-      <button
-        className="btn btn-sm btn-maroon text-white"
-        onClick={handleStart}
-        disabled={triggering || status?.backfill_running}
-        style={{ alignSelf: "flex-start" }}
-      >
-        {status?.backfill_running ? "Backfill running…" : "Start Backfill"}
-      </button>
+        <Button
+          size="sm"
+          onClick={handleStart}
+          disabled={triggering || status?.backfill_running}
+          className="self-start"
+        >
+          {status?.backfill_running ? "Backfill running…" : "Start Backfill"}
+        </Button>
 
-      {status?.channels?.length > 0 && (
-        <div className="mt-3" style={{ maxHeight: 220, overflowY: "auto" }}>
-          <table className="table table-sm mb-0" style={{ fontSize: 12 }}>
-            <thead>
-              <tr>
-                <th>Channel</th>
-                <th>Status</th>
-                <th>Messages</th>
-              </tr>
-            </thead>
-            <tbody>
-              {status.channels.map((ch) => (
-                <tr key={ch.channel_id}>
-                  <td>#{ch.channel_name || ch.channel_id}</td>
-                  <td>
-                    <span style={{ color: STATUS_COLORS[ch.status] ?? "#6c757d", fontWeight: 600 }}>
-                      {ch.status}
-                    </span>
-                    {ch.error && (
-                      <span className="text-danger ms-1" title={ch.error}>⚠</span>
-                    )}
-                  </td>
-                  <td>{ch.messages_fetched?.toLocaleString() ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+        {status?.channels?.length > 0 && (
+          <div className="mt-3" style={{ maxHeight: 220, overflowY: "auto" }}>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Channel</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Messages</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {status.channels.map((ch) => (
+                  <TableRow key={ch.channel_id}>
+                    <TableCell className="text-xs">#{ch.channel_name || ch.channel_id}</TableCell>
+                    <TableCell className="text-xs">
+                      <span style={{ color: STATUS_COLORS[ch.status] ?? "#6c757d", fontWeight: 600 }}>
+                        {ch.status}
+                      </span>
+                      {ch.error && (
+                        <span className="text-destructive ml-1" title={ch.error}>⚠</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs">{ch.messages_fetched?.toLocaleString() ?? "—"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -317,19 +323,16 @@ export default function MessageLogs() {
   const [tab, setTab] = useState("heatmap");
   const [showBackfill, setShowBackfill] = useState(false);
 
-  // Shared filter state
   const [fromDate, setFromDate] = useState(daysAgoISO(30));
   const [toDate, setToDate] = useState(todayISO());
   const [hasRoles, setHasRoles] = useState([]);
   const [notRoles, setNotRoles] = useState([]);
   const [activePreset, setActivePreset] = useState(30);
 
-  // Applied (fetched) state
   const [applied, setApplied] = useState({
     from: daysAgoISO(30), to: todayISO(), hasRoles: [], notRoles: [],
   });
 
-  // Data
   const [roles, setRoles] = useState([]);
   const [heatmapData, setHeatmapData] = useState(null);
   const [heatmapLoading, setHeatmapLoading] = useState(true);
@@ -337,12 +340,10 @@ export default function MessageLogs() {
   const [exportLoading, setExportLoading] = useState(false);
   const [exportPage, setExportPage] = useState(1);
 
-  // Load selectors once
   useEffect(() => {
     fetch("/api/admin/roles").then((r) => r.json()).then(setRoles).catch(() => {});
   }, []);
 
-  // Build query string from applied state
   const buildQS = useCallback((extra = {}) => {
     const p = new URLSearchParams();
     if (applied.from) p.set("from_date", applied.from);
@@ -353,7 +354,6 @@ export default function MessageLogs() {
     return p.toString();
   }, [applied]);
 
-  // Fetch heatmap whenever applied filters change
   useEffect(() => {
     setHeatmapLoading(true);
     fetch(`/api/admin/message-logs/heatmap?${buildQS()}`)
@@ -362,7 +362,6 @@ export default function MessageLogs() {
       .catch(() => setHeatmapLoading(false));
   }, [buildQS]);
 
-  // Fetch export page
   useEffect(() => {
     if (tab !== "export") return;
     setExportLoading(true);
@@ -372,7 +371,6 @@ export default function MessageLogs() {
       .catch(() => setExportLoading(false));
   }, [tab, buildQS, exportPage]);
 
-  // Reset page when tab switches
   useEffect(() => { setExportPage(1); }, [tab, applied]);
 
   const handleApply = () => {
@@ -392,67 +390,72 @@ export default function MessageLogs() {
 
   return (
     <>
-      <div className="d-flex align-items-start justify-content-between mb-1 flex-wrap gap-2">
+      <div className="flex items-start justify-between mb-1 flex-wrap gap-2">
         <div>
-          <h2 className="mb-1">Message Logs</h2>
-          <p className="text-muted small mb-0">
+          <h2 className="text-2xl font-bold mb-1">Message Logs</h2>
+          <p className="text-sm text-muted-foreground mb-0">
             Activity heatmap and message export — metadata only, no content stored.
           </p>
         </div>
-        <button
-          className="btn btn-sm btn-outline-secondary"
+        <Button
+          size="sm"
+          variant="outline"
           onClick={() => setShowBackfill((v) => !v)}
         >
-          <i className="fas fa-history me-1" />Backfill
-        </button>
+          <i className="fas fa-history mr-1" />Backfill
+        </Button>
       </div>
 
-      <div className="mt-3 mb-4">
+      <div className="mt-4 mb-6">
         {showBackfill && <BackfillPanel onClose={() => setShowBackfill(false)} />}
 
         {/* ── Filter card ── */}
-        <div className="chart-card mb-3">
-          <div className="chart-card-header">
-            <span className="chart-card-title">Filters</span>
+        <Card className="mb-3 overflow-hidden">
+          <div
+            className="flex items-end justify-between gap-3 px-5 py-4"
+            style={{ borderBottom: "1px solid hsl(var(--border))" }}
+          >
+            <span className="text-sm font-bold tracking-tight">Filters</span>
           </div>
-          <div className="p-3">
+          <CardContent className="p-4">
             {/* Date row */}
-            <div className="d-flex align-items-end gap-2 flex-wrap mb-3">
+            <div className="flex items-end gap-2 flex-wrap mb-4">
               <div>
-                <label className="form-label small mb-1 fw-semibold">From</label>
-                <input
-                  type="date" className="form-control form-control-sm"
+                <Label className="text-xs font-semibold mb-1 block">From</Label>
+                <Input
+                  type="date"
+                  className="h-8 text-sm w-36"
                   value={fromDate}
                   onChange={(e) => { setFromDate(e.target.value); setActivePreset(null); }}
                 />
               </div>
               <div>
-                <label className="form-label small mb-1 fw-semibold">To</label>
-                <input
-                  type="date" className="form-control form-control-sm"
+                <Label className="text-xs font-semibold mb-1 block">To</Label>
+                <Input
+                  type="date"
+                  className="h-8 text-sm w-36"
                   value={toDate}
                   onChange={(e) => { setToDate(e.target.value); setActivePreset(null); }}
                 />
               </div>
-              <div className="d-flex gap-1">
+              <div className="flex gap-1">
                 {PRESETS.map(({ label, days }) => (
-                  <button
+                  <Button
                     key={days}
-                    className={`btn btn-sm ${activePreset === days ? "btn-maroon text-white" : "btn-outline-secondary"}`}
+                    size="sm"
+                    variant={activePreset === days ? "default" : "outline"}
                     onClick={() => handlePreset(days)}
                   >
                     {label}
-                  </button>
+                  </Button>
                 ))}
               </div>
-              <button className="btn btn-sm btn-maroon text-white" onClick={handleApply}>
-                Apply
-              </button>
+              <Button size="sm" onClick={handleApply}>Apply</Button>
             </div>
 
             {/* Role filter */}
             <div>
-              <div className="form-label small fw-semibold mb-2">Roles</div>
+              <Label className="text-xs font-semibold mb-2 block">Roles</Label>
               <RoleFilter
                 hasRoles={hasRoles}
                 notRoles={notRoles}
@@ -461,62 +464,64 @@ export default function MessageLogs() {
                 onNotChange={setNotRoles}
               />
             </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
         {/* ── Tabs ── */}
-        <div className="d-flex gap-2 mb-3">
+        <div className="flex gap-2 mb-3">
           {[
             { id: "heatmap", icon: "fa-th", label: "Activity Heatmap" },
             { id: "export",  icon: "fa-table", label: "Export" },
           ].map(({ id, icon, label }) => (
-            <button
+            <Button
               key={id}
-              className={`btn btn-sm ${tab === id ? "btn-maroon text-white" : "btn-outline-secondary"}`}
+              size="sm"
+              variant={tab === id ? "default" : "outline"}
               onClick={() => setTab(id)}
             >
-              <i className={`fas ${icon} me-1`} />{label}
-            </button>
+              <i className={`fas ${icon} mr-1`} />{label}
+            </Button>
           ))}
         </div>
 
         {/* ── Heatmap tab ── */}
         {tab === "heatmap" && (
-          <div className="chart-card">
-            <div className="chart-card-header">
+          <Card className="overflow-hidden">
+            <div
+              className="flex items-end justify-between gap-3 px-5 py-4"
+              style={{ borderBottom: "1px solid hsl(var(--border))" }}
+            >
               <div>
-                <div className="chart-card-title">Message Activity</div>
-                <div className="chart-card-subtitle">
+                <div className="text-sm font-bold tracking-tight">Message Activity</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
                   By hour of day &amp; day of week · Arizona Time
                 </div>
               </div>
             </div>
-            <div className="p-3">
+            <CardContent className="p-4">
               <Heatmap
                 cells={heatmapData?.cells}
                 total={heatmapData?.total ?? 0}
                 loading={heatmapLoading}
               />
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         )}
 
         {/* ── Export tab ── */}
         {tab === "export" && (
           <div>
-            <div className="d-flex align-items-center justify-content-between mb-3">
-              <span className="text-muted small">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm text-muted-foreground">
                 {exportData
                   ? `${exportData.total.toLocaleString()} messages match`
                   : "Loading…"}
               </span>
-              <a
-                href={csvHref}
-                download={csvFilename}
-                className="btn btn-sm btn-outline-secondary"
-              >
-                <i className="fas fa-download me-1" />Download CSV
-              </a>
+              <Button size="sm" variant="outline" asChild>
+                <a href={csvHref} download={csvFilename}>
+                  <i className="fas fa-download mr-1" />Download CSV
+                </a>
+              </Button>
             </div>
             <ExportTable
               data={exportData}

@@ -1,4 +1,9 @@
 import { useState, useEffect } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const monthStartISO = () => {
@@ -19,16 +24,16 @@ function RoleBar({ name, count, total }) {
   const pct = total > 0 ? Math.round((count / total) * 100) : 0;
   return (
     <div className="mb-2">
-      <div className="d-flex justify-content-between small mb-1">
-        <span className="text-truncate me-2" title={name}>{name}</span>
-        <span className="text-muted flex-shrink-0">
+      <div className="flex justify-between text-sm mb-1">
+        <span className="truncate mr-2" title={name}>{name}</span>
+        <span className="text-muted-foreground shrink-0">
           {count.toLocaleString()} <span className="opacity-50">({pct}%)</span>
         </span>
       </div>
-      <div className="progress member-stat-bar">
+      <div className="h-[5px] rounded-[3px] bg-black/[0.07] overflow-hidden">
         <div
-          className="progress-bar"
-          style={{ width: `${pct}%`, background: "#8c1d40", transition: "width 0.4s ease" }}
+          className="h-full rounded-[3px] transition-[width] duration-300 ease-out"
+          style={{ width: `${pct}%`, background: "#8c1d40" }}
         />
       </div>
     </div>
@@ -41,78 +46,85 @@ function CategoryCard({ cat, total }) {
   const activeRoles = cat.roles.filter((r) => r.count > 0);
 
   return (
-    <div className="col-sm-6 col-xl-4">
-      <div className="card stat-card h-100">
-        <div className="stat-card-accent" style={{ background: meta.color }} />
-        <div className="p-3">
+    <div className="sm:col-span-1">
+      <Card className="h-full relative overflow-hidden">
+        <div
+          className="absolute top-0 left-0 w-1 h-full rounded-l-lg"
+          style={{ background: meta.color }}
+        />
+        <CardContent className="p-3 pl-5">
           {/* Header */}
-          <div className="d-flex align-items-center gap-2 mb-3">
+          <div className="flex items-center gap-2 mb-3">
             <div
-              className="stat-card-icon"
+              className="w-11 h-11 rounded-[10px] flex items-center justify-center shrink-0"
               style={{ background: `${meta.color}18`, color: meta.color }}
             >
               <i className={`fas ${meta.icon} fa-sm`} />
             </div>
-            <div className="flex-grow-1 overflow-hidden">
-              <h6 className="mb-0 text-truncate">{cat.name} Roles</h6>
-              <div className="small text-muted">
+            <div className="flex-1 overflow-hidden">
+              <h6 className="text-sm font-semibold mb-0 truncate">{cat.name} Roles</h6>
+              <div className="text-xs text-muted-foreground">
                 {cat.users_with.toLocaleString()} of {total.toLocaleString()} have this
               </div>
             </div>
-            <span
-              className="badge rounded-pill flex-shrink-0"
-              style={{ background: meta.color, fontSize: 12 }}
+            <Badge
+              className="shrink-0 rounded-full text-xs"
+              style={{ background: meta.color, color: "#fff" }}
             >
               {coveragePct}%
-            </span>
+            </Badge>
           </div>
 
           {/* Coverage bar */}
-          <div className="progress mb-1" style={{ height: 8, borderRadius: 6 }}>
+          <div className="h-2 rounded-[6px] bg-black/[0.07] overflow-hidden mb-1">
             <div
-              className="progress-bar"
-              style={{ width: `${coveragePct}%`, background: meta.color, borderRadius: 6, transition: "width 0.5s ease" }}
+              className="h-full rounded-[6px] transition-[width] duration-500 ease-out"
+              style={{ width: `${coveragePct}%`, background: meta.color }}
             />
           </div>
-          <div className="d-flex justify-content-between small text-muted mb-3">
+          <div className="flex justify-between text-xs text-muted-foreground mb-3">
             <span>{cat.users_with.toLocaleString()} have</span>
             <span>{cat.users_missing.toLocaleString()} missing</span>
           </div>
 
           {/* Role breakdown */}
           {activeRoles.length > 0 ? (
-            <div className="member-stat-roles">
+            <div className="pt-3 mt-1 border-t border-black/[0.06]">
               {activeRoles.map((r) => (
                 <RoleBar key={r.role} name={r.role} count={r.count} total={total} />
               ))}
             </div>
           ) : (
-            <p className="text-muted small mb-0 fst-italic">No role data for this period.</p>
+            <p className="text-xs text-muted-foreground italic mb-0">No role data for this period.</p>
           )}
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
 
 function SummaryCard({ value, label, icon, color }) {
+  const c = color || "#8c1d40";
   return (
-    <div className="col-sm-4">
-      <div className="card stat-card">
-        <div className="stat-card-accent" style={{ background: color || "#8c1d40" }} />
-        <div className="p-3 d-flex align-items-center gap-3">
+    <div className="sm:col-span-1">
+      <Card className="relative overflow-hidden">
+        <div
+          className="absolute top-0 left-0 w-1 h-full rounded-l-lg"
+          style={{ background: c }}
+        />
+        <CardContent className="p-3 pl-5 flex items-center gap-3">
           <div
-            className="stat-card-icon"
-            style={{ background: `${color || "#8c1d40"}18`, color: color || "#8c1d40" }}
+            className="w-11 h-11 rounded-[10px] flex items-center justify-center shrink-0"
+            style={{ background: `${c}18`, color: c }}
           >
             <i className={`fas ${icon} fa-lg`} />
           </div>
           <div>
-            <div className="stat-value">{value ?? "—"}</div>
-            <div className="text-muted small mt-1">{label}</div>
+            <div className="text-[28px] font-bold leading-none tracking-tight">{value ?? "—"}</div>
+            <div className="text-sm text-muted-foreground mt-1">{label}</div>
           </div>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -154,7 +166,7 @@ export default function MemberStats() {
 
   if (loading && !stats) {
     return (
-      <div className="text-center py-5">
+      <div className="flex justify-center py-20">
         <div className="spinner-border" role="status" style={{ color: "#8c1d40" }}>
           <span className="visually-hidden">Loading…</span>
         </div>
@@ -164,12 +176,10 @@ export default function MemberStats() {
 
   const total = stats?.total_verified ?? 0;
   const inServer = stats?.currently_in_server ?? 0;
-  const left = stats?.left_server ?? 0;
   const periodLabel = applied.from || applied.to
     ? `${applied.from || "start"} → ${applied.to || "today"}`
     : "All time";
 
-  // Members with all 4 required categories
   const requiredCats = ["Academic Level", "College", "Campus", "Residency"];
   const withAllRequired = stats?.categories
     ? requiredCats.reduce((min, name) => {
@@ -180,60 +190,58 @@ export default function MemberStats() {
 
   return (
     <>
-      <h2 className="mb-1">Member Stats</h2>
-      <p className="text-muted small mb-4">
+      <h2 className="text-2xl font-bold mb-1">Member Stats</h2>
+      <p className="text-sm text-muted-foreground mb-6">
         Role coverage for verified members — mirrors the{" "}
         <code>get_studet_data.py</code> report.
       </p>
 
       {/* Filters */}
-      <div className="card p-3 mb-4">
-        <div className="d-flex align-items-end gap-2 flex-wrap">
-          <div>
-            <label className="form-label small mb-1 fw-semibold">From</label>
-            <input
-              type="date"
-              className="form-control form-control-sm"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-            />
+      <Card className="mb-6">
+        <CardContent className="p-3">
+          <div className="flex items-end gap-2 flex-wrap">
+            <div>
+              <Label className="text-xs font-semibold mb-1 block">From</Label>
+              <Input
+                type="date"
+                className="h-8 text-sm w-36"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-semibold mb-1 block">To</Label>
+              <Input
+                type="date"
+                className="h-8 text-sm w-36"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+              />
+            </div>
+            <Button size="sm" onClick={handleApply} disabled={loading}>
+              Apply
+            </Button>
+            <div className="w-px h-6 bg-border self-center mx-1" />
+            <Button size="sm" variant="outline" onClick={() => handlePreset("today")}>
+              Today
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => handlePreset("month")}>
+              This Month
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => handlePreset("alltime")}>
+              All Time
+            </Button>
           </div>
-          <div>
-            <label className="form-label small mb-1 fw-semibold">To</label>
-            <input
-              type="date"
-              className="form-control form-control-sm"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-            />
-          </div>
-          <button
-            className="btn btn-sm btn-maroon text-white"
-            onClick={handleApply}
-            disabled={loading}
-          >
-            Apply
-          </button>
-          <div className="vr mx-1 align-self-center" style={{ height: 24 }} />
-          <button className="btn btn-sm btn-outline-secondary" onClick={() => handlePreset("today")}>
-            Today
-          </button>
-          <button className="btn btn-sm btn-outline-secondary" onClick={() => handlePreset("month")}>
-            This Month
-          </button>
-          <button className="btn btn-sm btn-outline-secondary" onClick={() => handlePreset("alltime")}>
-            All Time
-          </button>
-        </div>
-        {(applied.from || applied.to) && (
-          <div className="text-muted small mt-2">
-            Showing verified members: <strong>{periodLabel}</strong>
-          </div>
-        )}
-      </div>
+          {(applied.from || applied.to) && (
+            <p className="text-xs text-muted-foreground mt-2 mb-0">
+              Showing verified members: <strong>{periodLabel}</strong>
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Summary cards */}
-      <div className="row g-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
         <SummaryCard
           value={total.toLocaleString()}
           label="Verified Members"
@@ -256,13 +264,13 @@ export default function MemberStats() {
 
       {/* Role category cards */}
       {loading ? (
-        <div className="text-center py-4">
+        <div className="flex justify-center py-4">
           <div className="spinner-border spinner-border-sm" role="status" style={{ color: "#8c1d40" }}>
             <span className="visually-hidden">Loading…</span>
           </div>
         </div>
       ) : (
-        <div className="row g-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
           {stats?.categories?.map((cat) => (
             <CategoryCard key={cat.name} cat={cat} total={total} />
           ))}
