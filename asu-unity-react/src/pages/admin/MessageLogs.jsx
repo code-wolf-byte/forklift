@@ -19,6 +19,8 @@ import RoleFilter from "./RoleFilter.jsx";
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
+const DOW_ABBR = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const daysAgoISO = (n) => {
   const d = new Date();
@@ -102,6 +104,100 @@ function Heatmap({ cells, total, loading }) {
             })}
           </>
         ))}
+      </div>
+
+      <div className="heatmap-legend">
+        <span className="text-muted-foreground text-xs">Less</span>
+        <div className="heatmap-legend-scale">
+          {[0, 0.2, 0.4, 0.65, 0.85, 1].map((v) => (
+            <div
+              key={v}
+              className="heatmap-legend-swatch"
+              style={{ background: v === 0 ? "rgba(140,29,64,0.06)" : `rgba(140,29,64,${(0.08 + v * 0.88).toFixed(2)})` }}
+            />
+          ))}
+        </div>
+        <span className="text-muted-foreground text-xs">More</span>
+        <span className="text-muted-foreground text-xs ml-3">
+          {total.toLocaleString()} total messages
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ── Date heatmap (date × hour) ────────────────────────────────────────────────
+
+function fmtDateLabel(isoDate) {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
+    month: "short", day: "numeric",
+  });
+}
+
+function DateHeatmap({ cells, dates, total, loading }) {
+  if (loading) {
+    return (
+      <div className="flex justify-center py-20">
+        <div className="spinner-border spinner-border-sm" role="status" style={{ color: "#8c1d40" }}>
+          <span className="visually-hidden">Loading…</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!cells?.length || total === 0) {
+    return <div className="heatmap-empty">No message data for the selected filters.</div>;
+  }
+
+  const lookup = {};
+  let maxCount = 0;
+  for (const c of cells) {
+    if (!lookup[c.date]) lookup[c.date] = {};
+    lookup[c.date][c.hour] = c.count;
+    if (c.count > maxCount) maxCount = c.count;
+  }
+
+  const cellColor = (count) => {
+    if (!count) return undefined;
+    const intensity = Math.pow(count / maxCount, 0.5);
+    return `rgba(140,29,64,${(0.08 + intensity * 0.88).toFixed(2)})`;
+  };
+
+  return (
+    <div className="heatmap-wrapper" style={{ maxHeight: 480, overflowY: "auto" }}>
+      <div className="heatmap-grid" style={{ gridTemplateColumns: "64px repeat(24, 1fr)" }}>
+        {/* Header row */}
+        <div className="heatmap-corner" />
+        {HOURS.map((h) => (
+          <div key={h} className="heatmap-hour-label">{fmtHour(h)}</div>
+        ))}
+
+        {/* One row per date */}
+        {dates.map((date) => {
+          const [y, m, d] = date.split("-").map(Number);
+          const dow = new Date(y, m - 1, d).getDay(); // 0=Sun
+          const dowLabel = DOW_ABBR[(dow + 6) % 7]; // convert to Mon=0
+          return (
+            <>
+              <div key={`label-${date}`} className="heatmap-day-label" style={{ fontSize: 10 }}>
+                <span style={{ fontWeight: 700, marginRight: 3 }}>{fmtDateLabel(date)}</span>
+                <span style={{ opacity: 0.5, fontWeight: 400 }}>{dowLabel}</span>
+              </div>
+              {HOURS.map((h) => {
+                const count = lookup[date]?.[h] ?? 0;
+                return (
+                  <div
+                    key={`${date}-${h}`}
+                    className="heatmap-cell"
+                    style={{ background: cellColor(count) }}
+                    title={`${date} ${fmtHour(h)} — ${count.toLocaleString()} message${count !== 1 ? "s" : ""}`}
+                  />
+                );
+              })}
+            </>
+          );
+        })}
       </div>
 
       <div className="heatmap-legend">
@@ -333,6 +429,8 @@ export default function MessageLogs() {
     from: daysAgoISO(30), to: todayISO(), hasRoles: [], notRoles: [],
   });
 
+  const [heatmapGroupby, setHeatmapGroupby] = useState("dow");
+
   const [roles, setRoles] = useState([]);
   const [heatmapData, setHeatmapData] = useState(null);
   const [heatmapLoading, setHeatmapLoading] = useState(true);
@@ -356,11 +454,11 @@ export default function MessageLogs() {
 
   useEffect(() => {
     setHeatmapLoading(true);
-    fetch(`/api/admin/message-logs/heatmap?${buildQS()}`)
+    fetch(`/api/admin/message-logs/heatmap?${buildQS()}&groupby=${heatmapGroupby}`)
       .then((r) => r.json())
       .then((d) => { setHeatmapData(d); setHeatmapLoading(false); })
       .catch(() => setHeatmapLoading(false));
-  }, [buildQS]);
+  }, [buildQS, heatmapGroupby]);
 
   useEffect(() => {
     if (tab !== "export") return;
@@ -488,22 +586,49 @@ export default function MessageLogs() {
         {tab === "heatmap" && (
           <Card className="overflow-hidden">
             <div
-              className="flex items-end justify-between gap-3 px-5 py-4"
+              className="flex items-center justify-between gap-3 px-5 py-4"
               style={{ borderBottom: "1px solid hsl(var(--border))" }}
             >
               <div>
                 <div className="text-sm font-bold tracking-tight">Message Activity</div>
                 <div className="text-xs text-muted-foreground mt-0.5">
-                  By hour of day &amp; day of week · Arizona Time
+                  {heatmapGroupby === "dow"
+                    ? "By hour of day & day of week · Arizona Time"
+                    : "By date & hour of day · Arizona Time"}
                 </div>
+              </div>
+              <div className="flex gap-1">
+                <Button
+                  size="sm"
+                  variant={heatmapGroupby === "dow" ? "default" : "outline"}
+                  onClick={() => setHeatmapGroupby("dow")}
+                >
+                  By Day
+                </Button>
+                <Button
+                  size="sm"
+                  variant={heatmapGroupby === "date" ? "default" : "outline"}
+                  onClick={() => setHeatmapGroupby("date")}
+                >
+                  By Date
+                </Button>
               </div>
             </div>
             <CardContent className="p-4">
-              <Heatmap
-                cells={heatmapData?.cells}
-                total={heatmapData?.total ?? 0}
-                loading={heatmapLoading}
-              />
+              {heatmapGroupby === "dow" ? (
+                <Heatmap
+                  cells={heatmapData?.cells}
+                  total={heatmapData?.total ?? 0}
+                  loading={heatmapLoading}
+                />
+              ) : (
+                <DateHeatmap
+                  cells={heatmapData?.cells}
+                  dates={heatmapData?.dates ?? []}
+                  total={heatmapData?.total ?? 0}
+                  loading={heatmapLoading}
+                />
+              )}
             </CardContent>
           </Card>
         )}

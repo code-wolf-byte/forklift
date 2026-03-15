@@ -44,6 +44,18 @@ def _moderation_command_kwargs(name: str, description: str) -> dict[str, Any]:
     return kwargs
 
 
+def _admin_command_kwargs(name: str, description: str) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "name": name,
+        "description": description,
+        "dm_permission": False,
+        "default_member_permissions": discord.Permissions(administrator=True),
+    }
+    if TEST_GUILD_IDS:
+        kwargs["guild_ids"] = TEST_GUILD_IDS
+    return kwargs
+
+
 TARGET_TERM_CODE = "2267"
 
 
@@ -954,3 +966,46 @@ class VerificationCog(commands.Cog):
         await ctx.followup.send(
             "Verification prompt posted with the Verify Here button.", ephemeral=True
         )
+
+    @slash_command(**_admin_command_kwargs("email", "Look up the ASU email for a verified member."))
+    async def get_member_email(
+        self,
+        ctx: discord.ApplicationContext,
+        member: Option(discord.Member, "Member to look up"),
+    ) -> None:
+        """Return the verified ASU email for a Discord member. Only visible to the invoker."""
+        if ctx.guild_id != self.guild_id or ctx.guild is None:
+            await ctx.respond(
+                "This command is only available in the Devil2Devil server.",
+                ephemeral=True,
+            )
+            return
+
+        with session_scope() as db_session:
+            user = (
+                db_session.query(User)
+                .filter(User.discord_user_id == str(member.id))
+                .one_or_none()
+            )
+
+        if user is None:
+            await ctx.respond(
+                f"{member.mention} has no verification record in the system.",
+                ephemeral=True,
+            )
+            return
+
+        if not user.email:
+            await ctx.respond(
+                f"{member.mention} is in the system but has no email on record.",
+                ephemeral=True,
+            )
+            return
+
+        lines = [f"**{member.mention}**"]
+        lines.append(f"Email: `{user.email}`")
+        if user.asurite_id:
+            lines.append(f"ASURITE: `{user.asurite_id}`")
+        lines.append(f"Verified: {'✅' if user.verified else '❌'}")
+
+        await ctx.respond("\n".join(lines), ephemeral=True)

@@ -711,22 +711,45 @@ def admin_message_channels():
 @admin_bp.route("/api/admin/message-logs/heatmap")
 @require_admin
 def admin_message_heatmap():
-    """Return a 7×24 activity heatmap (day-of-week × hour) in AZ time."""
+    """Return activity heatmap in AZ time.
+
+    Query param ``groupby``:
+      - ``dow``  (default) — 7×24 grid aggregated by day-of-week
+      - ``date`` — N×24 grid with one row per calendar date
+    """
     from_dt, to_dt, channel_ids, roles, exclude_roles = _parse_message_filters()
+    groupby = request.args.get("groupby", "dow")
 
     with session_scope() as db_session:
         q = _message_query(db_session, from_dt, to_dt, channel_ids, roles, exclude_roles)
         timestamps = [row.sent_at for row in q.with_entities(MessageLog.sent_at).all()]
 
-    counts: dict[tuple[int, int], int] = {}
+    total = len(timestamps)
+
+    if groupby == "date":
+        date_counts: dict[tuple, int] = {}
+        for ts in timestamps:
+            dt_az = ts.replace(tzinfo=timezone.utc).astimezone(AZ_TZ)
+            key = (dt_az.strftime("%Y-%m-%d"), dt_az.hour)
+            date_counts[key] = date_counts.get(key, 0) + 1
+
+        dates = sorted({k[0] for k in date_counts})
+        cells = [
+            {"date": date, "hour": hour, "count": date_counts.get((date, hour), 0)}
+            for date in dates
+            for hour in range(24)
+        ]
+        return jsonify({"cells": cells, "dates": dates, "total": total})
+
+    # Default: day-of-week × hour
+    dow_counts: dict[tuple[int, int], int] = {}
     for ts in timestamps:
         dt_az = ts.replace(tzinfo=timezone.utc).astimezone(AZ_TZ)
         key = (dt_az.weekday(), dt_az.hour)  # (0=Mon … 6=Sun, 0–23)
-        counts[key] = counts.get(key, 0) + 1
+        dow_counts[key] = dow_counts.get(key, 0) + 1
 
-    total = sum(counts.values())
     cells = [
-        {"dow": dow, "hour": hour, "count": counts.get((dow, hour), 0)}
+        {"dow": dow, "hour": hour, "count": dow_counts.get((dow, hour), 0)}
         for dow in range(7)
         for hour in range(24)
     ]
