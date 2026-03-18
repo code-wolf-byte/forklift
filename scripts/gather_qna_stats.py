@@ -36,15 +36,17 @@ ASSISTANCE_CUSTOM_ID = "qna:assist"
 # Additional forum channel to report tag usage stats for
 EXTRA_FORUM_ID = 1435339065720311849
 
-# Campus channels to track post counts for the same date range
+# Campus text channels to track message counts for the same date range
 CAMPUS_CHANNELS: dict[str, int] = {
     "Tempe":         1435709161064103966,
     "Downtown":      1435710270755442748,
     "Poly":          1435710785287356546,
     "West Valley":   1435711047578419290,
     "LA":            1435711441452798003,
-    "Off Campus":    1435703689015853097,
 }
+
+# Category whose forum channels are all counted for thread posts
+CAMPUS_FORUMS_CATEGORY_ID = 1435690325917175928
 
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -281,6 +283,7 @@ async def run(*, forum_channel_id: int) -> None:
 
         # Count posts in each campus channel over the same date range
         logger.info("Counting posts in campus channels...")
+
         for campus_name, channel_id in CAMPUS_CHANNELS.items():
             try:
                 channel = await guild.fetch_channel(channel_id)
@@ -295,18 +298,43 @@ async def run(*, forum_channel_id: int) -> None:
 
             display_name = channel.name
 
-            # Use raw REST API to fetch archived threads — bypasses py-cord type classification
-            archived_ids = set(await _fetch_all_threads_in_range(client.http, channel_id))
+            if isinstance(channel, discord.TextChannel):
+                # Campus channels are plain text channels — count messages in the date range.
+                count = 0
+                async for _ in channel.history(limit=None, after=SINCE, before=UNTIL):
+                    count += 1
+            else:
+                # Forum / other thread-based channel — count threads.
+                archived_ids = set(await _fetch_all_threads_in_range(client.http, channel_id))
+                active_ids = {
+                    t.id for t in getattr(channel, "threads", [])
+                    if SINCE <= _snowflake_time(t.id) < UNTIL
+                }
+                count = len(archived_ids | active_ids)
 
-            # Also check active threads via the cache (derived creation time from snowflake)
-            active_ids = {
-                t.id for t in getattr(channel, "threads", [])
-                if SINCE <= _snowflake_time(t.id) < UNTIL
-            }
-
-            count = len(archived_ids | active_ids)
             campus_counts[display_name] = count
             logger.info("  %s: %d posts", display_name, count)
+
+        # Count threads in all forum channels belonging to the campus forums category
+        logger.info("Counting threads in campus forum channels (category %d)...", CAMPUS_FORUMS_CATEGORY_ID)
+        campus_forum_channels = [
+            ch for ch in guild.channels
+            if isinstance(ch, discord.ForumChannel)
+            and getattr(ch, "category_id", None) == CAMPUS_FORUMS_CATEGORY_ID
+        ]
+        logger.info("Found %d forum channels in category.", len(campus_forum_channels))
+        for forum in campus_forum_channels:
+            archived_ids = set(await _fetch_all_threads_in_range(client.http, forum.id))
+            seen: dict[int, discord.Thread] = {}
+            async for thread in forum.archived_threads(limit=None):
+                if thread.created_at and SINCE <= thread.created_at < UNTIL:
+                    seen[thread.id] = thread
+            for thread in forum.threads:
+                if thread.created_at and SINCE <= thread.created_at < UNTIL:
+                    seen[thread.id] = thread
+            count = len(archived_ids | set(seen.keys()))
+            campus_counts[forum.name] = count
+            logger.info("  %s: %d threads", forum.name, count)
 
         await client.close()
 
