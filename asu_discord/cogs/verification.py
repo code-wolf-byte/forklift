@@ -218,7 +218,7 @@ def role_names_from_student_profile(student_profile: dict[str, Any]) -> set[str]
                 roles.add("Upperclassmen")
                 break
 
-    # 3. International / First-generation based on any enrolled/admitted opportunity
+    # 3. International / First-generation / Enrollment Deposit based on any enrolled/admitted opportunity
     for opp in enrolled_opps:
         if opp.get("internationalStudent") is not None:
             if bool(opp.get("internationalStudent")) or _normalize_str(
@@ -230,6 +230,11 @@ def role_names_from_student_profile(student_profile: dict[str, Any]) -> set[str]
                 opp.get("firstGeneration")
             ) in {"true", "yes", "y", "1"}:
                 roles.add("First Generation Student")
+        deposit_paid = bool(opp.get("enrollmentDepositPaid")) or _normalize_str(
+            opp.get("enrollmentDepositStatus")
+        ) == "paid"
+        if deposit_paid:
+            roles.add("Commited")
 
     # 4. College and campus roles, again using any enrolled/admitted opportunity
     for opp in enrolled_opps:
@@ -260,6 +265,9 @@ def role_names_from_student_profile(student_profile: dict[str, Any]) -> set[str]
 
     if student_profile.get("international") or student_profile.get("is_international"):
         roles.add("International Student")
+
+    if student_profile.get("depositPaid") or student_profile.get("enrollmentDepositPaid"):
+        roles.add("Commited")
 
     if student_profile.get("inState"):
         roles.add("Arizona Resident")

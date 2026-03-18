@@ -12,6 +12,7 @@ from typing import Dict
 ROLE_ID_MAP: Dict[str, int] = {
     # Special Roles
     "First Generation Student": 1210322592544596030,
+    "Commited": 1356257786563920023,
     # Academic Level Roles
     "First Year": 1187164746454138900,
     "Transfer Student": 1187164763189416078,
