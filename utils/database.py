@@ -210,6 +210,12 @@ _CRON_JOB_DEFAULTS = [
         "schedule_hour": 11,
         "schedule_minute": 0,
     },
+    {
+        "job_name": "refresh_salesforce_roles",
+        "display_name": "Refresh Salesforce Roles",
+        "schedule_hour": 3,
+        "schedule_minute": 0,
+    },
 ]
 
 # Legacy state-file paths — read once during migration, then ignored.

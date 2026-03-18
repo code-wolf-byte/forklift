@@ -15,6 +15,7 @@ _UPLOAD_JOB: Sequence[str] = (
     "upload_incomplete_verifications_to_sftp",
     "upload_departed_to_sftp",
     "send_survey_messages",
+    "refresh_salesforce_roles",
 )
 logger = logging.getLogger(__name__)
 

@@ -287,9 +287,93 @@ def send_survey_messages() -> None:
     logger.info("send_survey_messages: sent survey pings to %d users in channel %s", len(discord_ids), channel_id)
 
 
+def refresh_salesforce_roles() -> None:
+    """Refresh Discord roles for all verified users based on current Salesforce data."""
+    job_name = "refresh_salesforce_roles"
+
+    if CONFIG.DEV_MODE:
+        logger.info("FORKLIFT_DEV_MODE enabled; skipping Salesforce role refresh")
+        return
+
+    from asu_discord.api import DiscordAPIError, refresh_roles_from_profile
+    from asu_discord.salesforce import get_student_profile
+
+    now = datetime.now(timezone.utc)
+
+    with session_scope() as db_session:
+        users = (
+            db_session.query(User)
+            .filter(User.verified.is_(True))
+            .filter(User.asurite_id.isnot(None))
+            .filter(User.discord_user_id.isnot(None))
+            .all()
+        )
+        user_data = [(u.asurite_id, u.discord_user_id) for u in users]
+
+    if not user_data:
+        logger.info("refresh_salesforce_roles: no verified users to process")
+        _set_last_run(job_name, now)
+        return
+
+    logger.info("refresh_salesforce_roles: processing %d users", len(user_data))
+
+    skipped = 0
+    failed = 0
+    refreshed = 0
+
+    for asurite_id, discord_user_id in user_data:
+        asurite = asurite_id.strip()
+        if asurite.lower().endswith("@asu.edu"):
+            asurite = asurite[: -len("@asu.edu")]
+
+        try:
+            profile = get_student_profile(asurite)
+        except Exception as exc:
+            logger.warning(
+                "refresh_salesforce_roles: Salesforce lookup failed for %s: %s",
+                asurite,
+                exc,
+            )
+            skipped += 1
+            continue
+
+        if profile.get("error"):
+            logger.info(
+                "refresh_salesforce_roles: skipping %s: %s", asurite, profile["error"]
+            )
+            skipped += 1
+            continue
+
+        try:
+            refresh_roles_from_profile(discord_user_id, profile)
+            refreshed += 1
+        except DiscordAPIError as exc:
+            logger.error(
+                "refresh_salesforce_roles: failed for %s (Discord ID %s): %s",
+                asurite,
+                discord_user_id,
+                exc,
+            )
+            failed += 1
+
+    _set_last_run(job_name, now)
+    logger.info(
+        "refresh_salesforce_roles: done. refreshed=%d skipped=%d failed=%d",
+        refreshed,
+        skipped,
+        failed,
+    )
+
+    if failed:
+        raise RuntimeError(
+            f"refresh_salesforce_roles: {failed}/{len(user_data)} users failed role refresh"
+        )
+
+
 AVAILABLE_JOBS: dict[str, CronJob] = {
     "upload_emails_to_sftp": upload_emails_to_sftp,
     "upload_incomplete_verifications_to_sftp": upload_incomplete_verifications_to_sftp,
     "upload_departed_to_sftp": upload_departed_to_sftp,
     "send_survey_messages": send_survey_messages,
+    "refresh_salesforce_roles": refresh_salesforce_roles,
 }

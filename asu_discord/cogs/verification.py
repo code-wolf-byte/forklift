@@ -779,6 +779,78 @@ class VerificationCog(commands.Cog):
             user_id,
         )
 
+    async def refresh_roles_from_profile(
+        self, user_id: int, student_profile: dict[str, Any]
+    ) -> None:
+        """Remove all ROLE_ID_MAP roles from a member and re-assign based on Salesforce profile."""
+        await self.bot.wait_until_ready()
+
+        guild = self.bot.get_guild(self.guild_id)
+        if guild is None:
+            try:
+                guild = await self.bot.fetch_guild(self.guild_id)
+            except discord.HTTPException as exc:
+                raise RuntimeError(
+                    "Unable to load the Discord guild for role refresh"
+                ) from exc
+
+        if guild is None:
+            raise RuntimeError("Discord guild is not available for role refresh")
+
+        member = guild.get_member(user_id)
+        if member is None:
+            try:
+                member = await guild.fetch_member(user_id)
+            except discord.NotFound as exc:
+                raise RuntimeError(
+                    f"Discord user {user_id} is not a member of the guild"
+                ) from exc
+            except discord.HTTPException as exc:
+                raise RuntimeError("Unable to load Discord member information") from exc
+
+        # Remove all known Salesforce-managed roles currently held by the member.
+        roles_to_remove = [
+            guild.get_role(role_id)
+            for role_id in ROLE_ID_MAP.values()
+        ]
+        roles_to_remove = [r for r in roles_to_remove if r is not None and r in member.roles]
+        if roles_to_remove:
+            await member.remove_roles(*roles_to_remove, reason="Salesforce role refresh")
+
+        # Assign new roles derived from the updated Salesforce profile.
+        logical_role_names = role_names_from_student_profile(student_profile)
+        roles_to_add: list[discord.Role] = []
+        for logical_name in sorted(logical_role_names):
+            role_id = ROLE_ID_MAP.get(logical_name)
+            if role_id is None:
+                continue
+            role = guild.get_role(role_id)
+            if role is None:
+                logger.warning(
+                    "Configured role id %s for %s not found in guild %s",
+                    role_id,
+                    logical_name,
+                    guild.id,
+                )
+                continue
+            if role in member.roles:
+                continue
+            roles_to_add.append(role)
+
+        if roles_to_add:
+            await member.add_roles(*roles_to_add, reason="Salesforce role refresh")
+
+        if logical_role_names:
+            await self._save_roles_to_database(user_id, logical_role_names, source="refresh")
+
+        logger.info(
+            "Refreshed Salesforce roles for Discord user %s: -%d/+%d roles, assigned=[%s]",
+            user_id,
+            len(roles_to_remove),
+            len(roles_to_add),
+            ", ".join(sorted(logical_role_names)) if logical_role_names else "none",
+        )
+
     @slash_command(
         **_moderation_command_kwargs(
             "unverify", "Remove the verification role from a member."

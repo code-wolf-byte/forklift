@@ -212,6 +212,47 @@ def assign_roles_from_profile(user_id: str, student_profile: Dict[str, Any]) -> 
         ) from exc
 
 
+def refresh_roles_from_profile(user_id: str, student_profile: Dict[str, Any]) -> None:
+    """
+    Remove all ROLE_ID_MAP roles from a Discord member and re-assign based on their
+    current Salesforce profile. Used by the automated role-refresh cron job.
+    """
+    _config()
+
+    bot = get_running_bot()
+    loop = get_running_loop()
+    if bot is None or loop is None or loop.is_closed():
+        raise DiscordAPIError(
+            "Discord bot is not running; unable to refresh Salesforce-based roles"
+        )
+
+    try:
+        discord_user_id = int(user_id)
+    except (TypeError, ValueError) as exc:
+        raise DiscordAPIError("Invalid Discord user id for role refresh") from exc
+
+    cog = bot.get_cog("VerificationCog")
+    if not isinstance(cog, VerificationCog):
+        raise DiscordAPIError("Verification cog is not loaded in the Discord bot")
+
+    future = asyncio.run_coroutine_threadsafe(
+        cog.refresh_roles_from_profile(discord_user_id, student_profile),
+        loop,
+    )
+
+    try:
+        future.result(timeout=DEFAULT_TIMEOUT)
+    except asyncio.TimeoutError as exc:
+        future.cancel()
+        raise DiscordAPIError(
+            "Timed out refreshing Discord roles from Salesforce profile"
+        ) from exc
+    except Exception as exc:
+        raise DiscordAPIError(
+            f"Failed to refresh Discord roles from Salesforce profile: {exc}"
+        ) from exc
+
+
 def remove_roles_from_profile(user_id: str, student_profile: Dict[str, Any]) -> None:
     """
     Remove Discord roles from a user based on their Salesforce profile.
@@ -338,6 +379,7 @@ __all__ = [
     "assign_verified_role",
     "remove_verified_role",
     "assign_roles_from_profile",
+    "refresh_roles_from_profile",
     "remove_roles_from_profile",
     "build_authorize_url",
     "check_member_is_admin",
