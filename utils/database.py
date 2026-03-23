@@ -116,12 +116,32 @@ class QnaPost(Base):
     question = Column(Text, nullable=True)
     answer = Column(Text, nullable=True)
     status = Column(String(32), default="pending", nullable=False)
+    tags = Column(Text, nullable=True)                                 # JSON array of tag names
+    gold_guide_pinged = Column(Boolean, default=False, nullable=False)
     last_feedback_user_id = Column(String(64), nullable=True)
     last_feedback_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
+
+
+class GoldGuideContribution(Base):
+    """One row per message sent by a Gold Guide member in a QnA thread."""
+
+    __tablename__ = "gold_guide_contributions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(String(64), nullable=True)
+    channel_id = Column(String(64), nullable=False, index=True)   # parent forum channel ID
+    channel_name = Column(String(255), nullable=True)
+    thread_id = Column(String(64), nullable=False, index=True)
+    thread_title = Column(String(255), nullable=True)
+    message_id = Column(String(64), unique=True, nullable=True, index=True)  # dedup key
+    responder_discord_id = Column(String(64), nullable=False, index=True)
+    responder_username = Column(String(255), nullable=True)
+    responded_at = Column(DateTime, nullable=False)               # naive UTC
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class QnaModule(Base):
@@ -234,7 +254,26 @@ def init_db() -> None:
     _ensure_user_columns()
     _ensure_cron_job_config_columns()
     _ensure_message_log_columns()
+    _ensure_qna_columns()
     _seed_cron_job_config()
+
+
+def _ensure_qna_columns() -> None:
+    """Add columns to qna_posts introduced after the initial schema."""
+    inspector = inspect(engine)
+    if not inspector.has_table(QnaPost.__tablename__):
+        return
+
+    columns = {col["name"] for col in inspector.get_columns(QnaPost.__tablename__)}
+
+    with engine.begin() as conn:
+        if "tags" not in columns:
+            conn.execute(text("ALTER TABLE qna_posts ADD COLUMN tags TEXT"))
+        if "gold_guide_pinged" not in columns:
+            default = "FALSE" if engine.dialect.name == "postgresql" else "0"
+            conn.execute(
+                text(f"ALTER TABLE qna_posts ADD COLUMN gold_guide_pinged BOOLEAN NOT NULL DEFAULT {default}")
+            )
 
 
 def _ensure_message_log_columns() -> None:

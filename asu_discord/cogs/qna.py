@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import discord
@@ -14,8 +15,7 @@ try:  # pragma: no cover - optional dependency
 except ImportError:  # pragma: no cover - optional dependency
     ForkmanQNA = None  # type: ignore[assignment]
 
-
-from utils.database import QnaModule, QnaPost, session_scope
+from utils.database import GoldGuideContribution, QnaModule, QnaPost, session_scope
 from utils.settings import CONFIG, DISCORD_CONFIG
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_COMMAND_STATE = {"qna-enable": True, "qna-disable": True}
 SATISFACTORY_CUSTOM_ID = "qna:satisfied"
 ASSISTANCE_CUSTOM_ID = "qna:assist"
+GOLD_GUIDE_ROLE_ID = 1187156709597270157
+GOLD_GUIDE_TAG_SUBSTRING = "gold guide"
 TEST_GUILD_IDS: list[int] = []
 if DISCORD_CONFIG and DISCORD_CONFIG.test_guild_ids:
     TEST_GUILD_IDS = list(DISCORD_CONFIG.test_guild_ids)
@@ -62,6 +64,17 @@ class QnACog(commands.Cog):
         self.aws_secret_access_key = CONFIG.AWS_SECRET_ACCESS_KEY
         self._enabled_cache: dict[int, bool] = {}
         self._active_views: set[QnAFeedbackView] = set()
+        self._backfill_task: Optional[asyncio.Task] = None
+        self._backfill_progress: dict = {
+            "status": "idle",
+            "threads_total": 0,
+            "threads_processed": 0,
+            "posts_upserted": 0,
+            "contributions_inserted": 0,
+            "started_at": None,
+            "completed_at": None,
+            "error": None,
+        }
 
     def _is_ready(self) -> bool:
         return bool(
@@ -71,9 +84,22 @@ class QnACog(commands.Cog):
             and ForkmanQNA
         )
 
+    @property
+    def backfill_running(self) -> bool:
+        return self._backfill_task is not None and not self._backfill_task.done()
+
+    def start_backfill(self) -> bool:
+        """Schedule a backfill task on the bot's event loop. Returns False if already running."""
+        if self.backfill_running:
+            logger.info("QnACog: backfill already running — ignoring request")
+            return False
+        logger.info("QnACog: scheduling QnA backfill task")
+        self._backfill_task = asyncio.ensure_future(self._run_backfill())
+        return True
+
     @commands.Cog.listener()
     async def on_ready(self) -> None:
-        if not self._is_ready():
+        if not self.forum_channel_id:
             logger.info(
                 "QnACog loaded but incomplete configuration prevents automation "
                 "(channel: %s, knowledge_base: %s, model: %s, forkman_available: %s)",
@@ -84,11 +110,7 @@ class QnACog(commands.Cog):
             )
             return
 
-        forum_channel = (
-            self.bot.get_channel(self.forum_channel_id)
-            if self.forum_channel_id
-            else None
-        )
+        forum_channel = self.bot.get_channel(self.forum_channel_id)
         if isinstance(forum_channel, discord.ForumChannel):
             logger.info(
                 "QnACog monitoring Q&A forum channel %s (%s).",
@@ -100,6 +122,10 @@ class QnACog(commands.Cog):
                 "QnACog could not locate the configured forum channel id %s.",
                 self.forum_channel_id,
             )
+
+        # Auto-backfill QnaPost records and Gold Guide contributions on each startup.
+        # The backfill is idempotent — threads already in the DB are skipped quickly.
+        self.start_backfill()
 
     @slash_command(
         **_moderation_command_kwargs("qna-enable", "Enable the AI Q&A assistant")
@@ -185,6 +211,225 @@ class QnACog(commands.Cog):
         else:
             await ctx.respond("Q&A assistant is already disabled.", ephemeral=True)
 
+    # ── Backfill ─────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _backfill_has_feedback_buttons(msg: discord.Message) -> bool:
+        for row in msg.components:
+            for component in row.children:
+                if getattr(component, "custom_id", None) in (
+                    SATISFACTORY_CUSTOM_ID, ASSISTANCE_CUSTOM_ID
+                ):
+                    return True
+        return False
+
+    @staticmethod
+    async def _classify_thread_for_backfill(
+        thread: discord.Thread, bot_id: int, gold_guide_ids: set[int]
+    ) -> dict:
+        """Scan thread history once; return status, answer info, and GG messages."""
+        result: dict = {
+            "status": "no_bot_msg",
+            "answer_text": None,
+            "assistant_msg_id": None,
+            "gold_guide_msgs": [],  # list of (msg_id, author_id, author_name, created_at)
+        }
+        messages: list[discord.Message] = []
+        try:
+            async for msg in thread.history(limit=None, oldest_first=True):
+                messages.append(msg)
+        except Exception as exc:
+            logger.warning("Could not read thread %s: %s", thread.id, exc)
+            return result
+
+        for msg in messages:
+            if msg.author.id == bot_id:
+                if "Assistance requested" in msg.content:
+                    result["status"] = "needs_help"
+                elif QnACog._backfill_has_feedback_buttons(msg):
+                    if result["status"] not in ("needs_help",):
+                        result["status"] = "pending"
+                    if result["assistant_msg_id"] is None:
+                        result["assistant_msg_id"] = str(msg.id)
+                        result["answer_text"] = msg.content or None
+                else:
+                    if result["assistant_msg_id"] is None and "Hi <@" not in msg.content:
+                        result["assistant_msg_id"] = str(msg.id)
+                        result["answer_text"] = msg.content or None
+                    if result["status"] == "no_bot_msg":
+                        result["status"] = "satisfied"
+            elif msg.author.id in gold_guide_ids:
+                result["gold_guide_msgs"].append((
+                    str(msg.id),
+                    str(msg.author.id),
+                    msg.author.name,
+                    msg.created_at.replace(tzinfo=None),
+                ))
+        return result
+
+    async def _run_backfill(self) -> None:
+        p = self._backfill_progress
+        p.update({
+            "status": "running",
+            "threads_total": 0,
+            "threads_processed": 0,
+            "posts_upserted": 0,
+            "contributions_inserted": 0,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "completed_at": None,
+            "error": None,
+        })
+
+        try:
+            guild_id = int(DISCORD_CONFIG.guild_id) if DISCORD_CONFIG and DISCORD_CONFIG.guild_id else None
+            if not guild_id:
+                raise RuntimeError("DISCORD_CONFIG.guild_id is not set")
+            guild = self.bot.get_guild(guild_id)
+            if guild is None:
+                raise RuntimeError(f"Guild not found in cache")
+
+            forum_channel = guild.get_channel(self.forum_channel_id)
+            if not isinstance(forum_channel, discord.ForumChannel):
+                raise RuntimeError(f"QnA forum channel {self.forum_channel_id} not found or wrong type")
+
+            # Build Gold Guide member ID set
+            gold_guide_role = guild.get_role(GOLD_GUIDE_ROLE_ID)
+            gold_guide_ids: set[int] = set()
+            if gold_guide_role:
+                gold_guide_ids = {m.id for m in gold_guide_role.members}
+            logger.info("QnA backfill: Gold Guide members found: %d", len(gold_guide_ids))
+
+            tag_name_by_id = {t.id: t.name for t in forum_channel.available_tags}
+
+            # Collect all threads (archived + active)
+            seen: dict[int, discord.Thread] = {}
+            async for thread in forum_channel.archived_threads(limit=None):
+                seen[thread.id] = thread
+            for thread in forum_channel.threads:
+                seen[thread.id] = thread
+            all_threads = list(seen.values())
+            p["threads_total"] = len(all_threads)
+            logger.info("QnA backfill: processing %d threads", len(all_threads))
+
+            bot_id = self.bot.user.id
+
+            for thread in all_threads:
+                tag_names = [tag_name_by_id.get(t.id, str(t.id)) for t in thread.applied_tags]
+                has_gg_tag = any(GOLD_GUIDE_TAG_SUBSTRING in n.lower() for n in tag_names)
+                created_at = thread.created_at.replace(tzinfo=None) if thread.created_at else datetime.utcnow()
+
+                # Check if already fully backfilled (has tags set)
+                with session_scope() as db_session:
+                    record = db_session.query(QnaPost).filter_by(thread_id=str(thread.id)).one_or_none()
+                    already_done = record is not None and record.tags is not None
+
+                if already_done:
+                    # Still scan for any new Gold Guide messages not yet recorded
+                    with session_scope() as db_session:
+                        existing_msg_ids = {
+                            r.message_id
+                            for r in db_session.query(GoldGuideContribution.message_id)
+                            .filter_by(thread_id=str(thread.id))
+                            .all()
+                        }
+                    if not gold_guide_ids:
+                        p["threads_processed"] += 1
+                        continue
+                    try:
+                        async for msg in thread.history(limit=None, oldest_first=True):
+                            if msg.author.id in gold_guide_ids and str(msg.id) not in existing_msg_ids:
+                                with session_scope() as db_session:
+                                    if not db_session.query(GoldGuideContribution).filter_by(message_id=str(msg.id)).one_or_none():
+                                        db_session.add(GoldGuideContribution(
+                                            guild_id=str(guild.id),
+                                            channel_id=str(forum_channel.id),
+                                            channel_name=forum_channel.name,
+                                            thread_id=str(thread.id),
+                                            thread_title=thread.name,
+                                            message_id=str(msg.id),
+                                            responder_discord_id=str(msg.author.id),
+                                            responder_username=msg.author.name,
+                                            responded_at=msg.created_at.replace(tzinfo=None),
+                                        ))
+                                        p["contributions_inserted"] += 1
+                    except Exception as exc:
+                        logger.warning("Could not scan GG messages for thread %s: %s", thread.id, exc)
+                    p["threads_processed"] += 1
+                    continue
+
+                info = await self._classify_thread_for_backfill(thread, bot_id, gold_guide_ids)
+
+                with session_scope() as db_session:
+                    record = db_session.query(QnaPost).filter_by(thread_id=str(thread.id)).one_or_none()
+                    if record is None:
+                        db_session.add(QnaPost(
+                            guild_id=str(guild.id),
+                            channel_id=str(forum_channel.id),
+                            thread_id=str(thread.id),
+                            title=thread.name,
+                            tags=json.dumps(tag_names),
+                            status=info["status"],
+                            answer=info["answer_text"],
+                            assistant_message_id=info["assistant_msg_id"],
+                            gold_guide_pinged=has_gg_tag,
+                            created_at=created_at,
+                        ))
+                    else:
+                        if record.tags is None:
+                            record.tags = json.dumps(tag_names)
+                        if record.status in (None, "pending") and info["status"] != "no_bot_msg":
+                            record.status = info["status"]
+                        if record.answer is None and info["answer_text"]:
+                            record.answer = info["answer_text"]
+                        if record.assistant_message_id is None and info["assistant_msg_id"]:
+                            record.assistant_message_id = info["assistant_msg_id"]
+                        if not record.gold_guide_pinged and has_gg_tag:
+                            record.gold_guide_pinged = True
+                    p["posts_upserted"] += 1
+
+                    for msg_id, author_id, author_name, responded_at in info["gold_guide_msgs"]:
+                        if not db_session.query(GoldGuideContribution).filter_by(message_id=msg_id).one_or_none():
+                            db_session.add(GoldGuideContribution(
+                                guild_id=str(guild.id),
+                                channel_id=str(forum_channel.id),
+                                channel_name=forum_channel.name,
+                                thread_id=str(thread.id),
+                                thread_title=thread.name,
+                                message_id=msg_id,
+                                responder_discord_id=author_id,
+                                responder_username=author_name,
+                                responded_at=responded_at,
+                            ))
+                            p["contributions_inserted"] += 1
+
+                p["threads_processed"] += 1
+
+            p["status"] = "done"
+            p["completed_at"] = datetime.now(timezone.utc).isoformat()
+            logger.info(
+                "QnA backfill complete: %d posts upserted, %d contributions inserted",
+                p["posts_upserted"], p["contributions_inserted"],
+            )
+
+        except Exception as exc:
+            logger.exception("QnA backfill failed: %s", exc)
+            p["status"] = "failed"
+            p["error"] = str(exc)
+            p["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+    # ── Thread lifecycle ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def _get_tag_names(thread: discord.Thread) -> list[str]:
+        return [tag.name for tag in thread.applied_tags]
+
+    @staticmethod
+    def _has_gold_guide_tag(thread: discord.Thread) -> bool:
+        return any(
+            GOLD_GUIDE_TAG_SUBSTRING in tag.name.lower()
+            for tag in thread.applied_tags
+        )
+
     @commands.Cog.listener()
     async def on_thread_create(self, thread: discord.Thread) -> None:
         if (
@@ -199,46 +444,107 @@ class QnACog(commands.Cog):
         if author_id is not None and starter_message and starter_message.author:
             if starter_message.author.bot:
                 return
-        message = (
+
+        tag_names = self._get_tag_names(thread)
+        question_text = (starter_message.content or "").strip() if starter_message else ""
+
+        # Create initial QnaPost record
+        with session_scope() as db_session:
+            if not db_session.query(QnaPost).filter_by(thread_id=str(thread.id)).one_or_none():
+                db_session.add(QnaPost(
+                    guild_id=str(thread.guild.id),
+                    channel_id=str(thread.parent_id),
+                    thread_id=str(thread.id),
+                    owner_id=str(author_id) if author_id else None,
+                    title=thread.name,
+                    question=question_text,
+                    tags=json.dumps(tag_names),
+                    status="pending",
+                ))
+
+        await thread.send(
             f"Hi <@{author_id}>, I'm Forkman, your friendly support bot. "
             "I'm looking through our knowledge base to see if I can answer your question. :wave:"
         )
-        await thread.send(message)
+
         thread_title = thread.name.strip()
-        question_text = (
-            (starter_message.content or "").strip() if starter_message else ""
-        )
         result = await self._generate_answer(
             thread_title=thread_title,
             question_text=question_text,
             author_id=author_id,
         )
+
+        answer_msg = None
         if not result:
-            failure = (
+            await thread.send(
                 "Uh oh, I couldn't find an answer to your question. "
                 "Please try again later or ping a moderator."
             )
-            await thread.send(failure)
-            return
-
-        if not result.get("ok"):
+        elif not result.get("ok"):
             await thread.send(
                 result.get(
                     "full_message",
                     "Uh oh, I couldn't find an answer to your question. Please try again later.",
                 )
             )
+        else:
+            answer_text = result.get("answer") or result.get("full_message")
+            if not answer_text:
+                answer_text = "I wasn't able to craft a response, please try again or ping a moderator."
+            rating_prompt = result.get("rating_prompt")
+            if rating_prompt:
+                answer_text = f"{answer_text}\n\n{rating_prompt}"
+            answer_msg = await thread.send(answer_text, view=QnAFeedbackView(self))
+
+        # Store answer details in DB
+        if answer_msg and result and result.get("ok"):
+            with session_scope() as db_session:
+                record = db_session.query(QnaPost).filter_by(thread_id=str(thread.id)).one_or_none()
+                if record is not None:
+                    record.answer = result.get("answer") or result.get("full_message")
+                    record.assistant_message_id = str(answer_msg.id)
+
+        # Ping Gold Guides if the thread carries a Gold Guide tag
+        if self._has_gold_guide_tag(thread):
+            await thread.send(
+                f"<@&{GOLD_GUIDE_ROLE_ID}> A question tagged for Gold Guide assistance has been posted!",
+                allowed_mentions=discord.AllowedMentions(roles=True),
+            )
+            with session_scope() as db_session:
+                record = db_session.query(QnaPost).filter_by(thread_id=str(thread.id)).one_or_none()
+                if record is not None:
+                    record.gold_guide_pinged = True
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        """Record a contribution whenever a Gold Guide member posts in a QnA thread."""
+        if message.author.bot:
+            return
+        if not isinstance(message.channel, discord.Thread):
+            return
+        if message.channel.parent_id != self.forum_channel_id:
+            return
+        if not isinstance(message.author, discord.Member):
+            return
+        if not any(r.id == GOLD_GUIDE_ROLE_ID for r in message.author.roles):
             return
 
-        answer_text = result.get("answer") or result.get("full_message")
-        if not answer_text:
-            answer_text = (
-                "I wasn't able to craft a response, please try again or ping a moderator."
-            )
-        rating_prompt = result.get("rating_prompt")
-        if rating_prompt:
-            answer_text = f"{answer_text}\n\n{rating_prompt}"
-        await thread.send(answer_text, view=QnAFeedbackView(self))
+        thread = message.channel
+        parent_name: str | None = thread.parent.name if thread.parent else None
+
+        with session_scope() as db_session:
+            if not db_session.query(GoldGuideContribution).filter_by(message_id=str(message.id)).one_or_none():
+                db_session.add(GoldGuideContribution(
+                    guild_id=str(message.guild.id) if message.guild else None,
+                    channel_id=str(thread.parent_id),
+                    channel_name=parent_name,
+                    thread_id=str(thread.id),
+                    thread_title=thread.name,
+                    message_id=str(message.id),
+                    responder_discord_id=str(message.author.id),
+                    responder_username=message.author.name,
+                    responded_at=message.created_at.replace(tzinfo=None),
+                ))
 
     async def handle_feedback(
         self,

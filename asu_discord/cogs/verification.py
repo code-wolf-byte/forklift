@@ -1051,7 +1051,7 @@ class VerificationCog(commands.Cog):
     async def get_member_email(
         self,
         ctx: discord.ApplicationContext,
-        member: Option(discord.Member, "Member to look up"),
+        member: Option(discord.User, "Member to look up"),
     ) -> None:
         """Return the verified ASU email for a Discord member. Only visible to the invoker."""
         if ctx.guild_id != self.guild_id or ctx.guild is None:

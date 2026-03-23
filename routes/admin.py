@@ -13,7 +13,7 @@ from sqlalchemy import func
 import csv
 import io
 
-from utils.database import CronJobConfig, MessageBackfill, MessageLog, User, UserRole, session_scope
+from utils.database import CronJobConfig, GoldGuideContribution, MessageBackfill, MessageLog, QnaPost, User, UserRole, session_scope
 
 AZ_TZ = ZoneInfo("America/Phoenix")
 
@@ -922,6 +922,154 @@ def admin_message_backfill_status():
         "channels_total": len(rows),
         "channels_done": done,
         "channels": channels,
+    })
+
+
+@admin_bp.route("/api/admin/qna/backfill", methods=["POST"])
+@require_admin
+def admin_qna_backfill_start():
+    """Trigger a QnA post + Gold Guide contribution backfill on the running bot."""
+    from asu_discord.shared import get_running_bot, get_running_loop
+    from asu_discord.cogs.qna import QnACog
+
+    bot = get_running_bot()
+    if bot is None:
+        return jsonify({"error": "Discord bot is not running"}), 503
+
+    cog = bot.cogs.get("QnACog")
+    if cog is None or not isinstance(cog, QnACog):
+        return jsonify({"error": "QnACog not loaded"}), 503
+
+    loop = get_running_loop()
+    if loop is None:
+        return jsonify({"error": "Bot event loop unavailable"}), 503
+
+    if cog.backfill_running:
+        return jsonify({"status": "already_running", "progress": cog._backfill_progress})
+
+    loop.call_soon_threadsafe(cog.start_backfill)
+    return jsonify({"status": "started"})
+
+
+@admin_bp.route("/api/admin/qna/backfill/status", methods=["GET"])
+@require_admin
+def admin_qna_backfill_status():
+    """Return current QnA backfill progress."""
+    from asu_discord.shared import get_running_bot
+    from asu_discord.cogs.qna import QnACog
+
+    bot = get_running_bot()
+    cog = bot.cogs.get("QnACog") if bot else None
+
+    if cog is None or not isinstance(cog, QnACog):
+        return jsonify({"error": "QnACog not loaded"}), 503
+
+    return jsonify({
+        "backfill_running": cog.backfill_running,
+        **cog._backfill_progress,
+    })
+
+
+@admin_bp.route("/api/admin/qna/stats", methods=["GET"])
+@require_admin
+def admin_qna_stats():
+    """Overall QnA post breakdown by status and tag."""
+    with session_scope() as db_session:
+        rows = db_session.query(QnaPost).all()
+
+    status_counts: dict[str, int] = {}
+    tag_counts: dict[str, int] = {}
+    tag_by_status: dict[str, dict[str, int]] = {}
+
+    for post in rows:
+        status_counts[post.status] = status_counts.get(post.status, 0) + 1
+        post_tags: list[str] = []
+        if post.tags:
+            try:
+                import json as _json
+                post_tags = _json.loads(post.tags)
+            except Exception:
+                pass
+        if not post_tags:
+            post_tags = ["(no tag)"]
+        for tag in post_tags:
+            tag_counts[tag] = tag_counts.get(tag, 0) + 1
+            tag_by_status.setdefault(tag, {})
+            tag_by_status[tag][post.status] = tag_by_status[tag].get(post.status, 0) + 1
+
+    tags = [
+        {"tag": tag, "total": count, "by_status": tag_by_status.get(tag, {})}
+        for tag, count in sorted(tag_counts.items(), key=lambda x: -x[1])
+    ]
+
+    return jsonify({
+        "total": len(rows),
+        "by_status": status_counts,
+        "by_tag": tags,
+    })
+
+
+@admin_bp.route("/api/admin/qna/gold-guide-stats", methods=["GET"])
+@require_admin
+def admin_gold_guide_stats():
+    """Gold Guide contribution counts per member per channel, with optional date range."""
+    from_date_str = request.args.get("from_date")
+    to_date_str = request.args.get("to_date")
+
+    from_dt = None
+    to_dt = None
+    if from_date_str:
+        try:
+            from_dt = datetime.strptime(from_date_str, "%Y-%m-%d").replace(tzinfo=AZ_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+        except ValueError:
+            return jsonify({"error": "Invalid from_date, expected YYYY-MM-DD"}), 400
+    if to_date_str:
+        try:
+            to_dt = (datetime.strptime(to_date_str, "%Y-%m-%d") + timedelta(days=1)).replace(tzinfo=AZ_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+        except ValueError:
+            return jsonify({"error": "Invalid to_date, expected YYYY-MM-DD"}), 400
+
+    with session_scope() as db_session:
+        q = db_session.query(GoldGuideContribution)
+        if from_dt:
+            q = q.filter(GoldGuideContribution.responded_at >= from_dt)
+        if to_dt:
+            q = q.filter(GoldGuideContribution.responded_at < to_dt)
+        contributions = q.order_by(GoldGuideContribution.responded_at.asc()).all()
+
+    # Aggregate: per guide → per channel → count
+    guide_map: dict[str, dict] = {}
+    for c in contributions:
+        gid = c.responder_discord_id
+        if gid not in guide_map:
+            guide_map[gid] = {
+                "discord_id": gid,
+                "username": c.responder_username,
+                "total": 0,
+                "by_channel": {},
+            }
+        guide_map[gid]["total"] += 1
+        ch_key = c.channel_id
+        if ch_key not in guide_map[gid]["by_channel"]:
+            guide_map[gid]["by_channel"][ch_key] = {
+                "channel_id": c.channel_id,
+                "channel_name": c.channel_name,
+                "count": 0,
+            }
+        guide_map[gid]["by_channel"][ch_key]["count"] += 1
+
+    gold_guides = []
+    for entry in sorted(guide_map.values(), key=lambda x: -x["total"]):
+        gold_guides.append({
+            "discord_id": entry["discord_id"],
+            "username": entry["username"],
+            "total_contributions": entry["total"],
+            "by_channel": sorted(entry["by_channel"].values(), key=lambda x: -x["count"]),
+        })
+
+    return jsonify({
+        "total_contributions": len(contributions),
+        "gold_guides": gold_guides,
     })
 
 

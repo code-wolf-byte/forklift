@@ -1,17 +1,26 @@
 #!/usr/bin/env python3
 """
-Gather QnA forum channel statistics (November 2025 – February 2026):
-  - Posts per forum tag
-  - Posts answered by bot   (bot answer message buttons removed, no "Assistance requested" message)
-  - Posts where user called for staff (bot sent a visible "Assistance requested." message)
-  - Posts pending (bot answer message still has feedback buttons)
+Gather QnA forum channel statistics (November 2025 – February 2026).
+
+Four primary metrics
+--------------------
+1. Total posts created
+2. Total messages sent (across all threads)
+3. Questions answered by the bot
+   - User clicked "It was great!" (satisfied)
+   - OR staff replied and confirmed the bot was correct
+4. Questions answered by ASU Staff
+   - Staff posted a substantive reply after "Assistance requested."
+   - (i.e. staff replied but did NOT just confirm the bot)
+
+Staff confirmation heuristic
+-----------------------------
+After the "Assistance requested." message, if a non-bot / non-OP member posts a
+message whose text contains one of CONFIRMATION_KEYWORDS the reply is counted as
+"staff confirmed bot" (credit goes to the bot); otherwise it is counted as
+"staff answered".
 
 Standalone script — no database, no project imports.
-
-Status detection mirrors qna.py cog behaviour:
-  - On "It was great!":     bot edits answer msg to remove buttons (ephemeral thank-you, not in history)
-  - On "I still need help": bot edits answer msg to remove buttons AND posts visible "Assistance requested."
-  - Pending:                answer message still carries the two feedback buttons
 """
 from __future__ import annotations
 
@@ -47,6 +56,24 @@ CAMPUS_CHANNELS: dict[str, int] = {
 
 # Category whose forum channels are all counted for thread posts
 CAMPUS_FORUMS_CATEGORY_ID = 1435690325917175928
+
+# Keywords that indicate a staff member is confirming the bot rather than providing a new answer.
+# Matched case-insensitively against the full message content.
+CONFIRMATION_KEYWORDS = (
+    "correct",
+    "that's right",
+    "that is right",
+    "you're right",
+    "forkman is right",
+    "bot is right",
+    "bot got it",
+    "exactly right",
+    "exactly",
+    "spot on",
+    "confirmed",
+    "this is accurate",
+    "this is correct",
+)
 
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -139,37 +166,81 @@ def _has_feedback_buttons(msg) -> bool:
     return False
 
 
-async def classify_thread(thread, bot_id: int) -> str:
+async def classify_thread(thread, bot_id: int) -> dict:
     """
-    Scan the thread's message history and return one of:
-      'satisfied'  – bot answered, user was happy (buttons removed, no assistance msg)
-      'needs_help' – user called for staff (bot posted visible "Assistance requested.")
-      'pending'    – feedback buttons still present on bot's answer
-      'no_bot_msg' – bot never posted (thread predates cog or cog was off)
+    Fetch all messages in the thread once and return:
+
+      msg_count       – total number of messages in the thread
+      bot_answered    – bot posted an answer (buttons present or removed)
+      status          – 'satisfied' | 'needs_help' | 'pending' | 'no_bot_msg'
+      staff_replied   – a non-bot non-OP member replied after "Assistance requested."
+      staff_confirmed – that staff reply confirmed the bot (keyword match)
+
+    Final credit buckets (computed in caller):
+      bot_credit   = satisfied  OR  (needs_help AND staff_confirmed)
+      staff_credit = needs_help AND staff_replied AND NOT staff_confirmed
     """
+    result: dict = {
+        "msg_count": 0,
+        "bot_answered": False,
+        "status": "no_bot_msg",
+        "staff_replied": False,
+        "staff_confirmed": False,
+    }
+
+    messages: list = []
     try:
-        async for msg in thread.history(limit=50, oldest_first=True):
-            if msg.author.id != bot_id:
-                continue
-
-            # Visible "Assistance requested." = user clicked needs_help
-            if "Assistance requested" in msg.content:
-                return "needs_help"
-
-            # Still has feedback buttons = pending
-            if _has_feedback_buttons(msg):
-                return "pending"
-
-        # Bot posted but buttons are gone and no assistance message = satisfied
-        # (Check whether the bot posted at all)
-        async for msg in thread.history(limit=50, oldest_first=True):
-            if msg.author.id == bot_id:
-                return "satisfied"
-
+        async for msg in thread.history(limit=None, oldest_first=True):
+            messages.append(msg)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not read history for thread %s: %s", thread.id, exc)
+        return result
 
-    return "no_bot_msg"
+    result["msg_count"] = len(messages)
+
+    # Original poster = author of the first message
+    original_poster_id: int | None = messages[0].author.id if messages else None
+
+    assistance_idx: int | None = None
+
+    for i, msg in enumerate(messages):
+        if msg.author.id != bot_id:
+            continue
+
+        if "Assistance requested" in msg.content:
+            assistance_idx = i
+            result["status"] = "needs_help"
+            result["bot_answered"] = True
+            continue
+
+        if _has_feedback_buttons(msg):
+            if result["status"] not in ("needs_help",):
+                result["status"] = "pending"
+            result["bot_answered"] = True
+            continue
+
+        # Bot message without buttons and without "Assistance requested" = satisfied answer
+        result["bot_answered"] = True
+        if result["status"] == "no_bot_msg":
+            result["status"] = "satisfied"
+
+    # Look for staff replies after "Assistance requested."
+    if assistance_idx is not None:
+        for msg in messages[assistance_idx + 1:]:
+            if msg.author.id == bot_id:
+                continue
+            if msg.author.id == original_poster_id:
+                continue  # original poster following up — not staff
+
+            # Non-bot, non-OP member → treat as staff
+            result["staff_replied"] = True
+
+            content_lower = msg.content.lower()
+            if any(kw in content_lower for kw in CONFIRMATION_KEYWORDS):
+                result["staff_confirmed"] = True
+            # Keep scanning — a later message may override to confirmed
+
+    return result
 
 
 async def run(*, forum_channel_id: int) -> None:
@@ -188,16 +259,28 @@ async def run(*, forum_channel_id: int) -> None:
 
     client = discord.Client(intents=intents)
 
+    # aggregates
+    total_threads = 0
+    total_messages = 0
+    bot_credit_count = 0           # satisfied + staff confirmed bot
+    bot_satisfied_count = 0        # user clicked "It was great!"
+    bot_staff_confirmed_count = 0  # staff confirmed bot was correct
+    staff_answered_count = 0       # staff provided a new answer
+    needs_help_unanswered = 0      # assistance requested, no staff reply yet
+    pending_count = 0
+    no_bot_msg_count = 0
+
     tag_counts: dict[str, int] = defaultdict(int)
-    status_counts: dict[str, int] = defaultdict(int)
+    tag_bot_credit: dict[str, int] = defaultdict(int)
+    tag_staff_answered: dict[str, int] = defaultdict(int)
+
     campus_counts: dict[str, int] = {}
     extra_forum_tag_counts: dict[str, int] = defaultdict(int)
     extra_forum_total = 0
-    total_threads = 0
 
     @client.event
     async def on_ready() -> None:
-        nonlocal total_threads, campus_counts, extra_forum_tag_counts, extra_forum_total
+        nonlocal total_threads, total_messages, bot_credit_count, bot_satisfied_count, bot_staff_confirmed_count, staff_answered_count, needs_help_unanswered, pending_count, no_bot_msg_count, campus_counts, extra_forum_tag_counts, extra_forum_total
         logger.info("Connected to Discord as %s.", client.user)
 
         guild = client.get_guild(GUILD_ID)
@@ -239,16 +322,49 @@ async def run(*, forum_channel_id: int) -> None:
         bot_id = client.user.id
 
         for i, thread in enumerate(all_threads):
-            status = await classify_thread(thread, bot_id)
-            status_counts[status] += 1
+            info = await classify_thread(thread, bot_id)
 
+            total_messages += info["msg_count"]
+
+            status = info["status"]
+            staff_replied = info["staff_replied"]
+            staff_confirmed = info["staff_confirmed"]
+
+            is_bot_credit = False
+            is_staff_credit = False
+
+            if status == "satisfied":
+                bot_credit_count += 1
+                bot_satisfied_count += 1
+                is_bot_credit = True
+            elif status == "needs_help":
+                if staff_replied:
+                    if staff_confirmed:
+                        bot_credit_count += 1
+                        bot_staff_confirmed_count += 1
+                        is_bot_credit = True
+                    else:
+                        staff_answered_count += 1
+                        is_staff_credit = True
+                else:
+                    needs_help_unanswered += 1
+            elif status == "pending":
+                pending_count += 1
+            else:
+                no_bot_msg_count += 1
+
+            # Per-tag breakdown
             thread_tags = [
                 tag_name_by_id.get(t.id, str(t.id)) for t in thread.applied_tags
             ]
+            if not thread_tags:
+                thread_tags = ["(no tag)"]
             for tag_name in thread_tags:
                 tag_counts[tag_name] += 1
-            if not thread_tags:
-                tag_counts["(no tag)"] += 1
+                if is_bot_credit:
+                    tag_bot_credit[tag_name] += 1
+                if is_staff_credit:
+                    tag_staff_answered[tag_name] += 1
 
             if (i + 1) % 25 == 0:
                 logger.info("Processed %d / %d threads...", i + 1, total_threads)
@@ -283,7 +399,6 @@ async def run(*, forum_channel_id: int) -> None:
 
         # Count posts in each campus channel over the same date range
         logger.info("Counting posts in campus channels...")
-
         for campus_name, channel_id in CAMPUS_CHANNELS.items():
             try:
                 channel = await guild.fetch_channel(channel_id)
@@ -297,14 +412,11 @@ async def run(*, forum_channel_id: int) -> None:
                 continue
 
             display_name = channel.name
-
             if isinstance(channel, discord.TextChannel):
-                # Campus channels are plain text channels — count messages in the date range.
                 count = 0
                 async for _ in channel.history(limit=None, after=SINCE, before=UNTIL):
                     count += 1
             else:
-                # Forum / other thread-based channel — count threads.
                 archived_ids = set(await _fetch_all_threads_in_range(client.http, channel_id))
                 active_ids = {
                     t.id for t in getattr(channel, "threads", [])
@@ -316,7 +428,10 @@ async def run(*, forum_channel_id: int) -> None:
             logger.info("  %s: %d posts", display_name, count)
 
         # Count threads in all forum channels belonging to the campus forums category
-        logger.info("Counting threads in campus forum channels (category %d)...", CAMPUS_FORUMS_CATEGORY_ID)
+        logger.info(
+            "Counting threads in campus forum channels (category %d)...",
+            CAMPUS_FORUMS_CATEGORY_ID,
+        )
         campus_forum_channels = [
             ch for ch in guild.channels
             if isinstance(ch, discord.ForumChannel)
@@ -340,44 +455,59 @@ async def run(*, forum_channel_id: int) -> None:
 
     await client.start(token)
 
-    status_labels = {
-        "satisfied": "Answered by bot (user satisfied)",
-        "needs_help": "Called for staff assistance (user not satisfied)",
-        "pending": "Pending (feedback buttons still active)",
-        "no_bot_msg": "No bot message found",
-    }
+    # ------------------------------------------------------------------ #
+    #  Report                                                              #
+    # ------------------------------------------------------------------ #
+    W = 54
 
-    print(f"\n{'=' * 45}")
+    def pct(n: int, total: int) -> str:
+        return f"{n / total * 100:.1f}%" if total else "—"
+
+    print(f"\n{'=' * W}")
     print("  QnA Forum Statistics")
     print("  November 2025 – February 2026")
-    print(f"{'=' * 45}")
-    print(f"Total posts: {total_threads}")
+    print(f"{'=' * W}")
 
-    print("\n-- By Status --")
-    for status, count in sorted(status_counts.items(), key=lambda x: -x[1]):
-        label = status_labels.get(status, status)
-        pct = (count / total_threads * 100) if total_threads else 0
-        print(f"  {label}: {count} ({pct:.1f}%)")
+    print(f"\n  {'Total posts created:':<38} {total_threads:>5}")
+    print(f"  {'Total messages sent:':<38} {total_messages:>5}")
 
-    print("\n-- By Tag --")
+    print(f"\n  {'Questions answered by bot:':<38} {bot_credit_count:>5}  ({pct(bot_credit_count, total_threads)})")
+    print(f"    {'User confirmed satisfied:':<36} {bot_satisfied_count:>5}")
+    print(f"    {'Staff confirmed bot was correct:':<36} {bot_staff_confirmed_count:>5}")
+
+    print(f"\n  {'Questions answered by ASU staff:':<38} {staff_answered_count:>5}  ({pct(staff_answered_count, total_threads)})")
+
+    print(f"\n  {'Needs help — awaiting staff reply:':<38} {needs_help_unanswered:>5}  ({pct(needs_help_unanswered, total_threads)})")
+    print(f"  {'Pending (feedback buttons active):':<38} {pending_count:>5}  ({pct(pending_count, total_threads)})")
+    print(f"  {'No bot message found:':<38} {no_bot_msg_count:>5}  ({pct(no_bot_msg_count, total_threads)})")
+
+    print(f"\n{'-' * W}")
+    print("  Posts by Tag")
+    print(f"{'-' * W}")
+    print(f"  {'Tag':<28} {'Posts':>5}  {'Bot':>5}  {'Staff':>5}")
+    print(f"  {'-' * 28}  {'-----'}  {'-----'}  {'-----'}")
     for tag, count in sorted(tag_counts.items(), key=lambda x: -x[1]):
-        pct = (count / total_threads * 100) if total_threads else 0
-        print(f"  {tag}: {count} ({pct:.1f}%)")
+        bc = tag_bot_credit.get(tag, 0)
+        sc = tag_staff_answered.get(tag, 0)
+        print(f"  {tag:<28} {count:>5}  {bc:>5}  {sc:>5}")
 
-    print(f"\n-- Forum {EXTRA_FORUM_ID} — Tag Usage ({extra_forum_total} total posts) --")
+    print(f"\n{'-' * W}")
+    print(f"  Forum {EXTRA_FORUM_ID} — Tag Usage  ({extra_forum_total} total posts)")
+    print(f"{'-' * W}")
     if extra_forum_tag_counts:
         for tag, count in sorted(extra_forum_tag_counts.items(), key=lambda x: -x[1]):
-            pct = (count / extra_forum_total * 100) if extra_forum_total else 0
-            print(f"  {tag}: {count} ({pct:.1f}%)")
+            print(f"  {tag:<28} {count:>5}  ({pct(count, extra_forum_total)})")
     else:
         print("  (no data — channel not found or no posts in range)")
 
-    print("\n-- Posts by Campus Channel --")
+    print(f"\n{'-' * W}")
+    print("  Posts by Campus Channel")
+    print(f"{'-' * W}")
     for campus_name, count in campus_counts.items():
         if count == -1:
-            print(f"  {campus_name} - (channel not found)")
+            print(f"  {campus_name} — (channel not found)")
         else:
-            print(f"  {campus_name} - {count}")
+            print(f"  {campus_name:<32} {count:>5}")
 
     print()
 
