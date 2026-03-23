@@ -31,26 +31,46 @@
 }
 
 .admin-layout.admin-dark {
-  --background: 224 71.4% 4.1%;
-  --foreground: 210 20% 98%;
-  --card: 224 71.4% 6%;
-  --card-foreground: 210 20% 98%;
-  --border: 215 27.9% 16.9%;
-  --input: 215 27.9% 16.9%;
-  --ring: 346 77% 50%;
-  --primary: 346 77% 50%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 215 27.9% 16.9%;
-  --secondary-foreground: 210 20% 98%;
-  --muted: 215 27.9% 16.9%;
-  --muted-foreground: 217.9 10.6% 64.9%;
-  --accent: 215 27.9% 16.9%;
-  --accent-foreground: 210 20% 98%;
-  --destructive: 0 62.8% 50%;
-  --destructive-foreground: 210 20% 98%;
-  --sidebar-background: 224 71.4% 6%;
-  --sidebar-foreground: 210 20% 98%;
-  --sidebar-border: 215 27.9% 16.9%;
-  --sidebar-accent: 346 30% 15%;
-  --sidebar-accent-foreground: 346 77% 70%;
+  /* Discord-inspired gray palette — not pure black */
+  --background:          225 5% 23%;   /* #36393f  chat area       */
+  --foreground:          210 5% 87%;   /* #dcddde  primary text    */
+  --card:                228 7% 20%;   /* #2f3136  card surface    */
+  --card-foreground:     210 5% 87%;
+  --border:              220 9% 14%;   /* #202226  subtle border   */
+  --input:               225 7% 28%;   /* #40444b  input bg        */
+  --ring:                346 77% 50%;
+  --primary:             346 77% 50%;
+  --primary-foreground:  0 0% 100%;
+  --secondary:           225 7% 28%;
+  --secondary-foreground:210 5% 87%;
+  --muted:               225 7% 28%;
+  --muted-foreground:    220 5% 58%;   /* #8e9297  muted text      */
+  --accent:              225 7% 28%;
+  --accent-foreground:   210 5% 87%;
+  --destructive:         0 63% 50%;
+  --destructive-foreground: 210 5% 95%;
+  --sidebar-background:  228 8% 18%;   /* #2c2f33  sidebar         */
+  --sidebar-foreground:  210 5% 87%;
+  --sidebar-border:      220 9% 14%;
+  --sidebar-accent:      346 30% 22%;
+  --sidebar-accent-foreground: 346 77% 75%;
+}
+
+/* Force native date/time/number inputs to respect dark theme */
+.admin-dark input[type="date"],
+.admin-dark input[type="datetime-local"],
+.admin-dark input[type="time"],
+.admin-dark input[type="number"],
+.admin-dark input[type="search"],
+.admin-dark input[type="text"],
+.admin-dark textarea,
+.admin-dark select {
+  color-scheme: dark;
+  color: hsl(var(--foreground));
+  background-color: hsl(var(--input));
+}
+
+/* Ensure the calendar/clock picker icon inherits dark mode */
+.admin-dark ::-webkit-calendar-picker-indicator {
+  filter: invert(0.8);
 }
