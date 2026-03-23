@@ -997,9 +997,6 @@ class VerificationCog(commands.Cog):
 
         await ctx.followup.send(
             (
-
-        await ctx.followup.send(
-            (
                 f"{stored_asurite or target} has been banned from verification."
                 + (f" {' '.join(notes)}" if notes else "")
             ),
