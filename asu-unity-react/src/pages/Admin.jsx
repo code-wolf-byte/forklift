@@ -9,6 +9,7 @@ import ServerJoins from "./admin/ServerJoins.jsx";
 import Leaves from "./admin/Leaves.jsx";
 import MemberStats from "./admin/MemberStats.jsx";
 import MessageLogs from "./admin/MessageLogs.jsx";
+import QnA from "./admin/QnA.jsx";
 
 // ─── Sidebar navigation config ────────────────────────────────────────────────
 
@@ -33,6 +34,12 @@ const NAV = [
       { id: "server-joins",  icon: "fa-sign-in-alt",  label: "Joins"         },
       { id: "leaves",        icon: "fa-sign-out-alt", label: "Leaves"        },
       { id: "message-logs",  icon: "fa-comments",     label: "Message Logs"  },
+    ],
+  },
+  {
+    label: "Q&A",
+    items: [
+      { id: "qna", icon: "fa-question-circle", label: "Q&A Analytics" },
     ],
   },
   {
@@ -121,6 +128,7 @@ export default function Admin() {
       case "leaves":        return <Leaves isDark={darkMode} />;
       case "message-logs":  return <MessageLogs />;
       case "automations":   return <Automations />;
+      case "qna":           return <QnA />;
       default:              return null;
     }
   };
