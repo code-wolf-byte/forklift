@@ -351,6 +351,113 @@ def send_channel_message(channel_id: str, content: str) -> None:
         raise DiscordAPIError(f"Failed to send Discord channel message: {exc}") from exc
 
 
+def add_role_to_member(discord_user_id: str, role_name: str) -> None:
+    """Immediately add a named role to a guild member (called from a non-async thread)."""
+    bot = get_running_bot()
+    loop = get_running_loop()
+    if bot is None or loop is None or loop.is_closed():
+        raise DiscordAPIError("Discord bot is not running; unable to add role")
+
+    try:
+        user_id = int(discord_user_id)
+    except (TypeError, ValueError) as exc:
+        raise DiscordAPIError("Invalid Discord user id") from exc
+
+    cog = bot.get_cog("VerificationCog")
+    if not isinstance(cog, VerificationCog):
+        raise DiscordAPIError("Verification cog is not loaded in the Discord bot")
+
+    future = asyncio.run_coroutine_threadsafe(
+        cog.add_role_to_member_by_id(user_id, role_name), loop
+    )
+    try:
+        future.result(timeout=DEFAULT_TIMEOUT)
+    except asyncio.TimeoutError as exc:
+        future.cancel()
+        raise DiscordAPIError("Timed out adding role") from exc
+    except Exception as exc:
+        raise DiscordAPIError(f"Failed to add role: {exc}") from exc
+
+
+def remove_role_from_member(discord_user_id: str, role_name: str) -> None:
+    """Immediately remove a named role from a guild member (called from a non-async thread)."""
+    bot = get_running_bot()
+    loop = get_running_loop()
+    if bot is None or loop is None or loop.is_closed():
+        raise DiscordAPIError("Discord bot is not running; unable to remove role")
+
+    try:
+        user_id = int(discord_user_id)
+    except (TypeError, ValueError) as exc:
+        raise DiscordAPIError("Invalid Discord user id") from exc
+
+    cog = bot.get_cog("VerificationCog")
+    if not isinstance(cog, VerificationCog):
+        raise DiscordAPIError("Verification cog is not loaded in the Discord bot")
+
+    future = asyncio.run_coroutine_threadsafe(
+        cog.remove_role_from_member_by_id(user_id, role_name), loop
+    )
+    try:
+        future.result(timeout=DEFAULT_TIMEOUT)
+    except asyncio.TimeoutError as exc:
+        future.cancel()
+        raise DiscordAPIError("Timed out removing role") from exc
+    except Exception as exc:
+        raise DiscordAPIError(f"Failed to remove role: {exc}") from exc
+
+
+def search_members(query: str, *, limit: int = 25) -> list[dict]:
+    """Search guild members by display name or username (bot cache, no API call).
+
+    Returns a list of dicts with keys: discord_user_id, username, display_name, avatar.
+    """
+    bot = get_running_bot()
+    if bot is None:
+        return []
+    cfg = _config()
+    guild = bot.get_guild(int(cfg.guild_id))
+    if guild is None:
+        return []
+
+    q = query.strip().lower()
+    results = []
+    for member in guild.members:
+        if q in member.name.lower() or (member.display_name and q in member.display_name.lower()):
+            results.append({
+                "discord_user_id": str(member.id),
+                "username": member.name,
+                "display_name": member.display_name,
+                "avatar": str(member.display_avatar.url) if member.display_avatar else None,
+            })
+            if len(results) >= limit:
+                break
+    return results
+
+
+def get_member_info(discord_user_id: str) -> dict | None:
+    """Return basic info for a guild member from the bot cache."""
+    bot = get_running_bot()
+    if bot is None:
+        return None
+    cfg = _config()
+    guild = bot.get_guild(int(cfg.guild_id))
+    if guild is None:
+        return None
+    try:
+        member = guild.get_member(int(discord_user_id))
+    except (TypeError, ValueError):
+        return None
+    if member is None:
+        return None
+    return {
+        "discord_user_id": str(member.id),
+        "username": member.name,
+        "display_name": member.display_name,
+        "avatar": str(member.display_avatar.url) if member.display_avatar else None,
+    }
+
+
 def check_member_is_admin(discord_user_id: str) -> bool:
     """Return True if the Discord user has Administrator permission in the guild."""
     bot = get_running_bot()
@@ -376,15 +483,19 @@ def _safe_json(response: requests.Response) -> Dict[str, Any]:
 
 __all__ = [
     "DiscordAPIError",
+    "add_role_to_member",
     "assign_verified_role",
-    "remove_verified_role",
     "assign_roles_from_profile",
-    "refresh_roles_from_profile",
-    "remove_roles_from_profile",
     "build_authorize_url",
     "check_member_is_admin",
     "exchange_code_for_token",
     "fetch_user_profile",
     "get_guild_channels",
+    "get_member_info",
+    "refresh_roles_from_profile",
+    "remove_role_from_member",
+    "remove_roles_from_profile",
+    "remove_verified_role",
+    "search_members",
     "send_channel_message",
 ]

@@ -11,7 +11,7 @@ from discord.commands import Option, slash_command
 from sqlalchemy import func, select
 
 from utils.settings import DISCORD_CONFIG
-from utils.database import User, session_scope, save_user_roles, get_user_by_discord_id
+from utils.database import User, UserRoleException, session_scope, save_user_roles, get_user_by_discord_id, get_exceptions_for_discord_id
 from services.google_sheets import write_user_left
 from ..roles import ROLE_ID_MAP
 from ..salesforce import get_student_profile
@@ -602,6 +602,68 @@ class VerificationCog(commands.Cog):
         remove_reason = reason or "Automatic re-verification"
         return await self._remove_verified_role(guild, member, reason=remove_reason)
 
+    async def add_role_to_member_by_id(self, user_id: int, role_name: str) -> None:
+        """Add a named role (from ROLE_ID_MAP) to a guild member by Discord user ID."""
+        await self.bot.wait_until_ready()
+
+        role_id = ROLE_ID_MAP.get(role_name)
+        if role_id is None:
+            raise ValueError(f"Unknown role name: {role_name!r}")
+
+        guild = self.bot.get_guild(self.guild_id)
+        if guild is None:
+            try:
+                guild = await self.bot.fetch_guild(self.guild_id)
+            except discord.HTTPException as exc:
+                raise RuntimeError("Unable to load the Discord guild") from exc
+
+        member = guild.get_member(user_id)
+        if member is None:
+            try:
+                member = await guild.fetch_member(user_id)
+            except discord.NotFound as exc:
+                raise RuntimeError(f"Discord user {user_id} is not a member of the guild") from exc
+            except discord.HTTPException as exc:
+                raise RuntimeError("Unable to load Discord member information") from exc
+
+        role = guild.get_role(role_id)
+        if role is None:
+            raise RuntimeError(f"Role {role_name!r} (id {role_id}) not found in guild")
+
+        if role not in member.roles:
+            await member.add_roles(role, reason="Manual exception — admin role add")
+
+    async def remove_role_from_member_by_id(self, user_id: int, role_name: str) -> None:
+        """Remove a named role (from ROLE_ID_MAP) from a guild member by Discord user ID."""
+        await self.bot.wait_until_ready()
+
+        role_id = ROLE_ID_MAP.get(role_name)
+        if role_id is None:
+            raise ValueError(f"Unknown role name: {role_name!r}")
+
+        guild = self.bot.get_guild(self.guild_id)
+        if guild is None:
+            try:
+                guild = await self.bot.fetch_guild(self.guild_id)
+            except discord.HTTPException as exc:
+                raise RuntimeError("Unable to load the Discord guild") from exc
+
+        member = guild.get_member(user_id)
+        if member is None:
+            try:
+                member = await guild.fetch_member(user_id)
+            except discord.NotFound as exc:
+                raise RuntimeError(f"Discord user {user_id} is not a member of the guild") from exc
+            except discord.HTTPException as exc:
+                raise RuntimeError("Unable to load Discord member information") from exc
+
+        role = guild.get_role(role_id)
+        if role is None:
+            return  # Already absent, nothing to do.
+
+        if role in member.roles:
+            await member.remove_roles(role, reason="Manual exception — admin role remove")
+
     async def assign_roles_from_profile(
         self, user_id: int, student_profile: dict[str, Any]
     ) -> None:
@@ -639,8 +701,15 @@ class VerificationCog(commands.Cog):
             )
             return
 
+        # Load per-user exceptions to honour paused/added overrides.
+        exceptions = await asyncio.to_thread(get_exceptions_for_discord_id, str(user_id))
+        paused_roles = {e.role_name for e in exceptions if e.exception_type == "paused"}
+
         roles_to_add: list[discord.Role] = []
         for logical_name in sorted(logical_role_names):
+            if logical_name in paused_roles:
+                logger.debug("Skipping paused role %s for user %s", logical_name, user_id)
+                continue
             role_id = ROLE_ID_MAP.get(logical_name)
             if role_id is None:
                 logger.debug("No configured Discord role id for %s", logical_name)
@@ -816,19 +885,33 @@ class VerificationCog(commands.Cog):
             except discord.HTTPException as exc:
                 raise RuntimeError("Unable to load Discord member information") from exc
 
-        # Remove all known Salesforce-managed roles currently held by the member.
+        # Load per-user exceptions to honour paused/added overrides.
+        exceptions = await asyncio.to_thread(get_exceptions_for_discord_id, str(user_id))
+        paused_roles = {e.role_name for e in exceptions if e.exception_type == "paused"}
+        added_roles = {e.role_name for e in exceptions if e.exception_type == "added"}
+        protected_role_ids = {
+            ROLE_ID_MAP[name]
+            for name in (paused_roles | added_roles)
+            if name in ROLE_ID_MAP
+        }
+
+        # Remove all known Salesforce-managed roles currently held by the member,
+        # except those protected by a paused or added exception.
         roles_to_remove = [
             guild.get_role(role_id)
             for role_id in ROLE_ID_MAP.values()
+            if role_id not in protected_role_ids
         ]
         roles_to_remove = [r for r in roles_to_remove if r is not None and r in member.roles]
         if roles_to_remove:
             await member.remove_roles(*roles_to_remove, reason="Salesforce role refresh")
 
-        # Assign new roles derived from the updated Salesforce profile.
+        # Assign new roles derived from the updated Salesforce profile,
+        # skipping paused roles and always including added roles.
         logical_role_names = role_names_from_student_profile(student_profile)
+        effective_names = (logical_role_names - paused_roles) | added_roles
         roles_to_add: list[discord.Role] = []
-        for logical_name in sorted(logical_role_names):
+        for logical_name in sorted(effective_names):
             role_id = ROLE_ID_MAP.get(logical_name)
             if role_id is None:
                 continue
@@ -848,15 +931,15 @@ class VerificationCog(commands.Cog):
         if roles_to_add:
             await member.add_roles(*roles_to_add, reason="Salesforce role refresh")
 
-        if logical_role_names:
-            await self._save_roles_to_database(user_id, logical_role_names, source="refresh")
+        if effective_names:
+            await self._save_roles_to_database(user_id, effective_names, source="refresh")
 
         logger.info(
             "Refreshed Salesforce roles for Discord user %s: -%d/+%d roles, assigned=[%s]",
             user_id,
             len(roles_to_remove),
             len(roles_to_add),
-            ", ".join(sorted(logical_role_names)) if logical_role_names else "none",
+            ", ".join(sorted(effective_names)) if effective_names else "none",
         )
 
     @slash_command(

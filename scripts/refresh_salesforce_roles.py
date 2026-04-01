@@ -30,7 +30,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 import discord
 
-from utils.database import User, init_db, session_scope
+from utils.database import User, UserRoleException, init_db, session_scope, get_exceptions_for_discord_id
 from asu_discord.roles import ROLE_ID_MAP
 from asu_discord.cogs.verification import role_names_from_student_profile
 
@@ -187,14 +187,25 @@ async def _update_member_roles(
     guild: discord.Guild,
     target_role_ids: list[int],
     apply: bool,
+    protected_role_ids: set[int] | None = None,
+    always_add_role_ids: list[int] | None = None,
 ) -> tuple[int, int]:
+    _protected = protected_role_ids or set()
     role_ids_to_remove = {
-        role_id for role_id in ROLE_ID_MAP.values() if guild.get_role(role_id)
+        role_id
+        for role_id in ROLE_ID_MAP.values()
+        if guild.get_role(role_id) and role_id not in _protected
     }
     current_role_ids = {role.id for role in member.roles}
 
+    # Target = Salesforce-derived + always-add, minus paused
+    effective_target = list(target_role_ids)
+    for rid in (always_add_role_ids or []):
+        if rid not in effective_target:
+            effective_target.append(rid)
+
     to_remove_ids = [rid for rid in role_ids_to_remove if rid in current_role_ids]
-    to_add_ids = [rid for rid in target_role_ids if rid not in current_role_ids]
+    to_add_ids = [rid for rid in effective_target if rid not in current_role_ids]
 
     roles_to_remove = [guild.get_role(rid) for rid in to_remove_ids]
     roles_to_remove = [role for role in roles_to_remove if role is not None]
@@ -406,7 +417,24 @@ async def _process_user(
             return {"status": "skipped_profile_error"}
 
         target_role_ids = _roles_from_profile(profile)
-        desired_names = _role_names_from_ids(target_role_ids)
+
+        # Respect per-user role exceptions.
+        exceptions = await asyncio.to_thread(get_exceptions_for_discord_id, str(discord_id))
+        paused_names = {e.role_name for e in exceptions if e.exception_type == "paused"}
+        added_names = {e.role_name for e in exceptions if e.exception_type == "added"}
+        protected_role_ids = {
+            ROLE_ID_MAP[name]
+            for name in (paused_names | added_names)
+            if name in ROLE_ID_MAP
+        }
+        # Remove paused roles from Salesforce-derived targets.
+        target_role_ids = [
+            rid for rid in target_role_ids
+            if rid not in {ROLE_ID_MAP.get(n) for n in paused_names}
+        ]
+        always_add_ids = [ROLE_ID_MAP[n] for n in added_names if n in ROLE_ID_MAP]
+
+        desired_names = _role_names_from_ids(target_role_ids) + sorted(added_names - paused_names)
         role_flags = _derive_role_flags(desired_names)
         (
             missing_residency_role,
@@ -418,6 +446,8 @@ async def _process_user(
             guild=guild,
             target_role_ids=target_role_ids,
             apply=apply,
+            protected_role_ids=protected_role_ids,
+            always_add_role_ids=always_add_ids,
         )
 
         # Diagnose why roles are missing

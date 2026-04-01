@@ -10,6 +10,7 @@ import Leaves from "./admin/Leaves.jsx";
 import MemberStats from "./admin/MemberStats.jsx";
 import MessageLogs from "./admin/MessageLogs.jsx";
 import QnA from "./admin/QnA.jsx";
+import Exceptions from "./admin/Exceptions.jsx";
 
 // ─── Sidebar navigation config ────────────────────────────────────────────────
 
@@ -23,9 +24,10 @@ const NAV = [
   {
     label: "Management",
     items: [
-      { id: "members",      icon: "fa-users",        label: "Members"       },
-      { id: "joins",        icon: "fa-user-check",   label: "Verifications" },
-      { id: "member-stats", icon: "fa-chart-pie",    label: "Member Stats"  },
+      { id: "members",     icon: "fa-users",        label: "Members"       },
+      { id: "joins",       icon: "fa-user-check",   label: "Verifications" },
+      { id: "member-stats",icon: "fa-chart-pie",    label: "Member Stats"  },
+      { id: "exceptions",  icon: "fa-shield-alt",   label: "Exceptions"    },
     ],
   },
   {
@@ -129,6 +131,7 @@ export default function Admin() {
       case "message-logs":  return <MessageLogs />;
       case "automations":   return <Automations />;
       case "qna":           return <QnA />;
+      case "exceptions":    return <Exceptions />;
       default:              return null;
     }
   };

@@ -103,6 +103,22 @@ class UserRole(Base):
     user = relationship("User", backref="roles")
 
 
+class UserRoleException(Base):
+    """Admin-controlled exceptions to automatic Salesforce-driven role management."""
+
+    __tablename__ = "user_role_exceptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    discord_user_id = Column(String(64), nullable=False, index=True)
+    role_name = Column(String(128), nullable=False, index=True)
+    # "paused": skip this role during Salesforce sync (don't add or remove it)
+    # "added":  always ensure this role is present, never auto-remove it
+    exception_type = Column(String(16), nullable=False)
+    note = Column(Text, nullable=True)
+    created_by = Column(String(64), nullable=True)  # admin Discord user ID
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class QnaPost(Base):
     __tablename__ = "qna_posts"
 
@@ -424,3 +440,13 @@ def get_user_by_discord_id(discord_id: str) -> User | None:
     """Get a user by their Discord ID."""
     with session_scope() as session:
         return session.query(User).filter(User.discord_user_id == discord_id).first()
+
+
+def get_exceptions_for_discord_id(discord_user_id: str) -> list[UserRoleException]:
+    """Return all UserRoleException rows for the given Discord user ID."""
+    with session_scope() as session:
+        return (
+            session.query(UserRoleException)
+            .filter(UserRoleException.discord_user_id == discord_user_id)
+            .all()
+        )

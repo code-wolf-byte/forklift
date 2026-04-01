@@ -13,7 +13,7 @@ from sqlalchemy import func
 import csv
 import io
 
-from utils.database import CronJobConfig, GoldGuideContribution, MessageBackfill, MessageLog, QnaPost, User, UserRole, session_scope
+from utils.database import CronJobConfig, GoldGuideContribution, MessageBackfill, MessageLog, QnaPost, User, UserRole, UserRoleException, session_scope
 
 AZ_TZ = ZoneInfo("America/Phoenix")
 
@@ -1071,6 +1071,176 @@ def admin_gold_guide_stats():
         "total_contributions": len(contributions),
         "gold_guides": gold_guides,
     })
+
+
+# ─── Role Exceptions ──────────────────────────────────────────────────────────
+
+def _serialize_exception(exc: UserRoleException) -> dict:
+    return {
+        "id": exc.id,
+        "discord_user_id": exc.discord_user_id,
+        "role_name": exc.role_name,
+        "exception_type": exc.exception_type,
+        "note": exc.note,
+        "created_by": exc.created_by,
+        "created_at": exc.created_at.isoformat() if exc.created_at else None,
+    }
+
+
+@admin_bp.route("/api/admin/exceptions/search")
+@require_admin
+def admin_exceptions_search():
+    """Search guild members by display name / username (bot cache)."""
+    q = (request.args.get("q") or "").strip()
+    if not q:
+        return jsonify([])
+    try:
+        from asu_discord.api import search_members
+        results = search_members(q, limit=25)
+    except Exception:
+        results = []
+    return jsonify(results)
+
+
+@admin_bp.route("/api/admin/exceptions/user/<discord_user_id>")
+@require_admin
+def admin_exceptions_for_user(discord_user_id: str):
+    """Return existing exceptions + current DB roles for a user."""
+    with session_scope() as db_session:
+        exceptions = (
+            db_session.query(UserRoleException)
+            .filter(UserRoleException.discord_user_id == discord_user_id)
+            .order_by(UserRoleException.created_at.desc())
+            .all()
+        )
+        db_user = (
+            db_session.query(User)
+            .filter(User.discord_user_id == discord_user_id)
+            .one_or_none()
+        )
+        db_roles = (
+            db_session.query(UserRole)
+            .filter(UserRole.user_id == db_user.id)
+            .all()
+            if db_user else []
+        )
+
+    try:
+        from asu_discord.api import get_member_info
+        member_info = get_member_info(discord_user_id)
+    except Exception:
+        member_info = None
+
+    return jsonify({
+        "discord_user_id": discord_user_id,
+        "member_info": member_info,
+        "db_user": {
+            "asurite_id": db_user.asurite_id,
+            "discord_username": db_user.discord_username,
+            "verified": db_user.verified,
+        } if db_user else None,
+        "db_roles": [r.role_name for r in db_roles],
+        "exceptions": [_serialize_exception(e) for e in exceptions],
+    })
+
+
+@admin_bp.route("/api/admin/exceptions/user/<discord_user_id>/pause", methods=["POST"])
+@require_admin
+def admin_exceptions_pause(discord_user_id: str):
+    """Create a 'paused' exception for a role on a user."""
+    data = request.get_json(silent=True) or {}
+    role_name = (data.get("role_name") or "").strip()
+    note = (data.get("note") or "").strip() or None
+
+    from asu_discord.roles import ROLE_ID_MAP
+    if role_name not in ROLE_ID_MAP:
+        return jsonify({"error": f"Unknown role: {role_name!r}"}), 400
+
+    admin_discord_id = (session.get("verification_state") or {}).get("discord_user_id")
+
+    with session_scope() as db_session:
+        # Upsert: remove any existing exception of either type for this role+user, then insert.
+        db_session.query(UserRoleException).filter(
+            UserRoleException.discord_user_id == discord_user_id,
+            UserRoleException.role_name == role_name,
+        ).delete()
+        exc = UserRoleException(
+            discord_user_id=discord_user_id,
+            role_name=role_name,
+            exception_type="paused",
+            note=note,
+            created_by=admin_discord_id,
+        )
+        db_session.add(exc)
+        db_session.flush()
+        result = _serialize_exception(exc)
+
+    return jsonify(result), 201
+
+
+@admin_bp.route("/api/admin/exceptions/user/<discord_user_id>/add", methods=["POST"])
+@require_admin
+def admin_exceptions_add(discord_user_id: str):
+    """Create an 'added' exception for a role on a user (and immediately grant it)."""
+    data = request.get_json(silent=True) or {}
+    role_name = (data.get("role_name") or "").strip()
+    note = (data.get("note") or "").strip() or None
+
+    from asu_discord.roles import ROLE_ID_MAP
+    if role_name not in ROLE_ID_MAP:
+        return jsonify({"error": f"Unknown role: {role_name!r}"}), 400
+
+    admin_discord_id = (session.get("verification_state") or {}).get("discord_user_id")
+
+    # Try to assign the role immediately on Discord.
+    try:
+        from asu_discord.api import add_role_to_member, DiscordAPIError
+        add_role_to_member(discord_user_id, role_name)
+    except Exception as exc:
+        logger.warning("Could not immediately add role %s to %s: %s", role_name, discord_user_id, exc)
+
+    with session_scope() as db_session:
+        db_session.query(UserRoleException).filter(
+            UserRoleException.discord_user_id == discord_user_id,
+            UserRoleException.role_name == role_name,
+        ).delete()
+        exc = UserRoleException(
+            discord_user_id=discord_user_id,
+            role_name=role_name,
+            exception_type="added",
+            note=note,
+            created_by=admin_discord_id,
+        )
+        db_session.add(exc)
+        db_session.flush()
+        result = _serialize_exception(exc)
+
+    return jsonify(result), 201
+
+
+@admin_bp.route("/api/admin/exceptions/<int:exception_id>", methods=["DELETE"])
+@require_admin
+def admin_exceptions_delete(exception_id: int):
+    """Delete a role exception (and optionally remove the Discord role for 'added' type)."""
+    with session_scope() as db_session:
+        exc = db_session.query(UserRoleException).filter(UserRoleException.id == exception_id).one_or_none()
+        if exc is None:
+            return jsonify({"error": "Not found"}), 404
+
+        discord_user_id = exc.discord_user_id
+        role_name = exc.role_name
+        exc_type = exc.exception_type
+        db_session.delete(exc)
+
+    # For "added" exceptions: remove the role from Discord too.
+    if exc_type == "added":
+        try:
+            from asu_discord.api import remove_role_from_member
+            remove_role_from_member(discord_user_id, role_name)
+        except Exception as e:
+            logger.warning("Could not remove role %s from %s after deleting exception: %s", role_name, discord_user_id, e)
+
+    return jsonify({"status": "deleted", "id": exception_id})
 
 
 @admin_bp.route("/admin")
