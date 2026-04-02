@@ -209,7 +209,7 @@ class AppConfig:
         self.CAS_SERVICE_URL = _env_value("CAS_SERVICE_URL") or f"{self.PUBLIC_BASE_URL}/auth/cas/callback"
         self.CAS_ENABLED = _env_bool("CAS_ENABLED", default=not self.DEV_MODE)
         if not self.QNA_MODEL_ARN:
-            self.QNA_MODEL_ARN = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+            self.QNA_MODEL_ARN = "anthropic.claude-haiku-4-5-20251001-v1:0"
 
 
 @dataclass(slots=True)
