@@ -40,6 +40,20 @@ class ForkmanQNA:
         )
 
     @staticmethod
+    def _extract_citation_links(response: Dict[str, Any]) -> list[str]:
+        """Extract unique source URLs from Bedrock citations, preserving order."""
+        seen: set[str] = set()
+        urls: list[str] = []
+        for citation in (response or {}).get("citations", []):
+            for ref in citation.get("retrievedReferences", []):
+                location = ref.get("location") or {}
+                url = (location.get("webLocation") or {}).get("url")
+                if url and url not in seen:
+                    seen.add(url)
+                    urls.append(url)
+        return urls
+
+    @staticmethod
     def build_query(thread_title: str, message_content: str) -> str:
         """
         Matches the Go logic: channel.Name + " " + msg.Content
@@ -143,6 +157,13 @@ class ForkmanQNA:
                 "rating_prompt": None,
                 "raw_response": response,
             }
+
+        citation_links = self._extract_citation_links(response)
+        if citation_links:
+            sources_block = "\n\n**Sources:**\n" + "\n".join(
+                f"- [{url}](<{url}>)" for url in citation_links
+            )
+            answer_text = answer_text + sources_block
 
         full_message = "\n----------------------\n" + answer_text
         rating_prompt = (
