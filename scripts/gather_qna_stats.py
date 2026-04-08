@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Gather QnA forum channel statistics (November 2025 – February 2026).
+Gather QnA forum channel statistics (March 2026).
 
 Four primary metrics
 --------------------
@@ -35,8 +35,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = PROJECT_ROOT / ".env"
 
 GUILD_ID = 1187144343400751234
-SINCE = datetime(2025, 11, 1, tzinfo=timezone.utc)
-UNTIL = datetime(2026, 3, 1, tzinfo=timezone.utc)  # exclusive — covers through end of Feb 2026
+SINCE = datetime(2026, 3, 1, tzinfo=timezone.utc)
+UNTIL = datetime(2026, 4, 1, tzinfo=timezone.utc)  # exclusive — covers through end of Mar 2026
 
 # Custom IDs used by QnAFeedbackView in qna.py
 SATISFACTORY_CUSTOM_ID = "qna:satisfied"
@@ -277,10 +277,11 @@ async def run(*, forum_channel_id: int) -> None:
     campus_counts: dict[str, int] = {}
     extra_forum_tag_counts: dict[str, int] = defaultdict(int)
     extra_forum_total = 0
+    extra_forum_messages = 0
 
     @client.event
     async def on_ready() -> None:
-        nonlocal total_threads, total_messages, bot_credit_count, bot_satisfied_count, bot_staff_confirmed_count, staff_answered_count, needs_help_unanswered, pending_count, no_bot_msg_count, campus_counts, extra_forum_tag_counts, extra_forum_total
+        nonlocal total_threads, total_messages, bot_credit_count, bot_satisfied_count, bot_staff_confirmed_count, staff_answered_count, needs_help_unanswered, pending_count, no_bot_msg_count, campus_counts, extra_forum_tag_counts, extra_forum_total, extra_forum_messages
         logger.info("Connected to Discord as %s.", client.user)
 
         guild = client.get_guild(GUILD_ID)
@@ -390,8 +391,10 @@ async def run(*, forum_channel_id: int) -> None:
                     extra_forum_tag_counts[tag_name] += 1
                 if not thread_tags:
                     extra_forum_tag_counts["(no tag)"] += 1
+                async for _ in thread.history(limit=None):
+                    extra_forum_messages += 1
             extra_forum_total = len(extra_threads)
-            logger.info("Extra forum total threads: %d", extra_forum_total)
+            logger.info("Extra forum total threads: %d, messages: %d", extra_forum_total, extra_forum_messages)
         else:
             logger.warning(
                 "Extra forum channel %d not found or not a ForumChannel.", EXTRA_FORUM_ID
@@ -465,7 +468,7 @@ async def run(*, forum_channel_id: int) -> None:
 
     print(f"\n{'=' * W}")
     print("  QnA Forum Statistics")
-    print("  November 2025 – February 2026")
+    print("  March 2026")
     print(f"{'=' * W}")
 
     print(f"\n  {'Total posts created:':<38} {total_threads:>5}")
@@ -492,8 +495,11 @@ async def run(*, forum_channel_id: int) -> None:
         print(f"  {tag:<28} {count:>5}  {bc:>5}  {sc:>5}")
 
     print(f"\n{'-' * W}")
-    print(f"  Forum {EXTRA_FORUM_ID} — Tag Usage  ({extra_forum_total} total posts)")
+    print(f"  Forum {EXTRA_FORUM_ID} — Tag Usage")
     print(f"{'-' * W}")
+    print(f"  {'Total posts created:':<38} {extra_forum_total:>5}")
+    print(f"  {'Total messages sent:':<38} {extra_forum_messages:>5}")
+    print()
     if extra_forum_tag_counts:
         for tag, count in sorted(extra_forum_tag_counts.items(), key=lambda x: -x[1]):
             print(f"  {tag:<28} {count:>5}  ({pct(count, extra_forum_total)})")

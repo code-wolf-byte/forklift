@@ -27,3 +27,4 @@ build/
 *.cover
 .coverage
 .env
+*.csv

@@ -481,12 +481,23 @@ class QnACog(commands.Cog):
                 "Please try again later or ping a moderator."
             )
         elif not result.get("ok"):
-            await thread.send(
-                result.get(
-                    "full_message",
-                    "Uh oh, I couldn't find an answer to your question. Please try again later.",
+            if result.get("retries_exhausted"):
+                await thread.send(
+                    f"<@{author_id}> I tried 3 times but wasn't able to get an answer to your question. "
+                    "A staff member has been notified and will follow up shortly.",
+                    allowed_mentions=discord.AllowedMentions(users=True),
                 )
-            )
+                await thread.send(
+                    f"<@689510313971810437> Forkman failed to answer after 3 attempts in this thread.",
+                    allowed_mentions=discord.AllowedMentions(users=True),
+                )
+            else:
+                await thread.send(
+                    result.get(
+                        "full_message",
+                        "Uh oh, I couldn't find an answer to your question. Please try again later.",
+                    )
+                )
         else:
             answer_text = result.get("answer") or result.get("full_message")
             if not answer_text:
@@ -650,29 +661,39 @@ class QnACog(commands.Cog):
         )
         if not qna:
             return None
-        response = qna.get_answer(
-            thread_title=thread_title,
-            message_content=question_text,
-            user_id=str(author_id) if author_id else None,
-        )
-        logger.info(f"Answer from ForkmanQNA: {response}")
-        if response["ok"]:
-            logger.info(
-                "Generated answer for thread '%s' (author: %s)",
-                thread_title,
-                author_id,
+
+        max_attempts = 3
+        response = None
+        for attempt in range(1, max_attempts + 1):
+            response = qna.get_answer(
+                thread_title=thread_title,
+                message_content=question_text,
+                user_id=str(author_id) if author_id else None,
             )
-            del qna
-            return response
-        else:
+            logger.info(f"Answer from ForkmanQNA (attempt {attempt}): {response}")
+            if response["ok"]:
+                logger.info(
+                    "Generated answer for thread '%s' (author: %s) on attempt %d",
+                    thread_title,
+                    author_id,
+                    attempt,
+                )
+                del qna
+                return response
             logger.warning(
-                "Failed to generate answer for thread '%s' (author: %s): %s",
+                "Failed to generate answer for thread '%s' (author: %s), attempt %d/%d: %s",
                 thread_title,
                 author_id,
+                attempt,
+                max_attempts,
                 response.get("full_message"),
             )
-            del qna
-            return response
+            if attempt < max_attempts:
+                await asyncio.sleep(2)
+
+        del qna
+        response["retries_exhausted"] = True
+        return response
 
     def _is_enabled(self, guild_id: Optional[int]) -> bool:
         if guild_id is None:

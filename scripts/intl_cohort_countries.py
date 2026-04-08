@@ -33,8 +33,8 @@ BASE = "https://esb.asu.edu"
 CONTACT_URL = f"{BASE}/api/v1/asu-sf-contact/contact"
 OPP_URL = f"{BASE}/api/v1/asu-sf-opportunity/opportunity"
 
-WINDOW_START = "2025-11-15"
-WINDOW_END = "2026-02-28 23:59:59"
+WINDOW_START = "2000-01-01"
+WINDOW_END = "2026-03-31 23:59:59"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -94,8 +94,11 @@ def get_cohort_asuries() -> list[tuple[str, str]]:
 
 
 # ---------------------------------------------------------------------------
-# Salesforce fetch (no opportunity filtering — return country from contact)
+# Salesforce fetch — filter to term code 2267 via opportunity lookup
 # ---------------------------------------------------------------------------
+
+TARGET_TERM = "2267"
+
 
 async def fetch_country(
     session: aiohttp.ClientSession,
@@ -105,25 +108,50 @@ async def fetch_country(
 ) -> dict[str, Any]:
     async with sem:
         try:
+            # 1. Contact lookup
             async with session.get(
                 f"{CONTACT_URL}?asurite={asurite}",
                 headers={"Authorization": header},
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
                 if resp.status != 200:
-                    return {"asurite": asurite, "country": "Unknown", "error": f"HTTP {resp.status}"}
+                    return {"asurite": asurite, "country": "Unknown", "term_match": False, "error": f"HTTP {resp.status}"}
                 data = await resp.json()
 
             contacts = data.get("contact") or []
             if not contacts:
-                return {"asurite": asurite, "country": "Unknown", "error": "no contact"}
+                return {"asurite": asurite, "country": "Unknown", "term_match": False, "error": "no contact"}
 
             contact = contacts[0]
+            contact_id = contact.get("id")
             country = (contact.get("country") or "Unknown").strip() or "Unknown"
-            return {"asurite": asurite, "country": country, "error": None}
+
+            # 2. Opportunity lookup — check for term code 2267
+            has_term = False
+            for career in ("Undergraduate", "Graduate"):
+                async with session.get(
+                    f"{OPP_URL}?contactId={contact_id}&career={career}",
+                    headers={"Authorization": header},
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as opp_resp:
+                    if opp_resp.status != 200:
+                        continue
+                    opps = await opp_resp.json()
+                    if not isinstance(opps, list):
+                        continue
+                    for opp in opps:
+                        stage = (opp.get("stageName") or "").strip().lower()
+                        term = str(opp.get("termCode") or "")
+                        if term == TARGET_TERM and stage in {"enrolled", "admitted"}:
+                            has_term = True
+                            break
+                if has_term:
+                    break
+
+            return {"asurite": asurite, "country": country, "term_match": has_term, "error": None}
 
         except Exception as exc:
-            return {"asurite": asurite, "country": "Unknown", "error": str(exc)}
+            return {"asurite": asurite, "country": "Unknown", "term_match": False, "error": str(exc)}
 
 
 async def bulk_fetch(asuries: list[str], concurrency: int) -> list[dict[str, Any]]:
@@ -161,7 +189,7 @@ async def main() -> None:
     out_dir = Path(args.output_dir)
 
     rows = get_cohort_asuries()
-    logger.info("Cohort size (Nov 15 2025 – Feb 28 2026): %d", len(rows))
+    logger.info("Cohort size (all time – Mar 31 2026): %d", len(rows))
 
     asuries = [r[0] for r in rows]
     if args.limit:
@@ -172,30 +200,41 @@ async def main() -> None:
 
     # Write CSV
     out_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = out_dir / "intl_cohort_nov25_feb26_countries.csv"
+    csv_path = out_dir / "intl_cohort_term2267_countries.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["asurite", "country", "error"])
+        writer = csv.DictWriter(f, fieldnames=["asurite", "country", "term_match", "error"])
         writer.writeheader()
         writer.writerows(profiles)
     logger.info("Wrote CSV → %s", csv_path)
 
-    # Country breakdown
+    # Country breakdown — only users with a matching term 2267 opportunity
     ok = [p for p in profiles if not p["error"]]
     errors = [p for p in profiles if p["error"]]
-    country_counts = Counter(p["country"] for p in ok)
+    matched = [p for p in ok if p["term_match"]]
+    country_counts = Counter(p["country"] for p in matched)
 
     print(f"\n{'='*55}")
-    print(f"  International Student Cohort — Country Breakdown")
-    print(f"  Verification window: Nov 15 2025 – Feb 28 2026")
+    print("  International Student Cohort — Country Breakdown")
+    print("  Term code filter: 2267 (admitted/enrolled)")
     print(f"{'='*55}")
     print(f"  Total in cohort:      {len(profiles):>4}")
     print(f"  Successful lookups:   {len(ok):>4}")
+    print(f"  Term 2267 matches:    {len(matched):>4}")
     print(f"  Lookup errors:        {len(errors):>4}")
     print(f"\n  {'Country':<35} {'Count':>5}  {'%':>6}")
     print(f"  {'-'*50}")
+    others = 0
+    others_count = 0
     for country, count in country_counts.most_common():
-        pct = count / len(ok) * 100 if ok else 0
-        print(f"  {country:<35} {count:>5}  {pct:>5.1f}%")
+        pct = count / len(matched) * 100 if matched else 0
+        if pct < 2.0:
+            others += count
+            others_count += 1
+        else:
+            print(f"  {country:<35} {count:>5}  {pct:>5.1f}%")
+    if others:
+        pct = others / len(matched) * 100 if matched else 0
+        print(f"  {'Others':<35} {others:>5}  {pct:>5.1f}%  ({others_count} countries)")
     print()
 
 

@@ -126,13 +126,24 @@ class ForkmanQNA:
                 self.knowledge_base_id,
                 self.model_arn,
             )
-            error_msg = (
-                "Uh oh, I couldn't find an answer to your question. "
-                f"An error occurred contacting Bedrock: {e}"
-            )
+            # Detect model access / marketplace subscription errors specifically
+            error_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+            error_detail = str(e)
+            if "aws-marketplace" in error_detail or "ModelAccess" in error_detail or (
+                error_code == "ValidationException" and "not authorized" in error_detail
+            ):
+                user_msg = (
+                    "Uh oh, I couldn't find an answer to your question. "
+                    "The AI model is currently unavailable — please try again later or ping a moderator."
+                )
+            else:
+                user_msg = (
+                    "Uh oh, I couldn't find an answer to your question. "
+                    "Please try again later or ping a moderator."
+                )
             return {
                 "ok": False,
-                "full_message": error_msg,
+                "full_message": user_msg,
                 "answer": None,
                 "rating_prompt": None,
                 "raw_response": None,

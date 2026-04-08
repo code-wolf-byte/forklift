@@ -213,17 +213,37 @@ def get_forkman_verified_asuries() -> list[tuple[str, str]]:
     return rows
 
 
-def get_forklift_asuries() -> list[tuple[str, str]]:
-    """Return [(asurite, discord_user_id), ...] for verified forklift users."""
+def get_forklift_asuries(present_during: tuple[str, str] | None = None) -> list[tuple[str, str]]:
+    """Return [(asurite, discord_user_id), ...] for verified forklift users.
+
+    If present_during is provided as (start, end) ISO date strings, only users
+    who were in the server during that window are returned:
+      - created before <end>
+      - left_at IS NULL or left_at >= <start>
+    """
     con = sqlite3.connect(FORKLIFT_DB)
-    rows = con.execute(
-        """
-        SELECT asurite_id, discord_user_id
-        FROM users
-        WHERE verified = 1
-          AND asurite_id IS NOT NULL
-        """
-    ).fetchall()
+    if present_during:
+        start, end = present_during
+        rows = con.execute(
+            """
+            SELECT asurite_id, discord_user_id
+            FROM users
+            WHERE verified = 1
+              AND asurite_id IS NOT NULL
+              AND created_at < ?
+              AND (left_at IS NULL OR left_at >= ?)
+            """,
+            (end, start),
+        ).fetchall()
+    else:
+        rows = con.execute(
+            """
+            SELECT asurite_id, discord_user_id
+            FROM users
+            WHERE verified = 1
+              AND asurite_id IS NOT NULL
+            """
+        ).fetchall()
     con.close()
     return rows
 
@@ -388,6 +408,13 @@ def parse_args() -> argparse.Namespace:
         default=str(PROJECT_ROOT / "data"),
         help="Directory for CSV output",
     )
+    parser.add_argument(
+        "--present-during",
+        type=str,
+        default=None,
+        metavar="START,END",
+        help="Filter forklift users present during this window, e.g. '2026-03-01,2026-04-01'",
+    )
     return parser.parse_args()
 
 
@@ -442,7 +469,8 @@ async def main() -> None:
 
     # --- This year: forklift.db ---
     logger.info("Loading forklift.db verified ASURITEs...")
-    forklift_rows = get_forklift_asuries()
+    present_during = tuple(args.present_during.split(",")) if args.present_during else None
+    forklift_rows = get_forklift_asuries(present_during=present_during)
     forklift_asuries = [r[0] for r in forklift_rows]
     logger.info("forklift.db verified users: %d", len(forklift_asuries))
 
