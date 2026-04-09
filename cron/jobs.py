@@ -138,9 +138,14 @@ def _fetch_departed_users(since: datetime | None) -> List[Tuple[str, datetime]]:
     return rows
 
 
-def _fetch_incomplete_verification_users(since: datetime | None) -> List[Tuple[str, datetime]]:
-    """Return users who completed CAS (step 1) but never linked Discord (step 2)."""
+def _fetch_incomplete_verification_users(since: datetime | None, now: datetime) -> List[Tuple[str, datetime]]:
+    """Return users who completed CAS (step 1) but never linked Discord (step 2).
+
+    Also stamps incomplete_sftp_exported_at on each fetched user so we can later
+    track how many of them eventually verified.
+    """
     since = _normalize_dt(since)
+    now_naive = now.replace(tzinfo=None) if now.tzinfo else now
     with session_scope() as session:
         query = (
             session.query(User)
@@ -157,6 +162,7 @@ def _fetch_incomplete_verification_users(since: datetime | None) -> List[Tuple[s
             if created_at is None:
                 continue
             rows.append((user.email, created_at))
+            user.incomplete_sftp_exported_at = now_naive
     return rows
 
 
@@ -173,7 +179,7 @@ def upload_incomplete_verifications_to_sftp() -> None:
     job_name = "upload_incomplete_verifications_to_sftp"
     now = datetime.now(timezone.utc)
     last_run = _get_last_run(job_name)
-    rows = _fetch_incomplete_verification_users(last_run)
+    rows = _fetch_incomplete_verification_users(last_run, now)
 
     if not rows:
         _set_last_run(job_name, now)

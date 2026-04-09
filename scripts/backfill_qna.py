@@ -73,6 +73,8 @@ async def _classify_and_extract(thread, bot_id: int, gold_guide_ids: set[int]) -
     """
     result = {
         "status": "no_bot_msg",
+        "question_text": None,
+        "owner_id": None,
         "answer_text": None,
         "assistant_msg_id": None,
         "gold_guide_msgs": [],
@@ -85,6 +87,10 @@ async def _classify_and_extract(thread, bot_id: int, gold_guide_ids: set[int]) -
     except Exception as exc:
         logger.warning("Could not read thread %s: %s", thread.id, exc)
         return result
+
+    if messages:
+        result["owner_id"] = str(messages[0].author.id)
+        result["question_text"] = messages[0].content or None
 
     original_poster_id = messages[0].author.id if messages else None
     assistance_idx = None
@@ -197,7 +203,9 @@ async def run(*, forum_channel_id: int) -> None:
                         guild_id=str(guild.id),
                         channel_id=str(forum_channel.id),
                         thread_id=str(thread.id),
+                        owner_id=info["owner_id"],
                         title=thread.name,
+                        question=info["question_text"],
                         tags=json.dumps(tag_names),
                         status=info["status"],
                         answer=info["answer_text"],
@@ -209,6 +217,10 @@ async def run(*, forum_channel_id: int) -> None:
                     posts_upserted += 1
                 else:
                     # Update fields that may have been missing
+                    if record.owner_id is None and info["owner_id"]:
+                        record.owner_id = info["owner_id"]
+                    if record.question is None and info["question_text"]:
+                        record.question = info["question_text"]
                     if record.tags is None:
                         record.tags = json.dumps(tag_names)
                     if record.status in (None, "pending") and info["status"] != "no_bot_msg":

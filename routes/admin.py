@@ -247,32 +247,35 @@ def _serialize_cron_config(cfg: CronJobConfig, extra_stats: dict | None = None) 
 def _get_incomplete_verification_stats(db_session) -> dict:
     """Return n/x conversion stats for the incomplete verification export job.
 
-    x = users who completed CAS (have email) — all eligible to be exported
+    x = users who were actually exported (have incomplete_sftp_exported_at set)
     n = of those, how many eventually verified (completed the full flow)
-    currently_incomplete = still stuck after CAS (not yet verified)
+    currently_incomplete = exported but still not verified
     """
-    total_cas = (
+    total_exported = (
         db_session.query(User)
-        .filter(User.email != "")
+        .filter(User.incomplete_sftp_exported_at.isnot(None))
         .count()
     )
-    verified_from_cas = (
+    verified_after_export = (
         db_session.query(User)
-        .filter(User.email != "", User.verified == True)  # noqa: E712
+        .filter(
+            User.incomplete_sftp_exported_at.isnot(None),
+            User.verified == True,  # noqa: E712
+        )
         .count()
     )
     currently_incomplete = (
         db_session.query(User)
         .filter(
-            User.email != "",
+            User.incomplete_sftp_exported_at.isnot(None),
             User.verified == False,  # noqa: E712
             User.discord_user_id.is_(None),
         )
         .count()
     )
     return {
-        "verified": verified_from_cas,
-        "total_exported": total_cas,
+        "verified": verified_after_export,
+        "total_exported": total_exported,
         "currently_incomplete": currently_incomplete,
     }
 
