@@ -152,6 +152,8 @@ export default function Automations() {
         const error = errors[job.job_name];
         const tStatus = triggerStatus[job.job_name];
         const isSurveyJob = job.job_name === "send_survey_messages";
+        const isIncompleteJob = job.job_name === "upload_incomplete_verifications_to_sftp";
+        const incompleteStats = isIncompleteJob && job.stats ? job.stats : null;
 
         return (
           <Card key={job.job_name} className="mb-3">
@@ -160,6 +162,20 @@ export default function Automations() {
                 <div>
                   <h5 className="text-base font-semibold mb-0">{job.display_name}</h5>
                   <code className="text-sm text-muted-foreground">{job.job_name}</code>
+                  {incompleteStats && (
+                    <div className="mt-1 flex items-center gap-2">
+                      <span
+                        className="text-sm font-semibold"
+                        style={{ color: "#8c1d40" }}
+                        title="Users who verified / Total users exported (completed CAS)"
+                      >
+                        {incompleteStats.verified}/{incompleteStats.total_exported} verified
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        ({incompleteStats.currently_incomplete} still incomplete)
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 pt-1">
                   <Switch

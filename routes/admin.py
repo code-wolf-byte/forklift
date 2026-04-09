@@ -224,12 +224,12 @@ def _next_run_az(cfg: CronJobConfig) -> str:
     return (scheduled_today + timedelta(days=1)).isoformat()
 
 
-def _serialize_cron_config(cfg: CronJobConfig) -> dict:
+def _serialize_cron_config(cfg: CronJobConfig, extra_stats: dict | None = None) -> dict:
     last_run_str = None
     if cfg.last_run_at is not None:
         last_az = cfg.last_run_at.replace(tzinfo=timezone.utc).astimezone(AZ_TZ)
         last_run_str = last_az.isoformat()
-    return {
+    result = {
         "job_name": cfg.job_name,
         "display_name": cfg.display_name,
         "enabled": cfg.enabled,
@@ -239,6 +239,42 @@ def _serialize_cron_config(cfg: CronJobConfig) -> dict:
         "next_run_at": _next_run_az(cfg),
         "channel_id": cfg.channel_id,
     }
+    if extra_stats is not None:
+        result["stats"] = extra_stats
+    return result
+
+
+def _get_incomplete_verification_stats(db_session) -> dict:
+    """Return n/x conversion stats for the incomplete verification export job.
+
+    x = users who completed CAS (have email) — all eligible to be exported
+    n = of those, how many eventually verified (completed the full flow)
+    currently_incomplete = still stuck after CAS (not yet verified)
+    """
+    total_cas = (
+        db_session.query(User)
+        .filter(User.email != "")
+        .count()
+    )
+    verified_from_cas = (
+        db_session.query(User)
+        .filter(User.email != "", User.verified == True)  # noqa: E712
+        .count()
+    )
+    currently_incomplete = (
+        db_session.query(User)
+        .filter(
+            User.email != "",
+            User.verified == False,  # noqa: E712
+            User.discord_user_id.is_(None),
+        )
+        .count()
+    )
+    return {
+        "verified": verified_from_cas,
+        "total_exported": total_cas,
+        "currently_incomplete": currently_incomplete,
+    }
 
 
 @admin_bp.route("/api/admin/automations")
@@ -246,7 +282,13 @@ def _serialize_cron_config(cfg: CronJobConfig) -> dict:
 def admin_automations():
     with session_scope() as db_session:
         configs = db_session.query(CronJobConfig).order_by(CronJobConfig.id.asc()).all()
-    return jsonify([_serialize_cron_config(c) for c in configs])
+        result = []
+        for c in configs:
+            extra = None
+            if c.job_name == "upload_incomplete_verifications_to_sftp":
+                extra = _get_incomplete_verification_stats(db_session)
+            result.append(_serialize_cron_config(c, extra_stats=extra))
+    return jsonify(result)
 
 
 @admin_bp.route("/api/admin/automations/<job_name>", methods=["PUT"])
@@ -284,7 +326,10 @@ def admin_update_automation(job_name: str):
             .filter(CronJobConfig.job_name == job_name)
             .one()
         )
-        return jsonify(_serialize_cron_config(cfg))
+        extra = None
+        if job_name == "upload_incomplete_verifications_to_sftp":
+            extra = _get_incomplete_verification_stats(db_session)
+        return jsonify(_serialize_cron_config(cfg, extra_stats=extra))
 
 
 @admin_bp.route("/api/admin/automations/<job_name>/trigger", methods=["POST"])
