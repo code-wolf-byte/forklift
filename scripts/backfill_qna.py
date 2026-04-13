@@ -40,6 +40,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
+_LOCAL_DB_URL = f"sqlite:///{PROJECT_ROOT / 'forklift.db'}"
+_SKIP_ENV_KEYS = {"DATABASE_URL"}
+
+
 def load_env(path: Path) -> None:
     if not path.exists():
         return
@@ -49,9 +53,12 @@ def load_env(path: Path) -> None:
             continue
         key, _, value = line.partition("=")
         key = key.strip()
+        if key in _SKIP_ENV_KEYS:
+            continue
         value = value.strip().strip("\"'")
         if key:
             os.environ.setdefault(key, value)
+    os.environ["DATABASE_URL"] = _LOCAL_DB_URL
 
 
 def _has_feedback_buttons(msg) -> bool:

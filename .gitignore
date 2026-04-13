@@ -28,3 +28,8 @@ build/
 .coverage
 .env
 *.csv
+*.xlsx
+*.pdf
+*.docx
+*.pptx
+*.zip
