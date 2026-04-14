@@ -983,7 +983,8 @@ class VerificationCog(commands.Cog):
     async def ban_asurite(
         self,
         ctx: discord.ApplicationContext,
-        asurite: Option(str, "ASURITE ID to ban"),
+        member: Option(discord.Member, "Discord member to ban", required=False, default=None),
+        asurite: Option(str, "ASURITE ID to ban", required=False, default=None),
     ) -> None:
         """Ban an ASURITE from verification and revoke their Discord access."""
         if ctx.guild_id != self.guild_id or ctx.guild is None:
@@ -993,13 +994,32 @@ class VerificationCog(commands.Cog):
             )
             return
 
-        target = (asurite or "").strip()
-        if not target:
-            await ctx.respond("Please provide an ASURITE to ban.", ephemeral=True)
+        if member is None and not (asurite or "").strip():
+            await ctx.respond(
+                "Please provide either a Discord member or an ASURITE ID to ban.",
+                ephemeral=True,
+            )
             return
 
         await ctx.defer(ephemeral=True)
 
+        # If a Discord member was given, resolve their ASURITE from the DB first.
+        if member is not None:
+            with session_scope() as db_session:
+                linked = (
+                    db_session.query(User)
+                    .filter(User.discord_user_id == str(member.id))
+                    .one_or_none()
+                )
+            if linked is None or not linked.asurite_id:
+                await ctx.followup.send(
+                    f"{member.mention} has no ASURITE linked in the system.",
+                    ephemeral=True,
+                )
+                return
+            asurite = linked.asurite_id
+
+        target = (asurite or "").strip()
         normalized = target.lower()
         stored_asurite: str | None = None
         discord_user_id: int | None = None
@@ -1133,12 +1153,12 @@ class VerificationCog(commands.Cog):
     @slash_command(**_admin_command_kwargs("email", "Look up the ASU email for a verified member."))
     async def get_member_email(
         self,
-        interaction: discord.Interaction,
+        ctx: discord.ApplicationContext,
         user: discord.Member,
     ) -> None:
         """Return the verified ASU email for a Discord member. Only visible to the invoker."""
-        if interaction.guild_id != self.guild_id or interaction.guild is None:
-            await interaction.response.send_message(
+        if ctx.guild_id != self.guild_id or ctx.guild is None:
+            await ctx.respond(
                 "This command is only available in the Devil2Devil server.",
                 ephemeral=True,
             )
@@ -1152,14 +1172,14 @@ class VerificationCog(commands.Cog):
             )
 
         if db_user is None:
-            await interaction.response.send_message(
+            await ctx.respond(
                 f"{user.mention} has no verification record in the system.",
                 ephemeral=True,
             )
             return
 
         if not db_user.email:
-            await interaction.response.send_message(
+            await ctx.respond(
                 f"{user.mention} is in the system but has no email on record.",
                 ephemeral=True,
             )
@@ -1171,4 +1191,4 @@ class VerificationCog(commands.Cog):
             lines.append(f"ASURITE: `{db_user.asurite_id}`")
         lines.append(f"Verified: {'✅' if db_user.verified else '❌'}")
 
-        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        await ctx.respond("\n".join(lines), ephemeral=True)
