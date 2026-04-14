@@ -1072,19 +1072,39 @@ class VerificationCog(commands.Cog):
                     member = None
 
         if member is not None:
-            removed = await self._remove_verified_role(
-                ctx.guild,
-                member,
-                reason=f"Verification ban by {ctx.author}",
+            reason = f"Verification blacklist by {ctx.author}"
+
+            # Remove verified role.
+            await self._remove_verified_role(ctx.guild, member, reason=reason)
+
+            # Remove all managed roles (college, campus, academic level, etc.).
+            managed_role_ids = set(ROLE_ID_MAP.values())
+            roles_to_remove = [r for r in member.roles if r.id in managed_role_ids]
+            if roles_to_remove:
+                try:
+                    await member.remove_roles(*roles_to_remove, reason=reason)
+                except discord.HTTPException as exc:
+                    logger.warning(
+                        "Failed to remove managed roles from member %s during blacklist: %s",
+                        member.id,
+                        exc,
+                    )
+
+            # Add unverified role.
+            unverified_role = self._get_unverified_role(ctx.guild)
+            if unverified_role is not None and unverified_role not in member.roles:
+                try:
+                    await member.add_roles(unverified_role, reason=reason)
+                except discord.HTTPException as exc:
+                    logger.warning(
+                        "Failed to add unverified role to member %s during blacklist: %s",
+                        member.id,
+                        exc,
+                    )
+
+            notes.append(
+                f"Removed all roles and assigned unverified role to {member.mention}."
             )
-            if removed:
-                notes.append(
-                    f"Removed verification role from linked account {member.mention}."
-                )
-            else:
-                notes.append(
-                    "No verification role changes were required for the linked account."
-                )
         elif discord_user_id is not None:
             notes.append(
                 "Linked Discord account not found in the guild; no role changes made."
