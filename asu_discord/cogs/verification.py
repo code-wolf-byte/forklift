@@ -468,7 +468,7 @@ class VerificationCog(commands.Cog):
     async def verify_member(
         self,
         ctx: discord.ApplicationContext,
-        member: Option(discord.Member, "Member to verify"),
+        member: discord.Member = Option(discord.Member, "Member to verify"),
     ) -> None:
         """Assign the verification role to a member."""
         if ctx.guild_id != self.guild_id or ctx.guild is None:
@@ -950,7 +950,7 @@ class VerificationCog(commands.Cog):
     async def unverify_member(
         self,
         ctx: discord.ApplicationContext,
-        member: Option(discord.Member, "Member to unverify"),
+        member: discord.Member = Option(discord.Member, "Member to unverify"),
     ) -> None:
         """Remove the verification role from a member."""
         if ctx.guild_id != self.guild_id or ctx.guild is None:
@@ -983,8 +983,8 @@ class VerificationCog(commands.Cog):
     async def ban_asurite(
         self,
         ctx: discord.ApplicationContext,
-        member: Option(discord.Member, "Discord member to ban", required=False, default=None),
-        asurite: Option(str, "ASURITE ID to ban", required=False, default=None),
+        member: discord.Member = Option(discord.Member, "Discord member to ban", required=False, default=None),
+        asurite: str = Option(str, "ASURITE ID to ban", required=False, default=None),
     ) -> None:
         """Ban an ASURITE from verification and revoke their Discord access."""
         if ctx.guild_id != self.guild_id or ctx.guild is None:
@@ -1154,7 +1154,7 @@ class VerificationCog(commands.Cog):
     async def get_member_email(
         self,
         ctx: discord.ApplicationContext,
-        user: Option(discord.Member, "Discord member to look up"),
+        user: discord.Member = Option(discord.Member, "Discord member to look up"),
     ) -> None:
         """Return the verified ASU email for a Discord member. Only visible to the invoker."""
         if ctx.guild_id != self.guild_id or ctx.guild is None:
