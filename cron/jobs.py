@@ -310,6 +310,7 @@ def refresh_salesforce_roles() -> None:
         users = (
             db_session.query(User)
             .filter(User.verified.is_(True))
+            .filter(User.banned.is_(False))
             .filter(User.asurite_id.isnot(None))
             .filter(User.discord_user_id.isnot(None))
             .all()

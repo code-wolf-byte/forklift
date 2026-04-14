@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import discord
@@ -1123,6 +1123,99 @@ class VerificationCog(commands.Cog):
                 f"{stored_asurite or target} has been banned from verification."
                 + (f" {' '.join(notes)}" if notes else "")
             ),
+            ephemeral=True,
+        )
+
+    @slash_command(
+        **_moderation_command_kwargs(
+            "whitelist",
+            "Remove a blacklist ban and restore verification roles for a member.",
+        )
+    )
+    async def whitelist_member(
+        self,
+        ctx: discord.ApplicationContext,
+        member: discord.Member = Option(discord.Member, "Discord member to whitelist"),
+    ) -> None:
+        """Clear a blacklist ban and re-verify the member."""
+        if ctx.guild_id != self.guild_id or ctx.guild is None:
+            await ctx.respond(
+                "This command is only available in the Devil2Devil server.",
+                ephemeral=True,
+            )
+            return
+
+        await ctx.defer(ephemeral=True)
+
+        asurite: str | None = None
+        not_banned = False
+        no_record = False
+
+        with session_scope() as db_session:
+            db_user = (
+                db_session.query(User)
+                .filter(User.discord_user_id == str(member.id))
+                .one_or_none()
+            )
+            if db_user is None:
+                no_record = True
+            elif not db_user.banned:
+                not_banned = True
+            else:
+                db_user.banned = False
+                db_user.verified = True
+                db_user.verified_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                asurite = db_user.asurite_id
+
+        if no_record:
+            await ctx.followup.send(
+                f"{member.mention} has no verification record in the system.",
+                ephemeral=True,
+            )
+            return
+
+        if not_banned:
+            await ctx.followup.send(
+                f"{member.mention} is not currently blacklisted.",
+                ephemeral=True,
+            )
+            return
+
+        reason = f"Whitelist by {ctx.author}"
+
+        # Remove unverified role, add verified role.
+        await self._remove_unverified_role(ctx.guild, member, reason=reason)
+        verified_role = self._get_verified_role(ctx.guild)
+        if verified_role is not None and verified_role not in member.roles:
+            try:
+                await member.add_roles(verified_role, reason=reason)
+            except discord.HTTPException as exc:
+                logger.warning(
+                    "Failed to add verified role to member %s during whitelist: %s",
+                    member.id,
+                    exc,
+                )
+
+        # Re-assign Salesforce-derived roles.
+        if asurite:
+            try:
+                profile = await asyncio.to_thread(get_student_profile, asurite)
+                if not profile.get("error"):
+                    await self.assign_roles_from_profile(member.id, profile)
+            except Exception:
+                logger.exception(
+                    "Failed to assign Salesforce-based roles for user %s during whitelist",
+                    member.id,
+                )
+                await ctx.followup.send(
+                    f"{member.mention} has been removed from the blacklist and re-verified, "
+                    "but there was an error re-assigning additional roles.",
+                    ephemeral=True,
+                )
+                return
+
+        await ctx.followup.send(
+            f"{member.mention} has been removed from the blacklist and re-verified. ✅",
             ephemeral=True,
         )
 
