@@ -976,7 +976,7 @@ class VerificationCog(commands.Cog):
 
     @slash_command(
         **_moderation_command_kwargs(
-            "ban",
+            "blacklist",
             "Ban an ASURITE from verification and remove their verification role.",
         )
     )
