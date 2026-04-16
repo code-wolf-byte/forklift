@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 import discord
+import yaml
 from discord.ext import commands
 from discord.commands import Option, slash_command
 from sqlalchemy import func, select
@@ -18,6 +20,10 @@ from ..roles import ROLE_ID_MAP
 from ..salesforce import get_student_profile
 
 logger = logging.getLogger(__name__)
+
+_CONFIG_PATH = Path(__file__).parent.parent.parent / "config" / "verification.yaml"
+with _CONFIG_PATH.open() as _f:
+    _VERIFICATION_CONFIG: dict = yaml.safe_load(_f).get("verification", {})
 
 TEST_GUILD_IDS: list[int] = []
 if DISCORD_CONFIG and DISCORD_CONFIG.test_guild_ids:
@@ -57,7 +63,7 @@ def _admin_command_kwargs(name: str, description: str) -> dict[str, Any]:
     return kwargs
 
 
-TARGET_TERM_CODE = "2267"
+TARGET_TERM_CODE: str = _VERIFICATION_CONFIG.get("target_term_code", "2267")
 
 
 def _is_enrolled_or_admitted(opp: SalesforceOpportunity) -> bool:
@@ -274,77 +280,37 @@ class VerificationCog(commands.Cog):
             return None
         return guild.get_role(self.unverified_role_id)
 
-    async def _remove_verified_role(
+    async def _remove_role(
         self,
-        guild: Optional[discord.Guild],
         member: discord.Member,
+        role: Optional[discord.Role],
         *,
+        label: str,
         reason: str,
     ) -> bool:
-        role = self._get_verified_role(guild)
         if role is None:
-            logger.info(
-                "No configured verified role available when processing member %s",
-                member.id,
-            )
+            logger.info("No configured %s role available when processing member %s", label, member.id)
             return False
         if role not in member.roles:
-            logger.info(
-                "Member %s does not currently have the verified role %s",
-                member.id,
-                role.id,
-            )
+            logger.info("Member %s does not currently have the %s role %s", member.id, label, role.id)
             return False
         try:
             await member.remove_roles(role, reason=reason)
         except discord.HTTPException as exc:  # pragma: no cover - network failure
-            logger.warning(
-                "Failed to remove verified role %s from member %s: %s",
-                role.id,
-                member.id,
-                exc,
-            )
+            logger.warning("Failed to remove %s role %s from member %s: %s", label, role.id, member.id, exc)
             return False
-
-        logger.info("Removed verified role %s from member %s", role.id, member.id)
+        logger.info("Removed %s role %s from member %s", label, role.id, member.id)
         return True
+
+    async def _remove_verified_role(
+        self, guild: Optional[discord.Guild], member: discord.Member, *, reason: str
+    ) -> bool:
+        return await self._remove_role(member, self._get_verified_role(guild), label="verified", reason=reason)
 
     async def _remove_unverified_role(
-        self,
-        guild: Optional[discord.Guild],
-        member: discord.Member,
-        *,
-        reason: str,
+        self, guild: Optional[discord.Guild], member: discord.Member, *, reason: str
     ) -> bool:
-        role = self._get_unverified_role(guild)
-        if role is None:
-            logger.info(
-                "No configured unverified role available when processing member %s",
-                member.id,
-            )
-            return False
-        if role not in member.roles:
-            logger.info(
-                "Member %s does not currently have the unverified role %s",
-                member.id,
-                role.id,
-            )
-            return False
-        try:
-            await member.remove_roles(role, reason=reason)
-        except discord.HTTPException as exc:  # pragma: no cover - network failure
-            logger.warning(
-                "Failed to remove unverified role %s from member %s: %s",
-                role.id,
-                member.id,
-                exc,
-            )
-            return False
-
-        logger.info(
-            "Removed unverified role %s from member %s", role.id, member.id
-        )
-        return True
+        return await self._remove_role(member, self._get_unverified_role(guild), label="unverified", reason=reason)
 
     async def _resolve_guild(self) -> discord.Guild:
         guild = self.bot.get_guild(self.guild_id)
@@ -367,6 +333,27 @@ class VerificationCog(commands.Cog):
             except discord.HTTPException as exc:
                 raise RuntimeError("Unable to load Discord member information") from exc
         return member
+
+    async def _apply_ban_discord_roles(
+        self, guild: discord.Guild, member: discord.Member, *, reason: str
+    ) -> None:
+        """Strip all verification-managed roles and assign the unverified role."""
+        await self._remove_verified_role(guild, member, reason=reason)
+
+        managed_role_ids = set(ROLE_ID_MAP.values())
+        roles_to_remove = [r for r in member.roles if r.id in managed_role_ids]
+        if roles_to_remove:
+            try:
+                await member.remove_roles(*roles_to_remove, reason=reason)
+            except discord.HTTPException as exc:
+                logger.warning("Failed to remove managed roles from member %s: %s", member.id, exc)
+
+        unverified_role = self._get_unverified_role(guild)
+        if unverified_role is not None and unverified_role not in member.roles:
+            try:
+                await member.add_roles(unverified_role, reason=reason)
+            except discord.HTTPException as exc:
+                logger.warning("Failed to add unverified role to member %s: %s", member.id, exc)
 
     async def _require_home_guild(self, ctx: discord.ApplicationContext) -> bool:
         if ctx.guild_id != self.guild_id or ctx.guild is None:
@@ -823,38 +810,8 @@ class VerificationCog(commands.Cog):
 
         if member is not None:
             reason = f"Verification blacklist by {ctx.author}"
-
-            # Remove verified role.
-            await self._remove_verified_role(ctx.guild, member, reason=reason)
-
-            # Remove all managed roles (college, campus, academic level, etc.).
-            managed_role_ids = set(ROLE_ID_MAP.values())
-            roles_to_remove = [r for r in member.roles if r.id in managed_role_ids]
-            if roles_to_remove:
-                try:
-                    await member.remove_roles(*roles_to_remove, reason=reason)
-                except discord.HTTPException as exc:
-                    logger.warning(
-                        "Failed to remove managed roles from member %s during blacklist: %s",
-                        member.id,
-                        exc,
-                    )
-
-            # Add unverified role.
-            unverified_role = self._get_unverified_role(ctx.guild)
-            if unverified_role is not None and unverified_role not in member.roles:
-                try:
-                    await member.add_roles(unverified_role, reason=reason)
-                except discord.HTTPException as exc:
-                    logger.warning(
-                        "Failed to add unverified role to member %s during blacklist: %s",
-                        member.id,
-                        exc,
-                    )
-
-            notes.append(
-                f"Removed all roles and assigned unverified role to {member.mention}."
-            )
+            await self._apply_ban_discord_roles(ctx.guild, member, reason=reason)
+            notes.append(f"Removed all roles and assigned unverified role to {member.mention}.")
         elif discord_user_id is not None:
             notes.append(
                 "Linked Discord account not found in the guild; no role changes made."

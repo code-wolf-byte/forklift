@@ -1,0 +1,5 @@
+# Verification configuration
+# Update target_term_code each term to correctly classify incoming/current students.
+# Format: 4-digit ASU term code (e.g. 2267 = Fall 2026, 2261 = Spring 2026)
+verification:
+  target_term_code: "2267"
