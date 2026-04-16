@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 from urllib.parse import urlencode
 
 import requests
 
 from utils.settings import DISCORD_CONFIG, DiscordConfig
 from .cogs.verification import VerificationCog
+from .models import DiscordProfile, DiscordTokenData, StudentProfile
 from .shared import get_running_bot, get_running_loop
 
 DEFAULT_TIMEOUT = 10
@@ -41,6 +42,37 @@ def _config() -> DiscordConfig:
     return DISCORD_CONFIG
 
 
+def _dispatch_to_cog(
+    user_id: str,
+    make_coroutine: Callable[[VerificationCog, int], Any],
+    *,
+    action: str,
+) -> None:
+    """Resolve the running bot/cog, parse user_id, dispatch a coroutine, and wait."""
+    bot = get_running_bot()
+    loop = get_running_loop()
+    if bot is None or loop is None or loop.is_closed():
+        raise DiscordAPIError(f"Discord bot is not running; unable to {action}")
+
+    try:
+        discord_user_id = int(user_id)
+    except (TypeError, ValueError) as exc:
+        raise DiscordAPIError("Invalid Discord user id") from exc
+
+    cog = bot.get_cog("VerificationCog")
+    if not isinstance(cog, VerificationCog):
+        raise DiscordAPIError("Verification cog is not loaded in the Discord bot")
+
+    future = asyncio.run_coroutine_threadsafe(make_coroutine(cog, discord_user_id), loop)
+    try:
+        future.result(timeout=DEFAULT_TIMEOUT)
+    except asyncio.TimeoutError as exc:
+        future.cancel()
+        raise DiscordAPIError(f"Timed out {action}") from exc
+    except Exception as exc:
+        raise DiscordAPIError(f"Failed to {action}: {exc}") from exc
+
+
 def build_authorize_url(state: str) -> str:
     cfg = _config()
     params = {
@@ -54,7 +86,7 @@ def build_authorize_url(state: str) -> str:
     return f"{cfg.authorize_base}?{urlencode(params)}"
 
 
-def exchange_code_for_token(code: str) -> Dict[str, Any]:
+def exchange_code_for_token(code: str) -> DiscordTokenData:
     cfg = _config()
     data = {
         "client_id": cfg.client_id,
@@ -81,10 +113,10 @@ def exchange_code_for_token(code: str) -> Dict[str, Any]:
             payload=payload,
         )
 
-    return _safe_json(response)
+    return DiscordTokenData.model_validate(_safe_json(response))
 
 
-def fetch_user_profile(access_token: str) -> Dict[str, Any]:
+def fetch_user_profile(access_token: str) -> DiscordProfile:
     cfg = _config()
     url = f"{cfg.api_base}/users/@me"
     headers = {"Authorization": f"Bearer {access_token}"}
@@ -103,194 +135,53 @@ def fetch_user_profile(access_token: str) -> Dict[str, Any]:
             payload=payload,
         )
 
-    return _safe_json(response)
+    return DiscordProfile.model_validate(_safe_json(response))
 
 
 def assign_verified_role(user_id: str, *, asurite: str | None = None) -> None:
-    _config()  # Ensure Discord configuration is present before attempting role assignment
-
-    bot = get_running_bot()
-    loop = get_running_loop()
-    if bot is None or loop is None or loop.is_closed():
-        raise DiscordAPIError(
-            "Discord bot is not running; unable to assign verified role"
-        )
-
-    try:
-        discord_user_id = int(user_id)
-    except (TypeError, ValueError) as exc:
-        raise DiscordAPIError("Invalid Discord user id for role assignment") from exc
-
-    cog = bot.get_cog("VerificationCog")
-    if not isinstance(cog, VerificationCog):
-        raise DiscordAPIError("Verification cog is not loaded in the Discord bot")
-
-    future = asyncio.run_coroutine_threadsafe(
-        cog.verify_member_by_id(discord_user_id, asurite=asurite),
-        loop,
+    _config()
+    _dispatch_to_cog(
+        user_id,
+        lambda cog, uid: cog.verify_member_by_id(uid, asurite=asurite),
+        action="assign verified role",
     )
-
-    try:
-        future.result(timeout=DEFAULT_TIMEOUT)
-    except asyncio.TimeoutError as exc:
-        future.cancel()
-        raise DiscordAPIError("Timed out assigning Discord verified role") from exc
-    except Exception as exc:
-        raise DiscordAPIError(f"Failed to assign Discord verified role: {exc}") from exc
 
 
 def remove_verified_role(user_id: str, *, reason: str | None = None) -> None:
-    _config()  # Ensure Discord configuration is present before attempting role removal
-
-    bot = get_running_bot()
-    loop = get_running_loop()
-    if bot is None or loop is None or loop.is_closed():
-        raise DiscordAPIError(
-            "Discord bot is not running; unable to remove verified role"
-        )
-
-    try:
-        discord_user_id = int(user_id)
-    except (TypeError, ValueError) as exc:
-        raise DiscordAPIError("Invalid Discord user id for role removal") from exc
-
-    cog = bot.get_cog("VerificationCog")
-    if not isinstance(cog, VerificationCog):
-        raise DiscordAPIError("Verification cog is not loaded in the Discord bot")
-
-    future = asyncio.run_coroutine_threadsafe(
-        cog.unverify_member_by_id(discord_user_id, reason=reason),
-        loop,
-    )
-
-    try:
-        future.result(timeout=DEFAULT_TIMEOUT)
-    except asyncio.TimeoutError as exc:
-        future.cancel()
-        raise DiscordAPIError("Timed out removing Discord verified role") from exc
-    except Exception as exc:
-        raise DiscordAPIError(f"Failed to remove Discord verified role: {exc}") from exc
-
-
-def assign_roles_from_profile(user_id: str, student_profile: Dict[str, Any]) -> None:
-    """
-    Assign additional Discord roles to a user based on their Salesforce profile.
-    """
-    _config()  # Ensure Discord configuration is present before attempting role assignment
-
-    bot = get_running_bot()
-    loop = get_running_loop()
-    if bot is None or loop is None or loop.is_closed():
-        raise DiscordAPIError(
-            "Discord bot is not running; unable to assign Salesforce-based roles"
-        )
-
-    try:
-        discord_user_id = int(user_id)
-    except (TypeError, ValueError) as exc:
-        raise DiscordAPIError("Invalid Discord user id for role assignment") from exc
-
-    cog = bot.get_cog("VerificationCog")
-    if not isinstance(cog, VerificationCog):
-        raise DiscordAPIError("Verification cog is not loaded in the Discord bot")
-
-    future = asyncio.run_coroutine_threadsafe(
-        cog.assign_roles_from_profile(discord_user_id, student_profile),
-        loop,
-    )
-
-    try:
-        future.result(timeout=DEFAULT_TIMEOUT)
-    except asyncio.TimeoutError as exc:
-        future.cancel()
-        raise DiscordAPIError(
-            "Timed out assigning Discord roles from Salesforce profile"
-        ) from exc
-    except Exception as exc:
-        raise DiscordAPIError(
-            f"Failed to assign Discord roles from Salesforce profile: {exc}"
-        ) from exc
-
-
-def refresh_roles_from_profile(user_id: str, student_profile: Dict[str, Any]) -> None:
-    """
-    Remove all ROLE_ID_MAP roles from a Discord member and re-assign based on their
-    current Salesforce profile. Used by the automated role-refresh cron job.
-    """
     _config()
-
-    bot = get_running_bot()
-    loop = get_running_loop()
-    if bot is None or loop is None or loop.is_closed():
-        raise DiscordAPIError(
-            "Discord bot is not running; unable to refresh Salesforce-based roles"
-        )
-
-    try:
-        discord_user_id = int(user_id)
-    except (TypeError, ValueError) as exc:
-        raise DiscordAPIError("Invalid Discord user id for role refresh") from exc
-
-    cog = bot.get_cog("VerificationCog")
-    if not isinstance(cog, VerificationCog):
-        raise DiscordAPIError("Verification cog is not loaded in the Discord bot")
-
-    future = asyncio.run_coroutine_threadsafe(
-        cog.refresh_roles_from_profile(discord_user_id, student_profile),
-        loop,
+    _dispatch_to_cog(
+        user_id,
+        lambda cog, uid: cog.unverify_member_by_id(uid, reason=reason),
+        action="remove verified role",
     )
 
-    try:
-        future.result(timeout=DEFAULT_TIMEOUT)
-    except asyncio.TimeoutError as exc:
-        future.cancel()
-        raise DiscordAPIError(
-            "Timed out refreshing Discord roles from Salesforce profile"
-        ) from exc
-    except Exception as exc:
-        raise DiscordAPIError(
-            f"Failed to refresh Discord roles from Salesforce profile: {exc}"
-        ) from exc
 
-
-def remove_roles_from_profile(user_id: str, student_profile: Dict[str, Any]) -> None:
-    """
-    Remove Discord roles from a user based on their Salesforce profile.
-    """
-    _config()  # Ensure Discord configuration is present before attempting role removal
-
-    bot = get_running_bot()
-    loop = get_running_loop()
-    if bot is None or loop is None or loop.is_closed():
-        raise DiscordAPIError(
-            "Discord bot is not running; unable to remove Salesforce-based roles"
-        )
-
-    try:
-        discord_user_id = int(user_id)
-    except (TypeError, ValueError) as exc:
-        raise DiscordAPIError("Invalid Discord user id for role removal") from exc
-
-    cog = bot.get_cog("VerificationCog")
-    if not isinstance(cog, VerificationCog):
-        raise DiscordAPIError("Verification cog is not loaded in the Discord bot")
-
-    future = asyncio.run_coroutine_threadsafe(
-        cog.remove_roles_from_profile(discord_user_id, student_profile),
-        loop,
+def assign_roles_from_profile(user_id: str, student_profile: StudentProfile) -> None:
+    _config()
+    _dispatch_to_cog(
+        user_id,
+        lambda cog, uid: cog.assign_roles_from_profile(uid, student_profile),
+        action="assign Salesforce-based roles",
     )
 
-    try:
-        future.result(timeout=DEFAULT_TIMEOUT)
-    except asyncio.TimeoutError as exc:
-        future.cancel()
-        raise DiscordAPIError(
-            "Timed out removing Discord roles from Salesforce profile"
-        ) from exc
-    except Exception as exc:
-        raise DiscordAPIError(
-            f"Failed to remove Discord roles from Salesforce profile: {exc}"
-        ) from exc
+
+def refresh_roles_from_profile(user_id: str, student_profile: StudentProfile) -> None:
+    """Remove all ROLE_ID_MAP roles from a Discord member and re-assign from Salesforce."""
+    _config()
+    _dispatch_to_cog(
+        user_id,
+        lambda cog, uid: cog.refresh_roles_from_profile(uid, student_profile),
+        action="refresh Salesforce-based roles",
+    )
+
+
+def remove_roles_from_profile(user_id: str, student_profile: StudentProfile) -> None:
+    _config()
+    _dispatch_to_cog(
+        user_id,
+        lambda cog, uid: cog.remove_roles_from_profile(uid, student_profile),
+        action="remove Salesforce-based roles",
+    )
 
 
 _DISCORD_TEXT_CHANNEL_TYPES = {0, 5}  # GUILD_TEXT, GUILD_ANNOUNCEMENT
@@ -353,58 +244,20 @@ def send_channel_message(channel_id: str, content: str) -> None:
 
 def add_role_to_member(discord_user_id: str, role_name: str) -> None:
     """Immediately add a named role to a guild member (called from a non-async thread)."""
-    bot = get_running_bot()
-    loop = get_running_loop()
-    if bot is None or loop is None or loop.is_closed():
-        raise DiscordAPIError("Discord bot is not running; unable to add role")
-
-    try:
-        user_id = int(discord_user_id)
-    except (TypeError, ValueError) as exc:
-        raise DiscordAPIError("Invalid Discord user id") from exc
-
-    cog = bot.get_cog("VerificationCog")
-    if not isinstance(cog, VerificationCog):
-        raise DiscordAPIError("Verification cog is not loaded in the Discord bot")
-
-    future = asyncio.run_coroutine_threadsafe(
-        cog.add_role_to_member_by_id(user_id, role_name), loop
+    _dispatch_to_cog(
+        discord_user_id,
+        lambda cog, uid: cog.add_role_to_member_by_id(uid, role_name),
+        action=f"add role {role_name!r}",
     )
-    try:
-        future.result(timeout=DEFAULT_TIMEOUT)
-    except asyncio.TimeoutError as exc:
-        future.cancel()
-        raise DiscordAPIError("Timed out adding role") from exc
-    except Exception as exc:
-        raise DiscordAPIError(f"Failed to add role: {exc}") from exc
 
 
 def remove_role_from_member(discord_user_id: str, role_name: str) -> None:
     """Immediately remove a named role from a guild member (called from a non-async thread)."""
-    bot = get_running_bot()
-    loop = get_running_loop()
-    if bot is None or loop is None or loop.is_closed():
-        raise DiscordAPIError("Discord bot is not running; unable to remove role")
-
-    try:
-        user_id = int(discord_user_id)
-    except (TypeError, ValueError) as exc:
-        raise DiscordAPIError("Invalid Discord user id") from exc
-
-    cog = bot.get_cog("VerificationCog")
-    if not isinstance(cog, VerificationCog):
-        raise DiscordAPIError("Verification cog is not loaded in the Discord bot")
-
-    future = asyncio.run_coroutine_threadsafe(
-        cog.remove_role_from_member_by_id(user_id, role_name), loop
+    _dispatch_to_cog(
+        discord_user_id,
+        lambda cog, uid: cog.remove_role_from_member_by_id(uid, role_name),
+        action=f"remove role {role_name!r}",
     )
-    try:
-        future.result(timeout=DEFAULT_TIMEOUT)
-    except asyncio.TimeoutError as exc:
-        future.cancel()
-        raise DiscordAPIError("Timed out removing role") from exc
-    except Exception as exc:
-        raise DiscordAPIError(f"Failed to remove role: {exc}") from exc
 
 
 def search_members(query: str, *, limit: int = 25) -> list[dict]:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import discord
 from discord.ext import commands
@@ -11,8 +11,9 @@ from discord.commands import Option, slash_command
 from sqlalchemy import func, select
 
 from utils.settings import DISCORD_CONFIG
-from utils.database import User, UserRoleException, session_scope, save_user_roles, get_user_by_discord_id, get_exceptions_for_discord_id
+from utils.database import User, session_scope, save_user_roles, get_user_by_discord_id, get_exceptions_for_discord_id
 from services.google_sheets import write_user_left
+from ..models import SalesforceOpportunity, StudentProfile
 from ..roles import ROLE_ID_MAP
 from ..salesforce import get_student_profile
 
@@ -59,8 +60,8 @@ def _admin_command_kwargs(name: str, description: str) -> dict[str, Any]:
 TARGET_TERM_CODE = "2267"
 
 
-def _is_enrolled_or_admitted(opp: dict[str, Any]) -> bool:
-    stage = (opp.get("stageName") or "").strip().lower()
+def _is_enrolled_or_admitted(opp: SalesforceOpportunity) -> bool:
+    stage = (opp.stageName or "").strip().lower()
     return stage in {"enrolled", "admitted"}
 
 
@@ -71,121 +72,79 @@ def _normalize_str(value: Any) -> str:
 
 
 def _select_enrolled_opps(
-    opportunities: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
+    opportunities: list[SalesforceOpportunity],
+) -> list[SalesforceOpportunity]:
     return [opp for opp in opportunities if _is_enrolled_or_admitted(opp)]
 
 
+# Each entry is (match_fn, role_name). Evaluated in order; first match wins.
+_COLLEGE_ROLE_MATCHERS: list[tuple[Callable[[str], bool], str]] = [
+    (lambda n: "ira a" in n and "fulton" in n,                      "Ira A. Fulton Schools of Engineering"),
+    (lambda n: "barrett" in n,                                       "Barrett The Honors College"),
+    (lambda n: "liberal arts" in n and "sciences" in n,             "College of Liberal Arts and Sciences"),
+    (lambda n: "global futures" in n,                                "College of Global Futures"),
+    (lambda n: "nursing" in n and "health" in n,                    "Edson College of Nursing and Health Innovation"),
+    (lambda n: "herberger" in n or ("design" in n and "arts" in n), "Herberger Institute for Design and the Arts"),
+    (lambda n: "thunderbird" in n,                                   "Thunderbird School of Global Management"),
+    (lambda n: "mary lou fulton" in n or "teachers college" in n,   "Mary Lou Fulton Teachers College"),
+    (lambda n: "new college" in n,                                   "New College of Interdisciplinary Arts and Sciences"),
+    (lambda n: "integrative sciences and arts" in n,                "College of Integrative Sciences and Arts"),
+    (lambda n: "w.p. carey" in n or ("carey" in n and "business" in n), "W.P. Carey School of Business"),
+    (lambda n: "cronkite" in n or "journalism" in n,                "Walter Cronkite School of Journalism and Mass Communication"),
+    (lambda n: "watts" in n or "public service" in n,               "Watts College of Public Service and Community Solutions"),
+    (lambda n: "university college" in n,                            "University College"),
+]
+
+
 def _college_role_from_name(college_name: Any) -> str | None:
-    """
-    Map a Salesforce collegeName to one of the configured college roles.
-    Uses simple substring matching on a normalized, lower-cased name.
-    """
     name = _normalize_str(college_name)
     if not name:
         return None
-
-    if "ira a" in name and "fulton" in name:
-        return "Ira A. Fulton Schools of Engineering"
-    if "barrett" in name:
-        return "Barrett The Honors College"
-    if "liberal arts" in name and "sciences" in name:
-        return "College of Liberal Arts and Sciences"
-    if "global futures" in name:
-        return "College of Global Futures"
-    if "nursing" in name and "health" in name:
-        return "Edson College of Nursing and Health Innovation"
-    if "herberger" in name or ("design" in name and "arts" in name):
-        return "Herberger Institute for Design and the Arts"
-    if "thunderbird" in name:
-        return "Thunderbird School of Global Management"
-    if "mary lou fulton" in name or "teachers college" in name:
-        return "Mary Lou Fulton Teachers College"
-    if "new college" in name:
-        return "New College of Interdisciplinary Arts and Sciences"
-    if "integrative sciences and arts" in name:
-        return "College of Integrative Sciences and Arts"
-    if "w.p. carey" in name or ("carey" in name and "business" in name):
-        return "W.P. Carey School of Business"
-    if "cronkite" in name or "journalism" in name:
-        return "Walter Cronkite School of Journalism and Mass Communication"
-    if "watts" in name or "public service" in name:
-        return "Watts College of Public Service and Community Solutions"
-    if "university college" in name:
-        return "University College"
+    for match, role in _COLLEGE_ROLE_MATCHERS:
+        if match(name):
+            return role
     return None
 
 
-def _campus_role_from_opportunity(opp: dict[str, Any]) -> str | None:
-    # Salesforce campus assignments are provided via locationName.
-    location = _normalize_str(opp.get("locationName"))
-    if not location:
-        return None
-
-    if location == "tempe":
-        return "Tempe"
-    if location == "downtown phoenix":
-        return "Downtown Phoenix"
-    if location == "polytechnic":
-        return "Polytechnic"
-    if location == "online":
-        return "Online"
-    if location == "west valley":
-        return "West Valley"
-    if location in {"la center", "los angeles"}:
-        return "LA Center"
-    return None
+_CAMPUS_LOCATION_MAP: dict[str, str] = {
+    "tempe": "Tempe",
+    "downtown phoenix": "Downtown Phoenix",
+    "polytechnic": "Polytechnic",
+    "online": "Online",
+    "west valley": "West Valley",
+    "la center": "LA Center",
+    "los angeles": "LA Center",
+}
 
 
-def _campus_role_from_profile(student_profile: dict[str, Any]) -> str | None:
-    location = _normalize_str(
-        student_profile.get("locationName") or student_profile.get("campus")
-    )
-    if not location:
-        return None
-
-    if location == "tempe":
-        return "Tempe"
-    if location == "downtown phoenix":
-        return "Downtown Phoenix"
-    if location == "polytechnic":
-        return "Polytechnic"
-    if location == "online":
-        return "Online"
-    if location == "west valley":
-        return "West Valley"
-    if location in {"la center", "los angeles"}:
-        return "LA Center"
-    return None
+def _campus_role_from_location(location_raw: str | None) -> str | None:
+    return _CAMPUS_LOCATION_MAP.get(_normalize_str(location_raw))
 
 
-def role_names_from_student_profile(student_profile: dict[str, Any]) -> set[str]:
+def _campus_role_from_opportunity(opp: SalesforceOpportunity) -> str | None:
+    return _campus_role_from_location(opp.locationName)
+
+
+def _campus_role_from_profile(student_profile: StudentProfile) -> str | None:
+    return _campus_role_from_location(student_profile.locationName or student_profile.campus)
+
+
+def role_names_from_student_profile(student_profile: StudentProfile) -> set[str]:
     """
-    Derive logical role names from a Salesforce student profile payload.
+    Derive logical role names from a Salesforce student profile.
 
     The returned names correspond to keys in ROLE_ID_MAP.
     """
     roles: set[str] = set()
-
-    opportunities_raw = student_profile.get("opportunities") or []
-    if not isinstance(opportunities_raw, list):
-        opportunities_raw = []
-
-    opportunities: list[dict[str, Any]] = [
-        opp for opp in opportunities_raw if isinstance(opp, dict)
-    ]
-
-    enrolled_opps = _select_enrolled_opps(opportunities)
+    enrolled_opps = _select_enrolled_opps(student_profile.opportunities)
 
     # 1. Term-specific classification for target term (e.g., 2267)
     for opp in enrolled_opps:
-        term_code = _normalize_str(opp.get("termCode"))
+        term_code = _normalize_str(opp.termCode)
         if term_code != TARGET_TERM_CODE:
             continue
-
-        career = _normalize_str(opp.get("career"))
-        opp_type = _normalize_str(opp.get("type"))
-
+        career = _normalize_str(opp.career)
+        opp_type = _normalize_str(opp.type)
         if career == "graduate":
             roles.add("Graduate Student")
         elif career == "undergraduate":
@@ -199,84 +158,65 @@ def role_names_from_student_profile(student_profile: dict[str, Any]) -> set[str]
         r in roles for r in ("Graduate Student", "First Year", "Transfer Student")
     )
     if not has_level_role:
-        # If the student has any enrolled/admitted graduate opportunity in a
-        # non-target term, still classify them as a graduate student.
         for opp in enrolled_opps:
-            career = _normalize_str(opp.get("career"))
-            if career == "graduate":
+            if _normalize_str(opp.career) == "graduate":
                 roles.add("Graduate Student")
                 has_level_role = True
                 break
 
     if not has_level_role:
-        # Otherwise, treat any enrolled/admitted undergraduate in a non-target
-        # term as an upperclassman.
         for opp in enrolled_opps:
-            term_code = _normalize_str(opp.get("termCode"))
-            career = _normalize_str(opp.get("career"))
-            if term_code != TARGET_TERM_CODE and career == "undergraduate":
+            if _normalize_str(opp.termCode) != TARGET_TERM_CODE and _normalize_str(opp.career) == "undergraduate":
                 roles.add("Upperclassmen")
                 break
 
-    # 3. International / First-generation / Enrollment Deposit based on any enrolled/admitted opportunity
+    # 3. International / First-generation / Enrollment Deposit per enrolled opportunity
     for opp in enrolled_opps:
-        if opp.get("internationalStudent") is not None:
-            if bool(opp.get("internationalStudent")) or _normalize_str(
-                opp.get("internationalStudent")
-            ) in {"true", "yes", "y", "1"}:
+        if opp.internationalStudent is not None:
+            if bool(opp.internationalStudent) or _normalize_str(opp.internationalStudent) in {"true", "yes", "y", "1"}:
                 roles.add("International Student")
-        if opp.get("firstGeneration") is not None:
-            if bool(opp.get("firstGeneration")) or _normalize_str(
-                opp.get("firstGeneration")
-            ) in {"true", "yes", "y", "1"}:
+        if opp.firstGeneration is not None:
+            if bool(opp.firstGeneration) or _normalize_str(opp.firstGeneration) in {"true", "yes", "y", "1"}:
                 roles.add("First Generation Student")
-        deposit_paid = bool(opp.get("enrollmentDepositPaid")) or _normalize_str(
-            opp.get("enrollmentDepositStatus")
-        ) == "paid"
+        deposit_paid = bool(opp.enrollmentDepositPaid) or _normalize_str(opp.enrollmentDepositStatus) == "paid"
         if deposit_paid:
             roles.add("Commited")
 
-    # 4. College and campus roles, again using any enrolled/admitted opportunity
+    # 4. College and campus roles per enrolled opportunity
     for opp in enrolled_opps:
-        college_role = _college_role_from_name(opp.get("collegeName"))
+        college_role = _college_role_from_name(opp.collegeName)
         if college_role:
             roles.add(college_role)
-
         campus_role = _campus_role_from_opportunity(opp)
         if campus_role:
             roles.add(campus_role)
 
-    # 5. Profile-based fallbacks (for summary fields derived upstream)
+    # 5. Profile-level fallbacks (summary fields built by salesforce.py)
     if not has_level_role:
-        career = _normalize_str(student_profile.get("career"))
+        career = _normalize_str(student_profile.career)
         if career == "graduate":
             roles.add("Graduate Student")
-            has_level_role = True
         elif career == "undergraduate":
-            if student_profile.get("transfer"):
+            if student_profile.transfer:
                 roles.add("Transfer Student")
-                has_level_role = True
-            elif student_profile.get("firstYear"):
+            elif student_profile.firstYear:
                 roles.add("First Year")
-                has_level_role = True
-            elif student_profile.get("current") is True:
+            elif student_profile.current is True:
                 roles.add("Upperclassmen")
-                has_level_role = True
 
-    if student_profile.get("international") or student_profile.get("is_international"):
+    if student_profile.international or student_profile.is_international:
         roles.add("International Student")
 
-    if student_profile.get("depositPaid") or student_profile.get("enrollmentDepositPaid"):
+    if student_profile.depositPaid or student_profile.enrollmentDepositPaid:
         roles.add("Commited")
 
-    if student_profile.get("inState"):
+    if student_profile.inState:
         roles.add("Arizona Resident")
-    elif student_profile.get("outOfState"):
+    elif student_profile.outOfState:
         roles.add("Out of State")
 
-    college_name = student_profile.get("college")
-    if isinstance(college_name, str) and college_name in ROLE_ID_MAP:
-        roles.add(college_name)
+    if isinstance(student_profile.college, str) and student_profile.college in ROLE_ID_MAP:
+        roles.add(student_profile.college)
 
     campus_role = _campus_role_from_profile(student_profile)
     if campus_role:
@@ -325,16 +265,14 @@ class VerificationCog(commands.Cog):
         if guild is None:
             logger.debug("No guild provided to _get_unverified_role")
             return None
-        expected_guild_id = 1187144343400751234
-        unverified_role_id = 1207441184218161182
-        if guild.id != expected_guild_id:
+        if guild.id != self.guild_id:
             logger.debug(
                 "VerificationCog invoked for guild %s (expected %s)",
                 guild.id,
-                expected_guild_id,
+                self.guild_id,
             )
             return None
-        return guild.get_role(unverified_role_id)
+        return guild.get_role(self.unverified_role_id)
 
     async def _remove_verified_role(
         self,
@@ -408,6 +346,37 @@ class VerificationCog(commands.Cog):
         )
         return True
 
+    async def _resolve_guild(self) -> discord.Guild:
+        guild = self.bot.get_guild(self.guild_id)
+        if guild is None:
+            try:
+                guild = await self.bot.fetch_guild(self.guild_id)
+            except discord.HTTPException as exc:
+                raise RuntimeError("Unable to load the Discord guild") from exc
+        if guild is None:
+            raise RuntimeError("Discord guild is not available")
+        return guild
+
+    async def _resolve_member(self, guild: discord.Guild, user_id: int) -> discord.Member:
+        member = guild.get_member(user_id)
+        if member is None:
+            try:
+                member = await guild.fetch_member(user_id)
+            except discord.NotFound as exc:
+                raise RuntimeError(f"Discord user {user_id} is not a member of the guild") from exc
+            except discord.HTTPException as exc:
+                raise RuntimeError("Unable to load Discord member information") from exc
+        return member
+
+    async def _require_home_guild(self, ctx: discord.ApplicationContext) -> bool:
+        if ctx.guild_id != self.guild_id or ctx.guild is None:
+            await ctx.respond(
+                "This command is only available in the Devil2Devil server.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
     @commands.Cog.listener()
     async def on_ready(self) -> None:
         guild = self.bot.get_guild(self.guild_id)
@@ -471,18 +440,12 @@ class VerificationCog(commands.Cog):
         member: discord.Member = Option(discord.Member, "Member to verify"),
     ) -> None:
         """Assign the verification role to a member."""
-        if ctx.guild_id != self.guild_id or ctx.guild is None:
-            await ctx.respond(
-                "This command is only available in the Devil2Devil server.",
-                ephemeral=True,
-            )
+        if not await self._require_home_guild(ctx):
             return
 
         role = self._get_verified_role(ctx.guild)
         if role is None:
-            await ctx.respond(
-                "Unable to locate the configured verification role for this server."
-            )
+            await ctx.respond("Unable to locate the configured verification role for this server.")
             return
 
         if role in member.roles:
@@ -491,26 +454,18 @@ class VerificationCog(commands.Cog):
 
         reason = f"Manual verification by {ctx.author}"
         await member.add_roles(role, reason=reason)
-
         await self._remove_unverified_role(ctx.guild, member, reason=reason)
 
-        # Optionally assign Salesforce-derived roles after manual verification.
         try:
             with session_scope() as session:
-                user = (
-                    session.query(User)
-                    .filter(User.discord_user_id == str(member.id))
-                    .one_or_none()
-                )
+                user = session.query(User).filter(User.discord_user_id == str(member.id)).one_or_none()
             asurite = user.asurite_id if user else None
             if asurite:
                 profile = await asyncio.to_thread(get_student_profile, asurite)
-                if not profile.get("error"):
+                if profile is not None:
                     await self.assign_roles_from_profile(member.id, profile)
         except Exception:
-            logger.exception(
-                "Failed to assign Salesforce-based roles for user %s", member.id
-            )
+            logger.exception("Failed to assign Salesforce-based roles for user %s", member.id)
             await ctx.respond(
                 f"{member.mention} has been marked as verified, "
                 "but there was an error assigning additional roles.",
@@ -524,184 +479,69 @@ class VerificationCog(commands.Cog):
     ) -> None:
         """Assign the verified role to a Discord user identified by ID."""
         await self.bot.wait_until_ready()
-
-        guild = self.bot.get_guild(self.guild_id)
-        if guild is None:
-            try:
-                guild = await self.bot.fetch_guild(self.guild_id)
-            except discord.HTTPException as exc:  # pragma: no cover - network failure
-                raise RuntimeError(
-                    "Unable to load the Discord guild for verification"
-                ) from exc
-
-        if guild is None:
-            raise RuntimeError("Discord guild is not available for verification")
-
+        guild = await self._resolve_guild()
         role = self._get_verified_role(guild)
         if role is None:
             raise RuntimeError("Configured verification role could not be found")
-
-        member = guild.get_member(user_id)
-        if member is None:
-            try:
-                member = await guild.fetch_member(user_id)
-            except discord.NotFound as exc:
-                raise RuntimeError(
-                    f"Discord user {user_id} is not a member of the guild"
-                ) from exc
-            except discord.HTTPException as exc:  # pragma: no cover - network failure
-                raise RuntimeError("Unable to load Discord member information") from exc
-
+        member = await self._resolve_member(guild, user_id)
         if role in member.roles:
             logger.info("Member %s already has the verification role", user_id)
             return
-
-        reason = "Automatic verification"
-        if asurite:
-            reason = f"{reason} for {asurite}"
-
+        reason = f"Automatic verification for {asurite}" if asurite else "Automatic verification"
         await member.add_roles(role, reason=reason)
-
         await self._remove_unverified_role(guild, member, reason=reason)
-
-        logger.info(
-            "Assigned verification role to Discord user %s (ASURITE: %s)",
-            user_id,
-            asurite,
-        )
+        logger.info("Assigned verification role to Discord user %s (ASURITE: %s)", user_id, asurite)
 
     async def unverify_member_by_id(
         self, user_id: int, *, reason: str | None = None
     ) -> bool:
         """Remove the verified role from a Discord user identified by ID."""
         await self.bot.wait_until_ready()
-
-        guild = self.bot.get_guild(self.guild_id)
-        if guild is None:
-            try:
-                guild = await self.bot.fetch_guild(self.guild_id)
-            except discord.HTTPException as exc:  # pragma: no cover - network failure
-                raise RuntimeError(
-                    "Unable to load the Discord guild for unverification"
-                ) from exc
-
-        if guild is None:
-            raise RuntimeError("Discord guild is not available for unverification")
-
-        member = guild.get_member(user_id)
-        if member is None:
-            try:
-                member = await guild.fetch_member(user_id)
-            except discord.NotFound as exc:
-                raise RuntimeError(
-                    f"Discord user {user_id} is not a member of the guild"
-                ) from exc
-            except discord.HTTPException as exc:  # pragma: no cover - network failure
-                raise RuntimeError("Unable to load Discord member information") from exc
-
-        remove_reason = reason or "Automatic re-verification"
-        return await self._remove_verified_role(guild, member, reason=remove_reason)
+        guild = await self._resolve_guild()
+        member = await self._resolve_member(guild, user_id)
+        return await self._remove_verified_role(guild, member, reason=reason or "Automatic re-verification")
 
     async def add_role_to_member_by_id(self, user_id: int, role_name: str) -> None:
         """Add a named role (from ROLE_ID_MAP) to a guild member by Discord user ID."""
         await self.bot.wait_until_ready()
-
         role_id = ROLE_ID_MAP.get(role_name)
         if role_id is None:
             raise ValueError(f"Unknown role name: {role_name!r}")
-
-        guild = self.bot.get_guild(self.guild_id)
-        if guild is None:
-            try:
-                guild = await self.bot.fetch_guild(self.guild_id)
-            except discord.HTTPException as exc:
-                raise RuntimeError("Unable to load the Discord guild") from exc
-
-        member = guild.get_member(user_id)
-        if member is None:
-            try:
-                member = await guild.fetch_member(user_id)
-            except discord.NotFound as exc:
-                raise RuntimeError(f"Discord user {user_id} is not a member of the guild") from exc
-            except discord.HTTPException as exc:
-                raise RuntimeError("Unable to load Discord member information") from exc
-
+        guild = await self._resolve_guild()
+        member = await self._resolve_member(guild, user_id)
         role = guild.get_role(role_id)
         if role is None:
             raise RuntimeError(f"Role {role_name!r} (id {role_id}) not found in guild")
-
         if role not in member.roles:
             await member.add_roles(role, reason="Manual exception — admin role add")
 
     async def remove_role_from_member_by_id(self, user_id: int, role_name: str) -> None:
         """Remove a named role (from ROLE_ID_MAP) from a guild member by Discord user ID."""
         await self.bot.wait_until_ready()
-
         role_id = ROLE_ID_MAP.get(role_name)
         if role_id is None:
             raise ValueError(f"Unknown role name: {role_name!r}")
-
-        guild = self.bot.get_guild(self.guild_id)
-        if guild is None:
-            try:
-                guild = await self.bot.fetch_guild(self.guild_id)
-            except discord.HTTPException as exc:
-                raise RuntimeError("Unable to load the Discord guild") from exc
-
-        member = guild.get_member(user_id)
-        if member is None:
-            try:
-                member = await guild.fetch_member(user_id)
-            except discord.NotFound as exc:
-                raise RuntimeError(f"Discord user {user_id} is not a member of the guild") from exc
-            except discord.HTTPException as exc:
-                raise RuntimeError("Unable to load Discord member information") from exc
-
+        guild = await self._resolve_guild()
+        member = await self._resolve_member(guild, user_id)
         role = guild.get_role(role_id)
         if role is None:
             return  # Already absent, nothing to do.
-
         if role in member.roles:
             await member.remove_roles(role, reason="Manual exception — admin role remove")
 
     async def assign_roles_from_profile(
-        self, user_id: int, student_profile: dict[str, Any]
+        self, user_id: int, student_profile: StudentProfile
     ) -> None:
         """Assign additional Discord roles for a user based on Salesforce data."""
         await self.bot.wait_until_ready()
-
-        guild = self.bot.get_guild(self.guild_id)
-        if guild is None:
-            try:
-                guild = await self.bot.fetch_guild(self.guild_id)
-            except discord.HTTPException as exc:  # pragma: no cover - network failure
-                raise RuntimeError(
-                    "Unable to load the Discord guild for role assignment"
-                ) from exc
-
-        if guild is None:
-            raise RuntimeError("Discord guild is not available for role assignment")
-
-        member = guild.get_member(user_id)
-        if member is None:
-            try:
-                member = await guild.fetch_member(user_id)
-            except discord.NotFound as exc:
-                raise RuntimeError(
-                    f"Discord user {user_id} is not a member of the guild"
-                ) from exc
-            except discord.HTTPException as exc:  # pragma: no cover - network failure
-                raise RuntimeError("Unable to load Discord member information") from exc
+        guild = await self._resolve_guild()
+        member = await self._resolve_member(guild, user_id)
 
         logical_role_names = role_names_from_student_profile(student_profile)
         if not logical_role_names:
-            logger.info(
-                "No additional roles derived from Salesforce profile for user %s",
-                user_id,
-            )
+            logger.info("No additional roles derived from Salesforce profile for user %s", user_id)
             return
 
-        # Load per-user exceptions to honour paused/added overrides.
         exceptions = await asyncio.to_thread(get_exceptions_for_discord_id, str(user_id))
         paused_roles = {e.role_name for e in exceptions if e.exception_type == "paused"}
 
@@ -716,38 +556,18 @@ class VerificationCog(commands.Cog):
                 continue
             role = guild.get_role(role_id)
             if role is None:
-                logger.warning(
-                    "Configured role id %s for %s not found in guild %s",
-                    role_id,
-                    logical_name,
-                    guild.id,
-                )
+                logger.warning("Configured role id %s for %s not found in guild %s", role_id, logical_name, guild.id)
                 continue
-            if role in member.roles:
-                continue
-            roles_to_add.append(role)
+            if role not in member.roles:
+                roles_to_add.append(role)
 
         if not roles_to_add:
-            logger.info(
-                "No new Discord roles to assign for user %s from Salesforce profile",
-                user_id,
-            )
+            logger.info("No new Discord roles to assign for user %s from Salesforce profile", user_id)
             return
 
-        reason = "Automatic Salesforce-based role assignment"
-        asurite = student_profile.get("asurite")
-        if isinstance(asurite, str) and asurite:
-            reason = f"{reason} for {asurite}"
-
+        reason = f"Automatic Salesforce-based role assignment for {student_profile.asurite}" if student_profile.asurite else "Automatic Salesforce-based role assignment"
         await member.add_roles(*roles_to_add, reason=reason)
-
-        logger.info(
-            "Assigned Salesforce-based roles %s to Discord user %s",
-            [r.id for r in roles_to_add],
-            user_id,
-        )
-
-        # Save all assigned roles to the database
+        logger.info("Assigned Salesforce-based roles %s to Discord user %s", [r.id for r in roles_to_add], user_id)
         await self._save_roles_to_database(user_id, logical_role_names, source="verification")
 
     async def _save_roles_to_database(
@@ -783,39 +603,16 @@ class VerificationCog(commands.Cog):
             )
 
     async def remove_roles_from_profile(
-        self, user_id: int, student_profile: dict[str, Any]
+        self, user_id: int, student_profile: StudentProfile
     ) -> None:
         """Remove Discord roles for a user based on Salesforce data."""
         await self.bot.wait_until_ready()
-
-        guild = self.bot.get_guild(self.guild_id)
-        if guild is None:
-            try:
-                guild = await self.bot.fetch_guild(self.guild_id)
-            except discord.HTTPException as exc:  # pragma: no cover - network failure
-                raise RuntimeError(
-                    "Unable to load the Discord guild for role removal"
-                ) from exc
-
-        if guild is None:
-            raise RuntimeError("Discord guild is not available for role removal")
-
-        member = guild.get_member(user_id)
-        if member is None:
-            try:
-                member = await guild.fetch_member(user_id)
-            except discord.NotFound as exc:
-                raise RuntimeError(
-                    f"Discord user {user_id} is not a member of the guild"
-                ) from exc
-            except discord.HTTPException as exc:  # pragma: no cover - network failure
-                raise RuntimeError("Unable to load Discord member information") from exc
+        guild = await self._resolve_guild()
+        member = await self._resolve_member(guild, user_id)
 
         logical_role_names = role_names_from_student_profile(student_profile)
         if not logical_role_names:
-            logger.info(
-                "No Salesforce-derived roles to remove for user %s", user_id
-            )
+            logger.info("No Salesforce-derived roles to remove for user %s", user_id)
             return
 
         roles_to_remove: list[discord.Role] = []
@@ -826,66 +623,27 @@ class VerificationCog(commands.Cog):
                 continue
             role = guild.get_role(role_id)
             if role is None:
-                logger.warning(
-                    "Configured role id %s for %s not found in guild %s",
-                    role_id,
-                    logical_name,
-                    guild.id,
-                )
+                logger.warning("Configured role id %s for %s not found in guild %s", role_id, logical_name, guild.id)
                 continue
-            if role not in member.roles:
-                continue
-            roles_to_remove.append(role)
+            if role in member.roles:
+                roles_to_remove.append(role)
 
         if not roles_to_remove:
-            logger.info(
-                "No Salesforce-derived roles to remove for user %s", user_id
-            )
+            logger.info("No Salesforce-derived roles to remove for user %s", user_id)
             return
 
-        reason = "Automatic Salesforce-based role removal"
-        asurite = student_profile.get("asurite")
-        if isinstance(asurite, str) and asurite:
-            reason = f"{reason} for {asurite}"
-
+        reason = f"Automatic Salesforce-based role removal for {student_profile.asurite}" if student_profile.asurite else "Automatic Salesforce-based role removal"
         await member.remove_roles(*roles_to_remove, reason=reason)
-
-        logger.info(
-            "Removed Salesforce-based roles %s from Discord user %s",
-            [r.id for r in roles_to_remove],
-            user_id,
-        )
+        logger.info("Removed Salesforce-based roles %s from Discord user %s", [r.id for r in roles_to_remove], user_id)
 
     async def refresh_roles_from_profile(
-        self, user_id: int, student_profile: dict[str, Any]
+        self, user_id: int, student_profile: StudentProfile
     ) -> None:
         """Remove all ROLE_ID_MAP roles from a member and re-assign based on Salesforce profile."""
         await self.bot.wait_until_ready()
+        guild = await self._resolve_guild()
+        member = await self._resolve_member(guild, user_id)
 
-        guild = self.bot.get_guild(self.guild_id)
-        if guild is None:
-            try:
-                guild = await self.bot.fetch_guild(self.guild_id)
-            except discord.HTTPException as exc:
-                raise RuntimeError(
-                    "Unable to load the Discord guild for role refresh"
-                ) from exc
-
-        if guild is None:
-            raise RuntimeError("Discord guild is not available for role refresh")
-
-        member = guild.get_member(user_id)
-        if member is None:
-            try:
-                member = await guild.fetch_member(user_id)
-            except discord.NotFound as exc:
-                raise RuntimeError(
-                    f"Discord user {user_id} is not a member of the guild"
-                ) from exc
-            except discord.HTTPException as exc:
-                raise RuntimeError("Unable to load Discord member information") from exc
-
-        # Load per-user exceptions to honour paused/added overrides.
         exceptions = await asyncio.to_thread(get_exceptions_for_discord_id, str(user_id))
         paused_roles = {e.role_name for e in exceptions if e.exception_type == "paused"}
         added_roles = {e.role_name for e in exceptions if e.exception_type == "added"}
@@ -953,11 +711,7 @@ class VerificationCog(commands.Cog):
         member: discord.Member = Option(discord.Member, "Member to unverify"),
     ) -> None:
         """Remove the verification role from a member."""
-        if ctx.guild_id != self.guild_id or ctx.guild is None:
-            await ctx.respond(
-                "This command is only available in the Devil2Devil server.",
-                ephemeral=True,
-            )
+        if not await self._require_home_guild(ctx):
             return
 
         role = self._get_verified_role(ctx.guild)
@@ -987,11 +741,7 @@ class VerificationCog(commands.Cog):
         asurite: str = Option(str, "ASURITE ID to ban", required=False, default=None),
     ) -> None:
         """Ban an ASURITE from verification and revoke their Discord access."""
-        if ctx.guild_id != self.guild_id or ctx.guild is None:
-            await ctx.respond(
-                "This command is only available in the Devil2Devil server.",
-                ephemeral=True,
-            )
+        if not await self._require_home_guild(ctx):
             return
 
         if member is None and not (asurite or "").strip():
@@ -1138,11 +888,7 @@ class VerificationCog(commands.Cog):
         member: discord.Member = Option(discord.Member, "Discord member to whitelist"),
     ) -> None:
         """Clear a blacklist ban and re-verify the member."""
-        if ctx.guild_id != self.guild_id or ctx.guild is None:
-            await ctx.respond(
-                "This command is only available in the Devil2Devil server.",
-                ephemeral=True,
-            )
+        if not await self._require_home_guild(ctx):
             return
 
         await ctx.defer(ephemeral=True)
@@ -1200,7 +946,7 @@ class VerificationCog(commands.Cog):
         if asurite:
             try:
                 profile = await asyncio.to_thread(get_student_profile, asurite)
-                if not profile.get("error"):
+                if profile is not None:
                     await self.assign_roles_from_profile(member.id, profile)
             except Exception:
                 logger.exception(
@@ -1239,11 +985,7 @@ class VerificationCog(commands.Cog):
     @slash_command(**SLASH_COMMAND_KWARGS)
     async def setup_verification(self, ctx: discord.ApplicationContext) -> None:
         """Slash command to seed the verification prompt embed in-channel."""
-        if ctx.guild_id != self.guild_id:
-            await ctx.respond(
-                "This command is only available in the Devil2Devil server.",
-                ephemeral=True,
-            )
+        if not await self._require_home_guild(ctx):
             return
 
         if ctx.channel is None:
@@ -1270,11 +1012,7 @@ class VerificationCog(commands.Cog):
         user: discord.Member = Option(discord.Member, "Discord member to look up"),
     ) -> None:
         """Return the verified ASU email for a Discord member. Only visible to the invoker."""
-        if ctx.guild_id != self.guild_id or ctx.guild is None:
-            await ctx.respond(
-                "This command is only available in the Devil2Devil server.",
-                ephemeral=True,
-            )
+        if not await self._require_home_guild(ctx):
             return
 
         with session_scope() as db_session:

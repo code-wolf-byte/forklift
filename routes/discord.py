@@ -119,23 +119,13 @@ def discord_callback():
         logger.error("Discord token exchange failed: %s", exc)
         return _oauth_failure(str(exc), 400)
 
-    access_token = token_data.get("access_token")
-    if not access_token:
-        logger.error(
-            "Discord token exchange response missing access token: %s", token_data
-        )
-        return _oauth_failure("Discord token response missing access token", 500)
-
     try:
-        profile = fetch_user_profile(access_token)
+        profile = fetch_user_profile(token_data.access_token)
     except DiscordAPIError as exc:
         logger.error("Discord user profile fetch failed: %s", exc)
         return _oauth_failure(str(exc), 400)
 
-    discord_user_id = profile.get("id")
-    if not discord_user_id:
-        logger.error("Discord profile missing user id: %s", profile)
-        return _oauth_failure("Discord profile response missing user id", 500)
+    discord_user_id = profile.id
 
     asurite = verification_state.get("asurite")
     old_discord_user_id: str | None = None
@@ -220,9 +210,9 @@ def discord_callback():
                         )
 
                 user.discord_user_id = discord_user_id
-                user.discord_username = profile.get("username")
-                user.discord_global_name = profile.get("global_name")
-                user.discord_avatar = profile.get("avatar")
+                user.discord_username = profile.username
+                user.discord_global_name = profile.global_name
+                user.discord_avatar = profile.avatar
                 user.verified = True
                 user.verified_at = datetime.utcnow()
                 if user.created_at != user.verified_at:
@@ -276,9 +266,9 @@ def discord_callback():
                 ):
                     existing_user.updated_at = datetime.utcnow()
                 else:
-                    existing_user.discord_username = profile.get("username")
-                    existing_user.discord_global_name = profile.get("global_name")
-                    existing_user.discord_avatar = profile.get("avatar")
+                    existing_user.discord_username = profile.username
+                    existing_user.discord_global_name = profile.global_name
+                    existing_user.discord_avatar = profile.avatar
                     existing_user.verified = True
                     existing_user.verified_at = datetime.utcnow()
                     if existing_user.created_at != existing_user.verified_at:
@@ -311,24 +301,18 @@ def discord_callback():
     # After Discord verification, attempt to look up the student's Salesforce profile.
     # Any failures here are non-fatal; verification still succeeds.
     asurite = verification_state.get("asurite")
-    student_profile = None
-    if asurite:
-        try:
-            student_profile = get_student_profile(asurite)
-        except Exception:  # pragma: no cover - defensive
-            logger.exception(
-                "Failed to fetch Salesforce student profile for %s", asurite
-            )
+    student_profile = get_student_profile(asurite) if asurite else None
+
     verification_state.update(
         {
             "discord_user_id": discord_user_id,
-            "discord_username": profile.get("username"),
+            "discord_username": profile.username,
             "discord_complete": True,
             "verified": True,
         }
     )
     session["verification_state"] = verification_state
-    session["discord_user"] = profile
+    session["discord_user"] = profile.model_dump()
 
     # Check and persist admin status (non-fatal if bot is unavailable)
     is_admin = False
@@ -346,8 +330,9 @@ def discord_callback():
     session["is_admin"] = is_admin
 
     if student_profile is not None:
-        verification_state["student_profile"] = student_profile
-        session["student_profile"] = student_profile
+        profile_dict = student_profile.model_dump()
+        verification_state["student_profile"] = profile_dict
+        session["student_profile"] = profile_dict
 
         # Assign additional Discord roles based on Salesforce profile data.
         try:
@@ -389,5 +374,5 @@ def discord_callback():
         "asurite": verification_state.get("asurite"),
         "email": verification_state.get("email"),
         "discord_user_id": discord_user_id,
-        "discord_username": profile.get("username"),
+        "discord_username": profile.username,
     }
