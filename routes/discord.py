@@ -3,15 +3,24 @@ from __future__ import annotations
 import logging
 import secrets
 from datetime import datetime
+from pathlib import Path
 
+import yaml
 from flask import Blueprint, redirect, request, session, url_for
 from sqlalchemy.exc import IntegrityError
+
+_ADMIN_CONFIG_PATH = Path(__file__).parent.parent / "config" / "verification.yaml"
+with _ADMIN_CONFIG_PATH.open() as _f:
+    _ADMIN_RESTRICTED_ROLE_IDS: list[str] = (
+        yaml.safe_load(_f).get("admin", {}).get("restricted_role_ids", [])
+    )
 
 from asu_discord.api import (
     DiscordAPIError,
     assign_verified_role,
     assign_roles_from_profile,
     build_authorize_url,
+    check_member_has_any_role,
     check_member_is_admin,
     exchange_code_for_token,
     fetch_user_profile,
@@ -328,6 +337,13 @@ def discord_callback():
     except Exception:
         logger.warning("Failed to update is_admin in DB for user %s", user_db_id)
     session["is_admin"] = is_admin
+
+    is_officer = False
+    try:
+        is_officer = (not is_admin) and check_member_has_any_role(discord_user_id, _ADMIN_RESTRICTED_ROLE_IDS)
+    except Exception:
+        logger.warning("Failed to check officer role for Discord user %s", discord_user_id)
+    session["is_officer"] = is_officer
 
     if student_profile is not None:
         profile_dict = student_profile.model_dump()

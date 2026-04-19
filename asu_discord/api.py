@@ -324,6 +324,24 @@ def check_member_is_admin(discord_user_id: str) -> bool:
     return bool(member and member.guild_permissions.administrator)
 
 
+def check_member_has_any_role(discord_user_id: str, role_ids: list[str]) -> bool:
+    """Return True if the Discord user has any of the given role IDs in the guild."""
+    if not role_ids:
+        return False
+    bot = get_running_bot()
+    if bot is None:
+        return False
+    cfg = _config()
+    guild = bot.get_guild(int(cfg.guild_id))
+    if guild is None:
+        return False
+    member = guild.get_member(int(discord_user_id))
+    if member is None:
+        return False
+    member_role_ids = {str(r.id) for r in member.roles}
+    return bool(member_role_ids & set(role_ids))
+
+
 def _safe_json(response: requests.Response) -> Dict[str, Any]:
     try:
         data = response.json()
@@ -340,6 +358,7 @@ __all__ = [
     "assign_verified_role",
     "assign_roles_from_profile",
     "build_authorize_url",
+    "check_member_has_any_role",
     "check_member_is_admin",
     "exchange_code_for_token",
     "fetch_user_profile",
