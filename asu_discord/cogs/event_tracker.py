@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import logging
@@ -10,10 +11,10 @@ from utils.database import EventParticipant, ServerEvent, session_scope
 
 logger = logging.getLogger(__name__)
 
-# Track voice and stage events only — skip external locations.
-_TRACKED_TYPES = {
-    discord.ScheduledEventLocationType.voice: "voice",
-    discord.ScheduledEventLocationType.stage_instance: "stage_instance",
+# Only track in-server events — filter out external locations.
+_TRACKED_ENTITY_TYPES: dict[discord.ScheduledEventEntityType, str] = {
+    discord.ScheduledEventEntityType.voice: "voice",
+    discord.ScheduledEventEntityType.stage_instance: "stage_instance",
 }
 
 
@@ -25,11 +26,7 @@ class EventTrackerCog(commands.Cog):
         self.guild_id = guild_id
 
     def _is_tracked(self, event: discord.ScheduledEvent) -> bool:
-        return event.location.type in _TRACKED_TYPES
-
-    def _channel_id(self, event: discord.ScheduledEvent) -> str | None:
-        loc = event.location.value
-        return str(loc.id) if hasattr(loc, "id") else None
+        return event.entity_type in _TRACKED_ENTITY_TYPES
 
     def _upsert_event(self, db_session, event: discord.ScheduledEvent) -> ServerEvent | None:
         if not self._is_tracked(event):
@@ -45,8 +42,8 @@ class EventTrackerCog(commands.Cog):
             if event.end_time else None
         )
         status = event.status.name.lower() if event.status else "scheduled"
-        entity_type = _TRACKED_TYPES[event.location.type]
-        channel_id = self._channel_id(event)
+        entity_type = _TRACKED_ENTITY_TYPES[event.entity_type]
+        channel_id = str(event.channel_id) if event.channel_id else None
 
         existing = (
             db_session.query(ServerEvent)
@@ -67,7 +64,7 @@ class EventTrackerCog(commands.Cog):
 
         new_ev = ServerEvent(
             discord_event_id=str(event.id),
-            guild_id=str(event.guild.id),
+            guild_id=str(event.guild_id),
             name=event.name,
             description=event.description,
             start_time=start_time,
@@ -97,8 +94,8 @@ class EventTrackerCog(commands.Cog):
     async def on_ready(self) -> None:
         """Sync all current scheduled events from Discord on startup.
 
-        Runs even if an event is already active when the bot deploys —
-        active events have their current subscriber list back-filled.
+        This runs even if an event is already active when the bot deploys —
+        active events get their current subscriber list back-filled.
         """
         guild = self.bot.get_guild(self.guild_id)
         if guild is None:
@@ -129,7 +126,7 @@ class EventTrackerCog(commands.Cog):
         """Insert 'joined' rows for users already subscribed to a live event on startup."""
         try:
             user_ids: list[str] = []
-            async for user in event.subscribers(limit=None):
+            async for user in event.fetch_users():
                 user_ids.append(str(user.id))
         except Exception:
             logger.warning(
@@ -192,14 +189,14 @@ class EventTrackerCog(commands.Cog):
                 .one_or_none()
             )
             if existing:
-                existing.status = "canceled"
+                existing.status = "cancelled"
                 existing.updated_at = datetime.utcnow()
 
     # ── Participant tracking ──────────────────────────────────────────────────
 
     @commands.Cog.listener()
     async def on_scheduled_event_user_add(
-        self, event: discord.ScheduledEvent, user: discord.Member
+        self, event: discord.ScheduledEvent, user: discord.User
     ) -> None:
         if not self._is_tracked(event):
             return
@@ -216,7 +213,7 @@ class EventTrackerCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_scheduled_event_user_remove(
-        self, event: discord.ScheduledEvent, user: discord.Member
+        self, event: discord.ScheduledEvent, user: discord.User
     ) -> None:
         if not self._is_tracked(event):
             return
