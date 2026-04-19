@@ -14,7 +14,7 @@ import yaml
 from flask import Blueprint, Response, abort, jsonify, redirect, request, send_from_directory, session
 from sqlalchemy import func
 
-from utils.database import CronJobConfig, GoldGuideContribution, MessageBackfill, MessageLog, QnaPost, User, UserRole, UserRoleException, session_scope
+from utils.database import CronJobConfig, EventParticipant, GoldGuideContribution, MessageBackfill, MessageLog, QnaPost, ServerEvent, User, UserRole, UserRoleException, session_scope
 
 AZ_TZ = ZoneInfo("America/Phoenix")
 
@@ -1318,6 +1318,110 @@ def admin_exceptions_delete(exception_id: int):
             logger.warning("Could not remove role %s from %s after deleting exception: %s", role_name, discord_user_id, e)
 
     return jsonify({"status": "deleted", "id": exception_id})
+
+
+# ── Server Events ─────────────────────────────────────────────────────────────
+
+@admin_bp.route("/api/admin/events")
+@require_admin
+def admin_events():
+    """List all tracked in-server scheduled events, sorted newest first."""
+    with session_scope() as db_session:
+        events = (
+            db_session.query(ServerEvent)
+            .order_by(ServerEvent.start_time.desc().nullslast())
+            .all()
+        )
+
+        event_ids = [e.id for e in events]
+        joined_counts: dict[int, int] = {}
+        left_counts: dict[int, int] = {}
+        if event_ids:
+            for eid, cnt in (
+                db_session.query(EventParticipant.event_id, func.count(EventParticipant.id))
+                .filter(EventParticipant.event_id.in_(event_ids), EventParticipant.action == "joined")
+                .group_by(EventParticipant.event_id)
+                .all()
+            ):
+                joined_counts[eid] = cnt
+            for eid, cnt in (
+                db_session.query(EventParticipant.event_id, func.count(EventParticipant.id))
+                .filter(EventParticipant.event_id.in_(event_ids), EventParticipant.action == "left")
+                .group_by(EventParticipant.event_id)
+                .all()
+            ):
+                left_counts[eid] = cnt
+
+        result = []
+        for e in events:
+            result.append({
+                "id": e.id,
+                "discord_event_id": e.discord_event_id,
+                "name": e.name,
+                "description": e.description,
+                "start_time": e.start_time.replace(tzinfo=timezone.utc).isoformat() if e.start_time else None,
+                "end_time": e.end_time.replace(tzinfo=timezone.utc).isoformat() if e.end_time else None,
+                "status": e.status,
+                "entity_type": e.entity_type,
+                "channel_id": e.channel_id,
+                "joined_count": joined_counts.get(e.id, 0),
+                "left_count": left_counts.get(e.id, 0),
+            })
+
+    return jsonify(result)
+
+
+@admin_bp.route("/api/admin/events/<int:event_id>")
+@require_admin
+def admin_event_detail(event_id: int):
+    """Event detail with full participant list including username and email."""
+    with session_scope() as db_session:
+        event = db_session.query(ServerEvent).filter(ServerEvent.id == event_id).one_or_none()
+        if event is None:
+            return jsonify({"error": "Event not found"}), 404
+
+        participants = (
+            db_session.query(EventParticipant)
+            .filter(EventParticipant.event_id == event_id)
+            .order_by(EventParticipant.timestamp.asc())
+            .all()
+        )
+
+        user_ids = list({p.discord_user_id for p in participants})
+        users_map: dict[str, User] = {}
+        if user_ids:
+            users_map = {
+                u.discord_user_id: u
+                for u in db_session.query(User)
+                .filter(User.discord_user_id.in_(user_ids))
+                .all()
+            }
+
+        participant_list = []
+        for p in participants:
+            u = users_map.get(p.discord_user_id)
+            participant_list.append({
+                "id": p.id,
+                "discord_user_id": p.discord_user_id,
+                "discord_username": u.discord_username if u else None,
+                "asurite_id": u.asurite_id if u else None,
+                "email": u.email if u else None,
+                "action": p.action,
+                "timestamp": p.timestamp.replace(tzinfo=timezone.utc).isoformat() if p.timestamp else None,
+            })
+
+        return jsonify({
+            "id": event.id,
+            "discord_event_id": event.discord_event_id,
+            "name": event.name,
+            "description": event.description,
+            "start_time": event.start_time.replace(tzinfo=timezone.utc).isoformat() if event.start_time else None,
+            "end_time": event.end_time.replace(tzinfo=timezone.utc).isoformat() if event.end_time else None,
+            "status": event.status,
+            "entity_type": event.entity_type,
+            "channel_id": event.channel_id,
+            "participants": participant_list,
+        })
 
 
 @admin_bp.route("/admin")
