@@ -4,6 +4,7 @@ import csv
 import io
 import logging
 import os
+import threading
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from functools import wraps
@@ -1564,7 +1565,7 @@ def admin_analytics():
 
 # ─── Salesforce Profile Cache ─────────────────────────────────────────────────
 
-_sf_refresh_lock = _threading.Lock()
+_sf_refresh_lock = threading.Lock()
 _sf_refresh_running = False
 _sf_refresh_last: dict = {
     "started_at": None,
@@ -1663,7 +1664,7 @@ def admin_salesforce_refresh():
         _sf_refresh_last["errors"] = 0
         _sf_refresh_last["total"] = 0
 
-    _threading.Thread(target=_run_sf_refresh, daemon=True).start()
+    threading.Thread(target=_run_sf_refresh, daemon=True).start()
     return jsonify({"status": "started"})
 
 
