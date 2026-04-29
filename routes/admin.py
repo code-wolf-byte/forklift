@@ -1,28 +1,29 @@
 from __future__ import annotations
 
+import csv
+import io
 import logging
 import os
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from functools import wraps
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import yaml
 from flask import Blueprint, Response, abort, jsonify, redirect, request, send_from_directory, session
 from sqlalchemy import func
 
-import csv
-import io
-
-import threading as _threading
-
 from utils.database import (
     CronJobConfig,
+    EventParticipant,
     ForumPost,
     GoldGuideContribution,
     MessageBackfill,
     MessageLog,
     ModerationEvent,
     QnaPost,
+    ServerEvent,
     User,
     UserRole,
     UserRoleException,
@@ -36,23 +37,46 @@ AZ_TZ = ZoneInfo("America/Phoenix")
 admin_bp = Blueprint("admin", __name__)
 logger = logging.getLogger(__name__)
 
+_ADMIN_CONFIG_PATH = Path(__file__).parent.parent / "config" / "verification.yaml"
+with _ADMIN_CONFIG_PATH.open() as _f:
+    _ADMIN_RESTRICTED_ROLE_IDS: list[str] = (
+        yaml.safe_load(_f).get("admin", {}).get("restricted_role_ids", [])
+    )
+
 REACT_BUILD_DIR = os.getenv(
     "REACT_BUILD_DIR",
     os.path.join(os.path.dirname(os.path.dirname(__file__)), "asu-unity-react", "dist"),
 )
 
 
+def _auth_complete() -> bool:
+    """Return True if the session has both CAS and Discord complete."""
+    verification_state = session.get("verification_state") or {}
+    cas_complete = bool(verification_state.get("cas_complete"))
+    discord_complete = bool(
+        verification_state.get("discord_complete") or verification_state.get("verified")
+    )
+    return cas_complete and discord_complete
+
+
 def require_admin(f):
-    """Decorator: enforces CAS+Discord completion and is_admin session flag."""
+    """Decorator: allows full admins and restricted-role officers (no message logs/stats)."""
 
     @wraps(f)
     def decorated(*args, **kwargs):
-        verification_state = session.get("verification_state") or {}
-        cas_complete = bool(verification_state.get("cas_complete"))
-        discord_complete = bool(
-            verification_state.get("discord_complete") or verification_state.get("verified")
-        )
-        if not (cas_complete and discord_complete and session.get("is_admin")):
+        if not (_auth_complete() and (session.get("is_admin") or session.get("is_officer"))):
+            abort(403)
+        return f(*args, **kwargs)
+
+    return decorated
+
+
+def require_full_admin(f):
+    """Decorator: full admins only — blocks restricted-role officers."""
+
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not (_auth_complete() and session.get("is_admin")):
             abort(403)
         return f(*args, **kwargs)
 
@@ -62,18 +86,13 @@ def require_admin(f):
 @admin_bp.route("/api/admin/me")
 def admin_me():
     verification_state = session.get("verification_state") or {}
-    cas_complete = bool(verification_state.get("cas_complete"))
-    discord_complete = bool(
-        verification_state.get("discord_complete") or verification_state.get("verified")
-    )
-    if not (cas_complete and discord_complete):
+    if not _auth_complete():
         return jsonify({"error": "Unauthorized"}), 403
 
     discord_user_id = verification_state.get("discord_user_id")
     if not discord_user_id:
         return jsonify({"error": "Unauthorized"}), 403
 
-    user = None
     is_admin = False
     with session_scope() as db_session:
         user = (
@@ -88,10 +107,19 @@ def admin_me():
         discord_username = user.discord_username
         discord_avatar = user.discord_avatar
 
-    # Refresh session is_admin from DB
+    # Refresh is_admin from DB and is_officer via live Discord role check
     session["is_admin"] = is_admin
 
+    is_officer = False
     if not is_admin:
+        try:
+            from asu_discord.api import check_member_has_any_role
+            is_officer = check_member_has_any_role(discord_user_id, _ADMIN_RESTRICTED_ROLE_IDS)
+        except Exception:
+            logger.warning("Failed to refresh officer role for %s", discord_user_id)
+    session["is_officer"] = is_officer
+
+    if not (is_admin or is_officer):
         return jsonify({"error": "Forbidden"}), 403
 
     return jsonify(
@@ -101,12 +129,13 @@ def admin_me():
             "discord_user_id": discord_user_id,
             "discord_avatar": discord_avatar,
             "is_admin": is_admin,
+            "is_officer": is_officer,
         }
     )
 
 
 @admin_bp.route("/api/admin/stats")
-@require_admin
+@require_full_admin
 def admin_stats():
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     today_naive = today_start.replace(tzinfo=None)
@@ -297,7 +326,7 @@ def _get_incomplete_verification_stats(db_session) -> dict:
 
 
 @admin_bp.route("/api/admin/automations")
-@require_admin
+@require_full_admin
 def admin_automations():
     with session_scope() as db_session:
         configs = db_session.query(CronJobConfig).order_by(CronJobConfig.id.asc()).all()
@@ -311,7 +340,7 @@ def admin_automations():
 
 
 @admin_bp.route("/api/admin/automations/<job_name>", methods=["PUT"])
-@require_admin
+@require_full_admin
 def admin_update_automation(job_name: str):
     data = request.get_json(silent=True) or {}
 
@@ -352,7 +381,7 @@ def admin_update_automation(job_name: str):
 
 
 @admin_bp.route("/api/admin/automations/<job_name>/trigger", methods=["POST"])
-@require_admin
+@require_full_admin
 def admin_trigger_automation(job_name: str):
     from cron import cron_manager
 
@@ -364,7 +393,7 @@ def admin_trigger_automation(job_name: str):
 
 
 @admin_bp.route("/api/admin/automations/<job_name>/reset", methods=["POST"])
-@require_admin
+@require_full_admin
 def admin_reset_automation(job_name: str):
     """Clear last_run_at so the next run fetches all records from the beginning."""
     from cron import cron_manager
@@ -442,7 +471,7 @@ MEMBER_ROLE_CATEGORIES: dict[str, list[str]] = {
 
 
 @admin_bp.route("/api/admin/roles")
-@require_admin
+@require_full_admin
 def admin_roles():
     with session_scope() as db_session:
         rows = (
@@ -455,7 +484,7 @@ def admin_roles():
 
 
 @admin_bp.route("/api/admin/member-stats")
-@require_admin
+@require_full_admin
 def admin_member_stats():
     """Role distribution stats mirroring the get_studet_data.py script, queryable by date."""
     from_dt = _parse_az_date(request.args.get("from_date"))
@@ -752,7 +781,7 @@ def _parse_message_filters():
 
 
 @admin_bp.route("/api/admin/message-logs/channels")
-@require_admin
+@require_full_admin
 def admin_message_channels():
     """Distinct channels that have logged messages, with counts."""
     with session_scope() as db_session:
@@ -773,7 +802,7 @@ def admin_message_channels():
 
 
 @admin_bp.route("/api/admin/message-logs/heatmap")
-@require_admin
+@require_full_admin
 def admin_message_heatmap():
     """Return activity heatmap in AZ time.
 
@@ -821,7 +850,7 @@ def admin_message_heatmap():
 
 
 @admin_bp.route("/api/admin/message-logs/export")
-@require_admin
+@require_full_admin
 def admin_message_export():
     """Paginated message log with optional user info joined from users table."""
     from_dt, to_dt, channel_ids, roles, exclude_roles = _parse_message_filters()
@@ -867,7 +896,7 @@ def admin_message_export():
 
 
 @admin_bp.route("/api/admin/message-logs/export/csv")
-@require_admin
+@require_full_admin
 def admin_message_export_csv():
     """Stream all matching message logs as a CSV download."""
     from_dt, to_dt, channel_ids, roles, exclude_roles = _parse_message_filters()
@@ -915,7 +944,7 @@ def admin_message_export_csv():
 
 
 @admin_bp.route("/api/admin/message-logs/backfill", methods=["POST"])
-@require_admin
+@require_full_admin
 def admin_message_backfill_start():
     """Trigger the one-year backfill on the running Discord bot."""
     from asu_discord.shared import get_running_bot, get_running_loop
@@ -941,7 +970,7 @@ def admin_message_backfill_start():
 
 
 @admin_bp.route("/api/admin/message-logs/backfill/status")
-@require_admin
+@require_full_admin
 def admin_message_backfill_status():
     """Return per-channel backfill progress."""
     from asu_discord.shared import get_running_bot
@@ -1845,15 +1874,114 @@ def admin_exceptions_delete(exception_id: int):
     return jsonify({"status": "deleted", "id": exception_id})
 
 
+# ── Server Events ─────────────────────────────────────────────────────────────
+
+@admin_bp.route("/api/admin/events")
+@require_admin
+def admin_events():
+    """List all tracked in-server scheduled events, sorted newest first."""
+    with session_scope() as db_session:
+        events = (
+            db_session.query(ServerEvent)
+            .order_by(ServerEvent.start_time.desc().nullslast())
+            .all()
+        )
+
+        event_ids = [e.id for e in events]
+        joined_counts: dict[int, int] = {}
+        left_counts: dict[int, int] = {}
+        if event_ids:
+            for eid, cnt in (
+                db_session.query(EventParticipant.event_id, func.count(EventParticipant.id))
+                .filter(EventParticipant.event_id.in_(event_ids), EventParticipant.action == "joined")
+                .group_by(EventParticipant.event_id)
+                .all()
+            ):
+                joined_counts[eid] = cnt
+            for eid, cnt in (
+                db_session.query(EventParticipant.event_id, func.count(EventParticipant.id))
+                .filter(EventParticipant.event_id.in_(event_ids), EventParticipant.action == "left")
+                .group_by(EventParticipant.event_id)
+                .all()
+            ):
+                left_counts[eid] = cnt
+
+        result = []
+        for e in events:
+            result.append({
+                "id": e.id,
+                "discord_event_id": e.discord_event_id,
+                "name": e.name,
+                "description": e.description,
+                "start_time": e.start_time.replace(tzinfo=timezone.utc).isoformat() if e.start_time else None,
+                "end_time": e.end_time.replace(tzinfo=timezone.utc).isoformat() if e.end_time else None,
+                "status": e.status,
+                "entity_type": e.entity_type,
+                "channel_id": e.channel_id,
+                "joined_count": joined_counts.get(e.id, 0),
+                "left_count": left_counts.get(e.id, 0),
+            })
+
+    return jsonify(result)
+
+
+@admin_bp.route("/api/admin/events/<int:event_id>")
+@require_admin
+def admin_event_detail(event_id: int):
+    """Event detail with full participant list including username and email."""
+    with session_scope() as db_session:
+        event = db_session.query(ServerEvent).filter(ServerEvent.id == event_id).one_or_none()
+        if event is None:
+            return jsonify({"error": "Event not found"}), 404
+
+        participants = (
+            db_session.query(EventParticipant)
+            .filter(EventParticipant.event_id == event_id)
+            .order_by(EventParticipant.timestamp.asc())
+            .all()
+        )
+
+        user_ids = list({p.discord_user_id for p in participants})
+        users_map: dict[str, User] = {}
+        if user_ids:
+            users_map = {
+                u.discord_user_id: u
+                for u in db_session.query(User)
+                .filter(User.discord_user_id.in_(user_ids))
+                .all()
+            }
+
+        participant_list = []
+        for p in participants:
+            u = users_map.get(p.discord_user_id)
+            participant_list.append({
+                "id": p.id,
+                "discord_user_id": p.discord_user_id,
+                "discord_username": u.discord_username if u else None,
+                "asurite_id": u.asurite_id if u else None,
+                "email": u.email if u else None,
+                "action": p.action,
+                "timestamp": p.timestamp.replace(tzinfo=timezone.utc).isoformat() if p.timestamp else None,
+            })
+
+        return jsonify({
+            "id": event.id,
+            "discord_event_id": event.discord_event_id,
+            "name": event.name,
+            "description": event.description,
+            "start_time": event.start_time.replace(tzinfo=timezone.utc).isoformat() if event.start_time else None,
+            "end_time": event.end_time.replace(tzinfo=timezone.utc).isoformat() if event.end_time else None,
+            "status": event.status,
+            "entity_type": event.entity_type,
+            "channel_id": event.channel_id,
+            "participants": participant_list,
+        })
+
+
 @admin_bp.route("/admin")
 @admin_bp.route("/admin/<path:path>")
 def admin_spa(path=""):
-    verification_state = session.get("verification_state") or {}
-    cas_complete = bool(verification_state.get("cas_complete"))
-    discord_complete = bool(
-        verification_state.get("discord_complete") or verification_state.get("verified")
-    )
-    if not (cas_complete and discord_complete and session.get("is_admin")):
+    if not (_auth_complete() and (session.get("is_admin") or session.get("is_officer"))):
         return redirect("/")
 
     react_index = os.path.join(REACT_BUILD_DIR, "index.html")

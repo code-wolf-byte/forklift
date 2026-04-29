@@ -159,7 +159,7 @@ def _parse_discord_id(value: str | None, user_id: int) -> int | None:
     return None
 
 
-def _roles_from_profile(profile: dict[str, Any]) -> list[int]:
+def _roles_from_profile(profile) -> list[int]:
     logical_names = role_names_from_student_profile(profile)
     role_ids: list[int] = []
     for name in sorted(logical_names):
@@ -407,13 +407,8 @@ async def _process_user(
 
         # Avoid blocking the Discord gateway heartbeat with sync HTTP calls.
         profile = await asyncio.to_thread(get_student_profile, asurite_id)
-        if profile.get("error"):
-            logger.info(
-                "User %s (%s): Salesforce error: %s",
-                user.id,
-                user.asurite_id,
-                profile.get("error"),
-            )
+        if profile is None:
+            logger.info("User %s (%s): no Salesforce profile returned", user.id, user.asurite_id)
             return {"status": "skipped_profile_error"}
 
         target_role_ids = _roles_from_profile(profile)

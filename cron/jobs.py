@@ -344,10 +344,8 @@ def refresh_salesforce_roles() -> None:
             skipped += 1
             continue
 
-        if profile.get("error"):
-            logger.info(
-                "refresh_salesforce_roles: skipping %s: %s", asurite, profile["error"]
-            )
+        if profile is None:
+            logger.info("refresh_salesforce_roles: skipping %s: no profile returned", asurite)
             skipped += 1
             continue
 

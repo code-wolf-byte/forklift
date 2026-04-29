@@ -1,7 +1,12 @@
 import base64
+import logging
 import os
 from typing import Any, Dict, Iterable
 import requests
+
+from .models import StudentProfile
+
+logger = logging.getLogger(__name__)
 
 BASE = "https://esb.asu.edu"
 CONTACT_URL = f"{BASE}/api/v1/asu-sf-contact/contact"
@@ -118,30 +123,16 @@ def _deposit_paid_from_opportunity(opp: Dict[str, Any]) -> bool:
     return status == "paid"
 
 
-def get_student_profile(asurite: str) -> Dict[str, Any]:
+def get_student_profile(asurite: str) -> StudentProfile | None:
     """
     Look up a student's Salesforce profile by ASURITE.
 
-    The returned structure is designed to support downstream role assignment,
-    and is similar to:
-
-    {
-        "asurite": "...",
-        "name": "...",
-        "fullName": "...",
-        "email": "...",
-        "state": "...",
-        "country": "...",
-        "contactId": "...",
-        "opportunities": [...],
-        ...summary fields...
-    }
-
-    On any failure or missing configuration, a dictionary with an "error" key
-    is returned.
+    Returns a StudentProfile on success, or None when credentials are missing,
+    the API is unreachable, no contact is found, or no opportunities exist.
     """
     if not CLIENT_ID or not CLIENT_SECRET:
-        return {"error": "Salesforce credentials are not configured"}
+        logger.warning("Salesforce credentials are not configured")
+        return None
 
     # --------------------
     # Basic Auth
@@ -157,13 +148,15 @@ def get_student_profile(asurite: str) -> Dict[str, Any]:
             f"{CONTACT_URL}?asurite={asurite}", headers=headers, timeout=10
         )
     except requests.RequestException as exc:
-        return {"error": f"Failed to contact Salesforce for student profile: {exc}"}
+        logger.warning("Failed to contact Salesforce for student profile for %s: %s", asurite, exc)
+        return None
 
     contact_resp.raise_for_status()
     contact_data = contact_resp.json()
 
     if "contact" not in contact_data or not contact_data["contact"]:
-        return {"error": "No contact found"}
+        logger.info("No Salesforce contact found for %s", asurite)
+        return None
 
     contact = contact_data["contact"][0]
     contact_id = contact.get("id")
@@ -283,6 +276,7 @@ def get_student_profile(asurite: str) -> Dict[str, Any]:
             profile["type"] = "Masters"
 
     if not opportunities:
-        profile["error"] = "No opportunities found"
+        logger.info("No Salesforce opportunities found for %s", asurite)
+        return None
 
-    return profile
+    return StudentProfile.model_validate(profile)

@@ -227,6 +227,41 @@ class MessageBackfill(Base):
     error = Column(Text, nullable=True)
 
 
+class ServerEvent(Base):
+    """A Discord scheduled event held in the server (voice/stage, not external)."""
+
+    __tablename__ = "server_events"
+
+    id = Column(Integer, primary_key=True)
+    discord_event_id = Column(String(64), unique=True, nullable=False, index=True)
+    guild_id = Column(String(64), nullable=False)
+    name = Column(String(256), nullable=False)
+    description = Column(Text, nullable=True)
+    start_time = Column(DateTime, nullable=True)   # naive UTC
+    end_time = Column(DateTime, nullable=True)     # naive UTC
+    status = Column(String(32), nullable=False, default="scheduled")
+    entity_type = Column(String(32), nullable=False)  # "voice" or "stage_instance"
+    channel_id = Column(String(64), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    participants = relationship("EventParticipant", back_populates="event")
+
+
+class EventParticipant(Base):
+    """A record of a user joining or leaving interest in a ServerEvent."""
+
+    __tablename__ = "event_participants"
+
+    id = Column(Integer, primary_key=True)
+    event_id = Column(Integer, ForeignKey("server_events.id"), nullable=False, index=True)
+    discord_user_id = Column(String(64), nullable=False, index=True)
+    action = Column(String(16), nullable=False)   # "joined" or "left"
+    timestamp = Column(DateTime, nullable=False)  # naive UTC
+
+    event = relationship("ServerEvent", back_populates="participants")
+
+
 class VoiceSession(Base):
     """One row per voice channel session.
 
