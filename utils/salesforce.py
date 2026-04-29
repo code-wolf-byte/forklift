@@ -249,4 +249,183 @@ def fetch_profile_with_retry(api: SalesforceAPI, asurite_id, retry_delay=RETRY_D
             # Non-network request problems (e.g., 4xx/5xx) should not spin forever.
             raise
 
- 
+
+# ─── Async bulk-fetch helpers (used by the analytics refresh endpoint) ─────────
+
+import asyncio
+import logging
+from typing import Any
+
+import aiohttp as _aiohttp
+
+_logger = logging.getLogger(__name__)
+
+_ESB_BASE = "https://esb.asu.edu"
+_CONTACT_URL = f"{_ESB_BASE}/api/v1/asu-sf-contact/contact"
+_OPP_URL = f"{_ESB_BASE}/api/v1/asu-sf-opportunity/opportunity"
+_ASYNC_TARGET_TERM_CODES = {"2267", "2261"}
+
+
+def _async_auth_header(client_id: str, client_secret: str) -> str:
+    token = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+    return f"Basic {token}"
+
+
+def _async_is_admitted_or_enrolled(opp: dict) -> bool:
+    stage = (opp.get("stageName") or "").strip().lower()
+    return stage in {"enrolled", "admitted"}
+
+
+def _async_parse_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "yes", "y", "1", "t"}
+    return False
+
+
+def _async_select_opportunity(opportunities: list[dict]) -> dict | None:
+    eligible = [o for o in opportunities if isinstance(o, dict) and _async_is_admitted_or_enrolled(o)]
+    for opp in eligible:
+        if str(opp.get("termCode") or "") in _ASYNC_TARGET_TERM_CODES:
+            return opp
+    return eligible[0] if eligible else None
+
+
+async def async_fetch_profile(
+    session: "_aiohttp.ClientSession",
+    asurite: str,
+    header: str,
+    sem: "asyncio.Semaphore",
+) -> dict[str, Any]:
+    """Return {asurite, country, state, is_international, has_opportunity, error}."""
+    async with sem:
+        try:
+            async with session.get(
+                f"{_CONTACT_URL}?asurite={asurite}",
+                headers={"Authorization": header},
+                timeout=_aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status != 200:
+                    return {"asurite": asurite, "error": f"contact HTTP {resp.status}"}
+                data = await resp.json()
+
+            contacts = data.get("contact") or []
+            if not contacts:
+                return {"asurite": asurite, "error": "no contact"}
+
+            contact = contacts[0]
+            contact_id = contact.get("id")
+            country = contact.get("country") or "Unknown"
+            state = contact.get("state") or ""
+
+            opportunities: list[dict] = []
+            for career in ("Undergraduate", "Graduate"):
+                try:
+                    async with session.get(
+                        f"{_OPP_URL}?contactId={contact_id}&career={career}",
+                        headers={"Authorization": header},
+                        timeout=_aiohttp.ClientTimeout(total=15),
+                    ) as oresp:
+                        if oresp.status == 200:
+                            odata = await oresp.json()
+                            if isinstance(odata, list):
+                                opportunities.extend(odata)
+                except Exception:
+                    pass
+
+            opportunities.sort(key=lambda o: str(o.get("createdDate") or ""))
+            selected = _async_select_opportunity(opportunities)
+
+            is_international = False
+            if selected:
+                is_international = _async_parse_bool(selected.get("internationalStudent"))
+                opp_country = selected.get("country") or country
+                country = opp_country if opp_country != "Unknown" else country
+
+            return {
+                "asurite": asurite,
+                "country": country,
+                "state": state,
+                "is_international": is_international,
+                "has_opportunity": selected is not None,
+                "error": None,
+            }
+
+        except Exception as exc:
+            return {"asurite": asurite, "error": str(exc)}
+
+
+async def async_bulk_fetch_profiles(
+    asuries: list[str],
+    client_id: str,
+    client_secret: str,
+    concurrency: int = 10,
+) -> list[dict[str, Any]]:
+    """Fetch Salesforce profiles for a list of ASURITEs concurrently."""
+    header = _async_auth_header(client_id, client_secret)
+    sem = asyncio.Semaphore(concurrency)
+    connector = _aiohttp.TCPConnector(limit=concurrency)
+    results: list[dict] = []
+
+    async with _aiohttp.ClientSession(connector=connector) as session:
+        tasks = [async_fetch_profile(session, a, header, sem) for a in asuries]
+        total = len(tasks)
+        for i, coro in enumerate(asyncio.as_completed(tasks), 1):
+            result = await coro
+            results.append(result)
+            if i % 100 == 0 or i == total:
+                _logger.info("Salesforce lookups: %d / %d", i, total)
+
+    return results
+
+
+def cache_sf_profile(asurite: str, profile: dict) -> None:
+    """Upsert a Salesforce-derived profile into the UserSalesforceProfile cache table.
+
+    Safe to call from any thread. Silently logs on failure so callers don't need to wrap.
+    Only caches when the profile has at least a contact-level asurite key (i.e. contact
+    was found in Salesforce); skips profiles that are pure error responses.
+    """
+    if not asurite or "asurite" not in profile:
+        return
+
+    from datetime import datetime as _dt
+    from utils.database import UserSalesforceProfile, session_scope
+
+    is_international = bool(profile.get("is_international") or profile.get("international"))
+    has_opportunity = bool(profile.get("opportunities"))
+    fetch_error = profile.get("error") or None
+    country = profile.get("country") or None
+    state = profile.get("state") or None
+    now = _dt.utcnow()
+
+    try:
+        with session_scope() as db:
+            existing = (
+                db.query(UserSalesforceProfile)
+                .filter(UserSalesforceProfile.asurite_id == asurite)
+                .one_or_none()
+            )
+            if existing:
+                existing.country = country
+                existing.state = state
+                existing.is_international = is_international
+                existing.has_opportunity = has_opportunity
+                existing.fetch_error = fetch_error
+                existing.fetched_at = now
+            else:
+                db.add(
+                    UserSalesforceProfile(
+                        asurite_id=asurite,
+                        country=country,
+                        state=state,
+                        is_international=is_international,
+                        has_opportunity=has_opportunity,
+                        fetch_error=fetch_error,
+                        fetched_at=now,
+                    )
+                )
+    except Exception:
+        _logger.exception("Failed to cache Salesforce profile for %s", asurite)
+

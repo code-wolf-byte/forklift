@@ -14,7 +14,23 @@ import yaml
 from flask import Blueprint, Response, abort, jsonify, redirect, request, send_from_directory, session
 from sqlalchemy import func
 
-from utils.database import CronJobConfig, EventParticipant, GoldGuideContribution, MessageBackfill, MessageLog, QnaPost, ServerEvent, User, UserRole, UserRoleException, session_scope
+from utils.database import (
+    CronJobConfig,
+    EventParticipant,
+    ForumPost,
+    GoldGuideContribution,
+    MessageBackfill,
+    MessageLog,
+    ModerationEvent,
+    QnaPost,
+    ServerEvent,
+    User,
+    UserRole,
+    UserRoleException,
+    UserSalesforceProfile,
+    VoiceSession,
+    session_scope,
+)
 
 AZ_TZ = ZoneInfo("America/Phoenix")
 
@@ -932,15 +948,15 @@ def admin_message_export_csv():
 def admin_message_backfill_start():
     """Trigger the one-year backfill on the running Discord bot."""
     from asu_discord.shared import get_running_bot, get_running_loop
-    from asu_discord.cogs.message_logger import MessageLoggerCog
+    from asu_discord.cogs.analytics import AnalyticsCog
 
     bot = get_running_bot()
     if bot is None:
         return jsonify({"error": "Discord bot is not running"}), 503
 
-    cog = bot.cogs.get("MessageLoggerCog")
-    if cog is None or not isinstance(cog, MessageLoggerCog):
-        return jsonify({"error": "MessageLoggerCog not loaded"}), 503
+    cog = bot.cogs.get("AnalyticsCog")
+    if cog is None or not isinstance(cog, AnalyticsCog):
+        return jsonify({"error": "AnalyticsCog not loaded"}), 503
 
     loop = get_running_loop()
     if loop is None:
@@ -949,8 +965,6 @@ def admin_message_backfill_start():
     if cog.backfill_running:
         return jsonify({"status": "already_running"})
 
-    # start_backfill() is synchronous (schedules an asyncio task); call it
-    # from the bot's event loop thread so ensure_future runs in the right loop.
     loop.call_soon_threadsafe(cog.start_backfill)
     return jsonify({"status": "started"})
 
@@ -960,11 +974,11 @@ def admin_message_backfill_start():
 def admin_message_backfill_status():
     """Return per-channel backfill progress."""
     from asu_discord.shared import get_running_bot
-    from asu_discord.cogs.message_logger import MessageLoggerCog
+    from asu_discord.cogs.analytics import AnalyticsCog
 
     bot = get_running_bot()
-    cog = bot.cogs.get("MessageLoggerCog") if bot else None
-    backfill_running = isinstance(cog, MessageLoggerCog) and cog.backfill_running
+    cog = bot.cogs.get("AnalyticsCog") if bot else None
+    backfill_running = isinstance(cog, AnalyticsCog) and cog.backfill_running
 
     with session_scope() as db_session:
         rows = (
@@ -1148,6 +1162,546 @@ def admin_gold_guide_stats():
         "total_contributions": len(contributions),
         "gold_guides": gold_guides,
     })
+
+
+# ─── Analytics ───────────────────────────────────────────────────────────────
+
+_COLLEGE_ROLES = [
+    "New College of Interdisciplinary Arts and Sciences",
+    "Herberger Institute for Design and the Arts",
+    "Edson College of Nursing and Health Innovation",
+    "College of Integrative Sciences and Arts",
+    "Walter Cronkite School of Journalism and Mass Communication",
+    "Watts College of Public Service and Community Solutions",
+    "Ira A. Fulton Schools of Engineering",
+    "College of Global Futures",
+    "College of Health Solutions",
+    "Mary Lou Fulton Teachers College",
+    "W.P. Carey School of Business",
+    "College of Liberal Arts and Sciences",
+    "Thunderbird School of Global Management",
+    "University College",
+]
+
+
+@admin_bp.route("/api/admin/analytics")
+@require_admin
+def admin_analytics():
+    import json as _json
+
+    from_dt = _parse_az_date(request.args.get("from_date"))
+    to_dt = _parse_az_date(request.args.get("to_date"), end_of_day=True)
+
+    with session_scope() as db_session:
+        # ── Core Activity ──────────────────────────────────────────────────────
+        msg_q = db_session.query(MessageLog)
+        if from_dt:
+            msg_q = msg_q.filter(MessageLog.sent_at >= from_dt)
+        if to_dt:
+            msg_q = msg_q.filter(MessageLog.sent_at <= to_dt)
+        messages_sent = msg_q.count()
+        unique_talkers = (
+            msg_q.with_entities(func.count(MessageLog.discord_user_id.distinct())).scalar() or 0
+        )
+
+        # ── Growth & Funnel / Onboarding ───────────────────────────────────────
+        joins_q = db_session.query(User).filter(User.joined_at.isnot(None))
+        if from_dt:
+            joins_q = joins_q.filter(User.joined_at >= from_dt)
+        if to_dt:
+            joins_q = joins_q.filter(User.joined_at <= to_dt)
+        total_joins = joins_q.count()
+
+        verified_q = db_session.query(User).filter(User.verified == True)  # noqa: E712
+        if from_dt:
+            verified_q = verified_q.filter(User.verified_at >= from_dt)
+        if to_dt:
+            verified_q = verified_q.filter(User.verified_at <= to_dt)
+        period_verified = verified_q.count()
+
+        unverified_q = db_session.query(User).filter(
+            User.verified == False, User.joined_at.isnot(None)  # noqa: E712
+        )
+        if from_dt:
+            unverified_q = unverified_q.filter(User.joined_at >= from_dt)
+        if to_dt:
+            unverified_q = unverified_q.filter(User.joined_at <= to_dt)
+        period_unverified = unverified_q.count()
+
+        # ── Growth & Funnel / Retention ────────────────────────────────────────
+        total_verified_alltime = (
+            db_session.query(User).filter(User.verified == True).count()  # noqa: E712
+        )
+        in_server_count = (
+            db_session.query(User)
+            .filter(User.verified == True, User.left_at.is_(None))  # noqa: E712
+            .count()
+        )
+        total_unverified_alltime = (
+            db_session.query(User)
+            .filter(User.verified == False, User.discord_user_id.isnot(None))  # noqa: E712
+            .count()
+        )
+
+        retention_rate = None
+        if from_dt:
+            verified_at_start = (
+                db_session.query(User)
+                .filter(User.verified == True, User.verified_at < from_dt)  # noqa: E712
+                .count()
+            )
+            leaves_q = db_session.query(User).filter(
+                User.verified == True,  # noqa: E712
+                User.left_at.isnot(None),
+                User.left_at >= from_dt,
+            )
+            if to_dt:
+                leaves_q = leaves_q.filter(User.left_at <= to_dt)
+            leaves_count = leaves_q.count()
+            if verified_at_start > 0:
+                retention_rate = round(
+                    ((verified_at_start - leaves_count) / verified_at_start) * 100, 1
+                )
+
+        # ── Channel Engagement ─────────────────────────────────────────────────
+        ch_q = db_session.query(
+            MessageLog.channel_id,
+            MessageLog.channel_name,
+            func.count(MessageLog.id).label("cnt"),
+        )
+        if from_dt:
+            ch_q = ch_q.filter(MessageLog.sent_at >= from_dt)
+        if to_dt:
+            ch_q = ch_q.filter(MessageLog.sent_at <= to_dt)
+        ch_rows = (
+            ch_q.group_by(MessageLog.channel_id, MessageLog.channel_name)
+            .order_by(func.count(MessageLog.id).desc())
+            .limit(25)
+            .all()
+        )
+        channels = [
+            {"rank": i + 1, "channel_id": cid, "channel_name": cname or cid, "messages": cnt}
+            for i, (cid, cname, cnt) in enumerate(ch_rows)
+        ]
+
+        # ── Demographics ───────────────────────────────────────────────────────
+        demo_q = (
+            db_session.query(
+                UserRole.role_name,
+                func.count(UserRole.user_id.distinct()).label("cnt"),
+            )
+            .join(User, User.id == UserRole.user_id)
+            .filter(User.verified == True)  # noqa: E712
+        )
+        if from_dt:
+            demo_q = demo_q.filter(User.verified_at >= from_dt)
+        if to_dt:
+            demo_q = demo_q.filter(User.verified_at <= to_dt)
+        role_counts = {name: cnt for name, cnt in demo_q.group_by(UserRole.role_name).all()}
+
+        # ── Voice (from voice_sessions) ────────────────────────────────────────
+        vs_q = db_session.query(VoiceSession).filter(VoiceSession.left_at.isnot(None))
+        if from_dt:
+            vs_q = vs_q.filter(VoiceSession.joined_at >= from_dt)
+        if to_dt:
+            vs_q = vs_q.filter(VoiceSession.joined_at <= to_dt)
+        total_voice_seconds = (
+            vs_q.with_entities(func.coalesce(func.sum(VoiceSession.duration_seconds), 0)).scalar()
+            or 0
+        )
+        voice_hours = round(total_voice_seconds / 3600, 1) if total_voice_seconds else None
+        unique_speakers = (
+            vs_q.with_entities(func.count(VoiceSession.discord_user_id.distinct())).scalar() or 0
+        ) or None
+
+        # Channel voice activity
+        vc_rows = (
+            vs_q.with_entities(
+                VoiceSession.channel_id,
+                VoiceSession.channel_name,
+                func.sum(VoiceSession.duration_seconds).label("dur"),
+                func.count(VoiceSession.id).label("sessions"),
+            )
+            .group_by(VoiceSession.channel_id, VoiceSession.channel_name)
+            .order_by(func.sum(VoiceSession.duration_seconds).desc())
+            .limit(25)
+            .all()
+        )
+        voice_by_channel = {
+            str(cid): {"channel_name": cname or cid, "voice_seconds": dur or 0, "sessions": ses}
+            for cid, cname, dur, ses in vc_rows
+        }
+
+        # ── Moderation (from moderation_events + User.banned) ──────────────────
+        banned_count = db_session.query(User).filter(User.banned == True).count()  # noqa: E712
+        me_q = db_session.query(ModerationEvent)
+        if from_dt:
+            me_q = me_q.filter(ModerationEvent.occurred_at >= from_dt)
+        if to_dt:
+            me_q = me_q.filter(ModerationEvent.occurred_at <= to_dt)
+        period_bans = me_q.filter(ModerationEvent.event_type == "ban").count()
+        period_unbans = me_q.filter(ModerationEvent.event_type == "unban").count()
+
+        # ── Forum Posts (from forum_posts) ─────────────────────────────────────
+        fp_q = db_session.query(ForumPost)
+        if from_dt:
+            fp_q = fp_q.filter(ForumPost.created_at >= from_dt)
+        if to_dt:
+            fp_q = fp_q.filter(ForumPost.created_at <= to_dt)
+
+        connect_posts = (
+            fp_q.filter(ForumPost.parent_channel_name.ilike("%major%")).count()
+        )
+        roommate_posts = (
+            fp_q.filter(ForumPost.parent_channel_name.ilike("%roommate%")).count()
+        )
+        forum_by_channel = (
+            fp_q.with_entities(
+                ForumPost.parent_channel_id,
+                ForumPost.parent_channel_name,
+                func.count(ForumPost.id).label("posts"),
+            )
+            .group_by(ForumPost.parent_channel_id, ForumPost.parent_channel_name)
+            .order_by(func.count(ForumPost.id).desc())
+            .all()
+        )
+
+        # ── International / Country of Origin ─────────────────────────────────
+        country_q = (
+            db_session.query(
+                UserSalesforceProfile.country,
+                func.count(UserSalesforceProfile.id).label("cnt"),
+            )
+            .filter(
+                UserSalesforceProfile.is_international == True,  # noqa: E712
+                UserSalesforceProfile.fetch_error.is_(None),
+            )
+            .group_by(UserSalesforceProfile.country)
+            .order_by(func.count(UserSalesforceProfile.id).desc())
+        )
+        country_rows = country_q.all()
+        international_country = (
+            [{"country": c or "Unknown", "count": cnt} for c, cnt in country_rows]
+            or None
+        )
+
+        # ── Programs / Gold Guides ─────────────────────────────────────────────
+        gg_q = db_session.query(GoldGuideContribution)
+        if from_dt:
+            gg_q = gg_q.filter(GoldGuideContribution.responded_at >= from_dt)
+        if to_dt:
+            gg_q = gg_q.filter(GoldGuideContribution.responded_at <= to_dt)
+        gg_total = gg_q.count()
+        active_guides = (
+            gg_q.with_entities(
+                func.count(GoldGuideContribution.responder_discord_id.distinct())
+            ).scalar()
+            or 0
+        )
+        guide_dist_rows = (
+            gg_q.with_entities(
+                GoldGuideContribution.responder_discord_id,
+                GoldGuideContribution.responder_username,
+                func.count(GoldGuideContribution.id).label("cnt"),
+            )
+            .group_by(
+                GoldGuideContribution.responder_discord_id,
+                GoldGuideContribution.responder_username,
+            )
+            .order_by(func.count(GoldGuideContribution.id).desc())
+            .limit(15)
+            .all()
+        )
+        guide_distribution = [
+            {"discord_id": did, "username": uname or did, "messages": cnt}
+            for did, uname, cnt in guide_dist_rows
+        ]
+
+        # ── Forums / Ask ASU Staff ─────────────────────────────────────────────
+        qna_q = db_session.query(QnaPost)
+        if from_dt:
+            qna_q = qna_q.filter(QnaPost.created_at >= from_dt)
+        if to_dt:
+            qna_q = qna_q.filter(QnaPost.created_at <= to_dt)
+        all_posts = qna_q.all()
+        total_posts = len(all_posts)
+        bot_answered = sum(1 for p in all_posts if p.status == "satisfied")
+        staff_answered = sum(1 for p in all_posts if p.status == "needs_help")
+
+        tag_counts: dict[str, int] = {}
+        for post in all_posts:
+            if post.tags:
+                try:
+                    tags = _json.loads(post.tags)
+                except Exception:
+                    tags = []
+                for tag in tags:
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+        by_tag = sorted(
+            [{"tag": t, "count": c} for t, c in tag_counts.items()],
+            key=lambda x: -x["count"],
+        )
+
+    return jsonify(
+        {
+            "period": {
+                "from_date": request.args.get("from_date", ""),
+                "to_date": request.args.get("to_date", ""),
+            },
+            "core_activity": {
+                "messages_sent": messages_sent,
+                "unique_talkers": unique_talkers,
+                "voice_hours": voice_hours,
+                "unique_speakers": unique_speakers,
+            },
+            "growth_funnel": {
+                "onboarding": {
+                    "total_joins": total_joins,
+                    "verified_users": period_verified,
+                    "unverified_users": period_unverified,
+                    "venue_users": None,
+                },
+                "retention": {
+                    "verified_retention_rate": retention_rate,
+                    "total_verified": total_verified_alltime,
+                    "currently_in_server": in_server_count,
+                    "verified_vs_unverified": {
+                        "verified": total_verified_alltime,
+                        "unverified": total_unverified_alltime,
+                    },
+                },
+            },
+            "channel_engagement": [
+                {
+                    **ch,
+                    "voice_seconds": voice_by_channel.get(ch["channel_id"], {}).get("voice_seconds"),
+                }
+                for ch in channels
+            ],
+            "readership": {
+                "monthly_visitors": None,
+                "monthly_readers_per_channel": None,
+                "weekly_readers_per_channel": None,
+                "channel_followers": None,
+            },
+            "demographics": {
+                "student_role": {
+                    "First-Year": role_counts.get("First Year", 0),
+                    "Transfer": role_counts.get("Transfer Student", 0),
+                    "Graduate": role_counts.get("Graduate Student", 0),
+                },
+                "residency": {
+                    "Arizona Resident": role_counts.get("Arizona Resident", 0),
+                    "Out-of-State": role_counts.get("Out of State", 0),
+                    "International": role_counts.get("International Student", 0),
+                },
+                "campus": {
+                    "Tempe": role_counts.get("Tempe", 0),
+                    "Downtown Phoenix": role_counts.get("Downtown Phoenix", 0),
+                    "Polytechnic": role_counts.get("Polytechnic", 0),
+                    "West Valley": role_counts.get("West Valley", 0),
+                    "LA Center": role_counts.get("LA Center", 0),
+                },
+                "college": {name: role_counts.get(name, 0) for name in _COLLEGE_ROLES},
+                "international_country": international_country,
+            },
+            "moderation": {
+                "banned_users": banned_count,
+                "period_bans": period_bans,
+                "period_unbans": period_unbans,
+                "support_tickets": None,
+                "inappropriate_speech_incidents": None,
+                "harassment_incidents": None,
+                "spam_phishing_attempts": None,
+            },
+            "programs": {
+                "gold_guides": {
+                    "active_guides": active_guides,
+                    "qna_sessions": total_posts,
+                    "messages_sent": gg_total,
+                    "contribution_distribution": guide_distribution,
+                },
+                "volunteers": {
+                    "active_volunteers": None,
+                    "messages_sent": None,
+                    "avg_messages_per_volunteer": None,
+                    "voice_hours": None,
+                    "contribution_distribution": None,
+                },
+            },
+            "forums": {
+                "ask_asu_staff": {
+                    "total_questions_answered": bot_answered + staff_answered,
+                    "total_messages": total_posts,
+                    "bot_answered": bot_answered,
+                    "staff_answered": staff_answered,
+                    "by_tag": by_tag,
+                },
+                "connect_by_major": {
+                    "posts_created": connect_posts or None,
+                    "messages_sent": None,
+                    "activity_by_major": None,
+                },
+                "roommate_finder": {
+                    "posts_by_campus": roommate_posts or None,
+                },
+                "all_forum_channels": [
+                    {"channel_id": cid, "channel_name": cname or cid, "posts": posts}
+                    for cid, cname, posts in forum_by_channel
+                ],
+            },
+            "acquisition": {
+                "source_medium": None,
+                "users": None,
+                "sessions": None,
+                "pageviews": None,
+                "bounce_rate": None,
+                "session_duration": None,
+            },
+        }
+    )
+
+
+# ─── Salesforce Profile Cache ─────────────────────────────────────────────────
+
+_sf_refresh_lock = _threading.Lock()
+_sf_refresh_running = False
+_sf_refresh_last: dict = {
+    "started_at": None,
+    "finished_at": None,
+    "total": 0,
+    "errors": 0,
+    "error": None,
+}
+
+
+def _run_sf_refresh() -> None:
+    """Background thread: async-fetch Salesforce profiles for all verified users."""
+    global _sf_refresh_running
+    import asyncio
+
+    from utils.salesforce import async_bulk_fetch_profiles
+    from utils.settings import CONFIG
+
+    try:
+        client_id = CONFIG.SALESFORCE_API_CLIENT_ID or ""
+        client_secret = CONFIG.SALESFORCE_API_CLIENT_SECRET or ""
+        if not client_id or not client_secret:
+            _sf_refresh_last["error"] = "SALESFORCE_API_CLIENT_ID / SALESFORCE_API_CLIENT_SECRET not configured"
+            return
+
+        with session_scope() as db:
+            rows = (
+                db.query(User.asurite_id)
+                .filter(User.verified == True, User.asurite_id.isnot(None))  # noqa: E712
+                .all()
+            )
+        asuries = [r[0] for r in rows]
+        _sf_refresh_last["total"] = len(asuries)
+
+        profiles = asyncio.run(
+            async_bulk_fetch_profiles(asuries, client_id, client_secret)
+        )
+
+        errors = 0
+        now = datetime.utcnow()
+        for p in profiles:
+            try:
+                with session_scope() as db:
+                    existing = (
+                        db.query(UserSalesforceProfile)
+                        .filter(UserSalesforceProfile.asurite_id == p["asurite"])
+                        .one_or_none()
+                    )
+                    if existing:
+                        existing.country = p.get("country")
+                        existing.state = p.get("state")
+                        existing.is_international = bool(p.get("is_international"))
+                        existing.has_opportunity = bool(p.get("has_opportunity"))
+                        existing.fetch_error = p.get("error")
+                        existing.fetched_at = now
+                    else:
+                        db.add(
+                            UserSalesforceProfile(
+                                asurite_id=p["asurite"],
+                                country=p.get("country"),
+                                state=p.get("state"),
+                                is_international=bool(p.get("is_international")),
+                                has_opportunity=bool(p.get("has_opportunity")),
+                                fetch_error=p.get("error"),
+                                fetched_at=now,
+                            )
+                        )
+            except Exception:
+                logger.exception("Error upserting Salesforce profile for %s", p.get("asurite"))
+            if p.get("error"):
+                errors += 1
+
+        _sf_refresh_last["errors"] = errors
+        _sf_refresh_last["finished_at"] = datetime.utcnow().isoformat()
+    except Exception as exc:
+        _sf_refresh_last["error"] = str(exc)
+        _sf_refresh_last["finished_at"] = datetime.utcnow().isoformat()
+        logger.exception("Salesforce refresh failed")
+    finally:
+        _sf_refresh_running = False
+
+
+@admin_bp.route("/api/admin/salesforce/refresh", methods=["POST"])
+@require_admin
+def admin_salesforce_refresh():
+    """Trigger async Salesforce profile refresh for all verified users."""
+    global _sf_refresh_running
+
+    with _sf_refresh_lock:
+        if _sf_refresh_running:
+            return jsonify({"status": "already_running", "last": _sf_refresh_last})
+        _sf_refresh_running = True
+        _sf_refresh_last["started_at"] = datetime.utcnow().isoformat()
+        _sf_refresh_last["finished_at"] = None
+        _sf_refresh_last["error"] = None
+        _sf_refresh_last["errors"] = 0
+        _sf_refresh_last["total"] = 0
+
+    _threading.Thread(target=_run_sf_refresh, daemon=True).start()
+    return jsonify({"status": "started"})
+
+
+@admin_bp.route("/api/admin/salesforce/status", methods=["GET"])
+@require_admin
+def admin_salesforce_status():
+    """Return Salesforce profile cache status."""
+    with session_scope() as db:
+        profiles_cached = db.query(UserSalesforceProfile).count()
+        international_count = (
+            db.query(UserSalesforceProfile)
+            .filter(UserSalesforceProfile.is_international == True)  # noqa: E712
+            .count()
+        )
+        error_count = (
+            db.query(UserSalesforceProfile)
+            .filter(UserSalesforceProfile.fetch_error.isnot(None))
+            .count()
+        )
+        last_fetched_raw = (
+            db.query(func.max(UserSalesforceProfile.fetched_at)).scalar()
+        )
+
+    last_fetched = (
+        last_fetched_raw.replace(tzinfo=timezone.utc).astimezone(AZ_TZ).isoformat()
+        if last_fetched_raw else None
+    )
+
+    return jsonify(
+        {
+            "profiles_cached": profiles_cached,
+            "international_count": international_count,
+            "error_count": error_count,
+            "last_fetched": last_fetched,
+            "refresh_running": _sf_refresh_running,
+            "last_refresh": _sf_refresh_last,
+        }
+    )
 
 
 # ─── Role Exceptions ──────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ import MemberStats from "./admin/MemberStats.jsx";
 import MessageLogs from "./admin/MessageLogs.jsx";
 import QnA from "./admin/QnA.jsx";
 import Exceptions from "./admin/Exceptions.jsx";
+import Analytics from "./admin/Analytics.jsx";
 
 // ─── Sidebar navigation config ────────────────────────────────────────────────
 
@@ -19,7 +20,8 @@ const NAV = [
   {
     label: "General",
     items: [
-      { id: "dashboard", icon: "fa-chart-bar", label: "Overview" },
+      { id: "dashboard",  icon: "fa-chart-bar",    label: "Overview"    },
+      { id: "analytics",  icon: "fa-chart-line",   label: "Analytics"   },
     ],
   },
   {
@@ -125,6 +127,7 @@ export default function Admin() {
   const renderView = () => {
     switch (activeView) {
       case "dashboard":     return <Dashboard />;
+      case "analytics":     return <Analytics />;
       case "members":       return <Users />;
       case "joins":         return <Joins />;
       case "member-stats":  return <MemberStats />;

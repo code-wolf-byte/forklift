@@ -18,6 +18,7 @@ from services.google_sheets import write_user_left
 from ..models import SalesforceOpportunity, StudentProfile
 from ..roles import ROLE_ID_MAP
 from ..salesforce import get_student_profile
+from utils.salesforce import cache_sf_profile
 
 logger = logging.getLogger(__name__)
 
@@ -449,10 +450,10 @@ class VerificationCog(commands.Cog):
             asurite = user.asurite_id if user else None
             if asurite:
                 profile = await asyncio.to_thread(get_student_profile, asurite)
-                if profile is not None:
+                if "asurite" in profile:
+                    asyncio.create_task(asyncio.to_thread(cache_sf_profile, asurite, profile))
+                if not profile.get("error"):
                     await self.assign_roles_from_profile(member.id, profile)
-        except Exception:
-            logger.exception("Failed to assign Salesforce-based roles for user %s", member.id)
             await ctx.respond(
                 f"{member.mention} has been marked as verified, "
                 "but there was an error assigning additional roles.",
@@ -903,7 +904,9 @@ class VerificationCog(commands.Cog):
         if asurite:
             try:
                 profile = await asyncio.to_thread(get_student_profile, asurite)
-                if profile is not None:
+                if "asurite" in profile:
+                    asyncio.create_task(asyncio.to_thread(cache_sf_profile, asurite, profile))
+                if not profile.get("error"):
                     await self.assign_roles_from_profile(member.id, profile)
             except Exception:
                 logger.exception(

@@ -81,10 +81,58 @@ def _start_discord_bot_thread() -> None:
     logger.info("Started Discord bot background thread for guild %s", DISCORD_CONFIG.guild_id)
 
 
+def _maybe_start_sf_backfill() -> None:
+    """Auto-backfill Salesforce profile cache on startup if verified users are uncached."""
+    from utils.database import User, UserSalesforceProfile, session_scope
+    from utils.settings import CONFIG
+
+    if not CONFIG.SALESFORCE_API_CLIENT_ID or not CONFIG.SALESFORCE_API_CLIENT_SECRET:
+        return
+
+    try:
+        with session_scope() as db:
+            total_verified = (
+                db.query(User.id)
+                .filter(User.verified == True, User.asurite_id.isnot(None))  # noqa: E712
+                .count()
+            )
+            total_cached = db.query(UserSalesforceProfile.id).count()
+
+        if total_cached >= total_verified:
+            return
+
+        logger.info(
+            "Salesforce cache incomplete (%d verified, %d cached) — starting backfill",
+            total_verified,
+            total_cached,
+        )
+
+        import routes.admin as _admin_mod
+
+        with _admin_mod._sf_refresh_lock:
+            if _admin_mod._sf_refresh_running:
+                return
+            _admin_mod._sf_refresh_running = True
+            _admin_mod._sf_refresh_last.update(
+                {
+                    "started_at": datetime.utcnow().isoformat(),
+                    "finished_at": None,
+                    "error": None,
+                    "errors": 0,
+                    "total": 0,
+                }
+            )
+
+        threading.Thread(target=_admin_mod._run_sf_refresh, daemon=True).start()
+    except Exception:
+        logger.exception("Failed to start startup Salesforce backfill")
+
+
 if _should_start_background_tasks():
     init_db()
     start_upload_scheduler()
     sync_departed_users()
+    _maybe_start_sf_backfill()
 else:
     init_db()
 if _should_start_discord_bot():

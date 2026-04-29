@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -310,7 +311,21 @@ def discord_callback():
     # After Discord verification, attempt to look up the student's Salesforce profile.
     # Any failures here are non-fatal; verification still succeeds.
     asurite = verification_state.get("asurite")
-    student_profile = get_student_profile(asurite) if asurite else None
+    student_profile = None
+    if asurite:
+        try:
+            student_profile = get_student_profile(asurite)
+            if student_profile and "asurite" in student_profile:
+                from utils.salesforce import cache_sf_profile
+                threading.Thread(
+                    target=cache_sf_profile,
+                    args=(asurite, student_profile),
+                    daemon=True,
+                ).start()
+        except Exception:  # pragma: no cover - defensive
+            logger.exception(
+                "Failed to fetch Salesforce student profile for %s", asurite
+            )
 
     verification_state.update(
         {

@@ -262,6 +262,87 @@ class EventParticipant(Base):
     event = relationship("ServerEvent", back_populates="participants")
 
 
+class VoiceSession(Base):
+    """One row per voice channel session.
+
+    Opened when a member joins a voice channel, closed when they leave.
+    ``left_at`` is NULL while the session is still active so the AnalyticsCog
+    can detect sessions that were never closed after a bot restart and mark
+    them ``is_complete=False`` during reconciliation.
+    """
+
+    __tablename__ = "voice_sessions"
+
+    id = Column(Integer, primary_key=True)
+    discord_user_id = Column(String(64), nullable=False, index=True)
+    discord_username = Column(String(255), nullable=True)
+    guild_id = Column(String(64), nullable=False, index=True)
+    channel_id = Column(String(64), nullable=False, index=True)
+    channel_name = Column(String(255), nullable=True)
+    joined_at = Column(DateTime, nullable=False, index=True)   # naive UTC
+    left_at = Column(DateTime, nullable=True)                  # naive UTC; NULL = still active
+    duration_seconds = Column(Integer, nullable=True)          # NULL until session closes
+    is_complete = Column(Boolean, default=True, nullable=False)  # False = truncated by restart
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ModerationEvent(Base):
+    """One row per moderation action recorded by AnalyticsCog (ban, unban)."""
+
+    __tablename__ = "moderation_events"
+
+    id = Column(Integer, primary_key=True)
+    discord_user_id = Column(String(64), nullable=False, index=True)
+    discord_username = Column(String(255), nullable=True)
+    guild_id = Column(String(64), nullable=False, index=True)
+    event_type = Column(String(32), nullable=False, index=True)  # "ban" | "unban"
+    reason = Column(Text, nullable=True)
+    moderator_discord_id = Column(String(64), nullable=True)
+    moderator_username = Column(String(255), nullable=True)
+    occurred_at = Column(DateTime, nullable=False, index=True)   # naive UTC
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ForumPost(Base):
+    """One row per thread created in any non-QnA forum channel.
+
+    Covers channels like Connect by Major, Roommate Finder, and any future
+    forum channels. QnA threads are tracked separately in qna_posts.
+    """
+
+    __tablename__ = "forum_posts"
+
+    id = Column(Integer, primary_key=True)
+    thread_id = Column(String(64), unique=True, nullable=False, index=True)
+    parent_channel_id = Column(String(64), nullable=False, index=True)
+    parent_channel_name = Column(String(255), nullable=True)
+    guild_id = Column(String(64), nullable=False, index=True)
+    discord_user_id = Column(String(64), nullable=True)
+    title = Column(String(255), nullable=True)
+    tag_names = Column(Text, nullable=True)                      # JSON array of strings
+    created_at = Column(DateTime, nullable=False, index=True)    # naive UTC
+    inserted_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class UserSalesforceProfile(Base):
+    """Cached Salesforce profile data per verified user (country-of-origin tracking)."""
+
+    __tablename__ = "user_salesforce_profiles"
+
+    id = Column(Integer, primary_key=True)
+    asurite_id = Column(String(64), unique=True, nullable=False, index=True)
+    country = Column(String(128), nullable=True)
+    state = Column(String(128), nullable=True)
+    is_international = Column(Boolean, default=False, nullable=False)
+    has_opportunity = Column(Boolean, default=False, nullable=False)
+    fetch_error = Column(Text, nullable=True)                          # non-null if last fetch failed
+    fetched_at = Column(DateTime, nullable=False, index=True)          # naive UTC
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
 # Default rows seeded on first startup.
 _CRON_JOB_DEFAULTS = [
     {

@@ -526,36 +526,7 @@ class QnACog(commands.Cog):
                 if record is not None:
                     record.gold_guide_pinged = True
 
-    @commands.Cog.listener()
-    async def on_message(self, message: discord.Message) -> None:
-        """Record a contribution whenever a Gold Guide member posts in a QnA thread."""
-        if message.author.bot:
-            return
-        if not isinstance(message.channel, discord.Thread):
-            return
-        if message.channel.parent_id != self.forum_channel_id:
-            return
-        if not isinstance(message.author, discord.Member):
-            return
-        if not any(r.id == GOLD_GUIDE_ROLE_ID for r in message.author.roles):
-            return
-
-        thread = message.channel
-        parent_name: str | None = thread.parent.name if thread.parent else None
-
-        with session_scope() as db_session:
-            if not db_session.query(GoldGuideContribution).filter_by(message_id=str(message.id)).one_or_none():
-                db_session.add(GoldGuideContribution(
-                    guild_id=str(message.guild.id) if message.guild else None,
-                    channel_id=str(thread.parent_id),
-                    channel_name=parent_name,
-                    thread_id=str(thread.id),
-                    thread_title=thread.name,
-                    message_id=str(message.id),
-                    responder_discord_id=str(message.author.id),
-                    responder_username=message.author.name,
-                    responded_at=message.created_at.replace(tzinfo=None),
-                ))
+    # Gold Guide contribution tracking has moved to AnalyticsCog.on_message.
 
     async def handle_feedback(
         self,
