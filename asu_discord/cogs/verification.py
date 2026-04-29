@@ -15,6 +15,7 @@ from utils.database import User, UserRoleException, session_scope, save_user_rol
 from services.google_sheets import write_user_left
 from ..roles import ROLE_ID_MAP
 from ..salesforce import get_student_profile
+from utils.salesforce import cache_sf_profile
 
 logger = logging.getLogger(__name__)
 
@@ -505,6 +506,8 @@ class VerificationCog(commands.Cog):
             asurite = user.asurite_id if user else None
             if asurite:
                 profile = await asyncio.to_thread(get_student_profile, asurite)
+                if "asurite" in profile:
+                    asyncio.create_task(asyncio.to_thread(cache_sf_profile, asurite, profile))
                 if not profile.get("error"):
                     await self.assign_roles_from_profile(member.id, profile)
         except Exception:
@@ -1200,6 +1203,8 @@ class VerificationCog(commands.Cog):
         if asurite:
             try:
                 profile = await asyncio.to_thread(get_student_profile, asurite)
+                if "asurite" in profile:
+                    asyncio.create_task(asyncio.to_thread(cache_sf_profile, asurite, profile))
                 if not profile.get("error"):
                     await self.assign_roles_from_profile(member.id, profile)
             except Exception:

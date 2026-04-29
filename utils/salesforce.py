@@ -379,3 +379,53 @@ async def async_bulk_fetch_profiles(
 
     return results
 
+
+def cache_sf_profile(asurite: str, profile: dict) -> None:
+    """Upsert a Salesforce-derived profile into the UserSalesforceProfile cache table.
+
+    Safe to call from any thread. Silently logs on failure so callers don't need to wrap.
+    Only caches when the profile has at least a contact-level asurite key (i.e. contact
+    was found in Salesforce); skips profiles that are pure error responses.
+    """
+    if not asurite or "asurite" not in profile:
+        return
+
+    from datetime import datetime as _dt
+    from utils.database import UserSalesforceProfile, session_scope
+
+    is_international = bool(profile.get("is_international") or profile.get("international"))
+    has_opportunity = bool(profile.get("opportunities"))
+    fetch_error = profile.get("error") or None
+    country = profile.get("country") or None
+    state = profile.get("state") or None
+    now = _dt.utcnow()
+
+    try:
+        with session_scope() as db:
+            existing = (
+                db.query(UserSalesforceProfile)
+                .filter(UserSalesforceProfile.asurite_id == asurite)
+                .one_or_none()
+            )
+            if existing:
+                existing.country = country
+                existing.state = state
+                existing.is_international = is_international
+                existing.has_opportunity = has_opportunity
+                existing.fetch_error = fetch_error
+                existing.fetched_at = now
+            else:
+                db.add(
+                    UserSalesforceProfile(
+                        asurite_id=asurite,
+                        country=country,
+                        state=state,
+                        is_international=is_international,
+                        has_opportunity=has_opportunity,
+                        fetch_error=fetch_error,
+                        fetched_at=now,
+                    )
+                )
+    except Exception:
+        _logger.exception("Failed to cache Salesforce profile for %s", asurite)
+

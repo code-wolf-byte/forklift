@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import threading
 from datetime import datetime
 
 from flask import Blueprint, redirect, request, session, url_for
@@ -315,6 +316,13 @@ def discord_callback():
     if asurite:
         try:
             student_profile = get_student_profile(asurite)
+            if student_profile and "asurite" in student_profile:
+                from utils.salesforce import cache_sf_profile
+                threading.Thread(
+                    target=cache_sf_profile,
+                    args=(asurite, student_profile),
+                    daemon=True,
+                ).start()
         except Exception:  # pragma: no cover - defensive
             logger.exception(
                 "Failed to fetch Salesforce student profile for %s", asurite
