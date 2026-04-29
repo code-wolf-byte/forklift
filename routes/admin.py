@@ -1121,6 +1121,309 @@ def admin_gold_guide_stats():
     })
 
 
+# ─── Analytics ───────────────────────────────────────────────────────────────
+
+_COLLEGE_ROLES = [
+    "New College of Interdisciplinary Arts and Sciences",
+    "Herberger Institute for Design and the Arts",
+    "Edson College of Nursing and Health Innovation",
+    "College of Integrative Sciences and Arts",
+    "Walter Cronkite School of Journalism and Mass Communication",
+    "Watts College of Public Service and Community Solutions",
+    "Ira A. Fulton Schools of Engineering",
+    "College of Global Futures",
+    "College of Health Solutions",
+    "Mary Lou Fulton Teachers College",
+    "W.P. Carey School of Business",
+    "College of Liberal Arts and Sciences",
+    "Thunderbird School of Global Management",
+    "University College",
+]
+
+
+@admin_bp.route("/api/admin/analytics")
+@require_admin
+def admin_analytics():
+    import json as _json
+
+    from_dt = _parse_az_date(request.args.get("from_date"))
+    to_dt = _parse_az_date(request.args.get("to_date"), end_of_day=True)
+
+    with session_scope() as db_session:
+        # ── Core Activity ──────────────────────────────────────────────────────
+        msg_q = db_session.query(MessageLog)
+        if from_dt:
+            msg_q = msg_q.filter(MessageLog.sent_at >= from_dt)
+        if to_dt:
+            msg_q = msg_q.filter(MessageLog.sent_at <= to_dt)
+        messages_sent = msg_q.count()
+        unique_talkers = (
+            msg_q.with_entities(func.count(MessageLog.discord_user_id.distinct())).scalar() or 0
+        )
+
+        # ── Growth & Funnel / Onboarding ───────────────────────────────────────
+        joins_q = db_session.query(User).filter(User.joined_at.isnot(None))
+        if from_dt:
+            joins_q = joins_q.filter(User.joined_at >= from_dt)
+        if to_dt:
+            joins_q = joins_q.filter(User.joined_at <= to_dt)
+        total_joins = joins_q.count()
+
+        verified_q = db_session.query(User).filter(User.verified == True)  # noqa: E712
+        if from_dt:
+            verified_q = verified_q.filter(User.verified_at >= from_dt)
+        if to_dt:
+            verified_q = verified_q.filter(User.verified_at <= to_dt)
+        period_verified = verified_q.count()
+
+        unverified_q = db_session.query(User).filter(
+            User.verified == False, User.joined_at.isnot(None)  # noqa: E712
+        )
+        if from_dt:
+            unverified_q = unverified_q.filter(User.joined_at >= from_dt)
+        if to_dt:
+            unverified_q = unverified_q.filter(User.joined_at <= to_dt)
+        period_unverified = unverified_q.count()
+
+        # ── Growth & Funnel / Retention ────────────────────────────────────────
+        total_verified_alltime = (
+            db_session.query(User).filter(User.verified == True).count()  # noqa: E712
+        )
+        in_server_count = (
+            db_session.query(User)
+            .filter(User.verified == True, User.left_at.is_(None))  # noqa: E712
+            .count()
+        )
+        total_unverified_alltime = (
+            db_session.query(User)
+            .filter(User.verified == False, User.discord_user_id.isnot(None))  # noqa: E712
+            .count()
+        )
+
+        retention_rate = None
+        if from_dt:
+            verified_at_start = (
+                db_session.query(User)
+                .filter(User.verified == True, User.verified_at < from_dt)  # noqa: E712
+                .count()
+            )
+            leaves_q = db_session.query(User).filter(
+                User.verified == True,  # noqa: E712
+                User.left_at.isnot(None),
+                User.left_at >= from_dt,
+            )
+            if to_dt:
+                leaves_q = leaves_q.filter(User.left_at <= to_dt)
+            leaves_count = leaves_q.count()
+            if verified_at_start > 0:
+                retention_rate = round(
+                    ((verified_at_start - leaves_count) / verified_at_start) * 100, 1
+                )
+
+        # ── Channel Engagement ─────────────────────────────────────────────────
+        ch_q = db_session.query(
+            MessageLog.channel_id,
+            MessageLog.channel_name,
+            func.count(MessageLog.id).label("cnt"),
+        )
+        if from_dt:
+            ch_q = ch_q.filter(MessageLog.sent_at >= from_dt)
+        if to_dt:
+            ch_q = ch_q.filter(MessageLog.sent_at <= to_dt)
+        ch_rows = (
+            ch_q.group_by(MessageLog.channel_id, MessageLog.channel_name)
+            .order_by(func.count(MessageLog.id).desc())
+            .limit(25)
+            .all()
+        )
+        channels = [
+            {"rank": i + 1, "channel_id": cid, "channel_name": cname or cid, "messages": cnt}
+            for i, (cid, cname, cnt) in enumerate(ch_rows)
+        ]
+
+        # ── Demographics ───────────────────────────────────────────────────────
+        demo_q = (
+            db_session.query(
+                UserRole.role_name,
+                func.count(UserRole.user_id.distinct()).label("cnt"),
+            )
+            .join(User, User.id == UserRole.user_id)
+            .filter(User.verified == True)  # noqa: E712
+        )
+        if from_dt:
+            demo_q = demo_q.filter(User.verified_at >= from_dt)
+        if to_dt:
+            demo_q = demo_q.filter(User.verified_at <= to_dt)
+        role_counts = {name: cnt for name, cnt in demo_q.group_by(UserRole.role_name).all()}
+
+        # ── Moderation ─────────────────────────────────────────────────────────
+        banned_count = db_session.query(User).filter(User.banned == True).count()  # noqa: E712
+
+        # ── Programs / Gold Guides ─────────────────────────────────────────────
+        gg_q = db_session.query(GoldGuideContribution)
+        if from_dt:
+            gg_q = gg_q.filter(GoldGuideContribution.responded_at >= from_dt)
+        if to_dt:
+            gg_q = gg_q.filter(GoldGuideContribution.responded_at <= to_dt)
+        gg_total = gg_q.count()
+        active_guides = (
+            gg_q.with_entities(
+                func.count(GoldGuideContribution.responder_discord_id.distinct())
+            ).scalar()
+            or 0
+        )
+        guide_dist_rows = (
+            gg_q.with_entities(
+                GoldGuideContribution.responder_discord_id,
+                GoldGuideContribution.responder_username,
+                func.count(GoldGuideContribution.id).label("cnt"),
+            )
+            .group_by(
+                GoldGuideContribution.responder_discord_id,
+                GoldGuideContribution.responder_username,
+            )
+            .order_by(func.count(GoldGuideContribution.id).desc())
+            .limit(15)
+            .all()
+        )
+        guide_distribution = [
+            {"discord_id": did, "username": uname or did, "messages": cnt}
+            for did, uname, cnt in guide_dist_rows
+        ]
+
+        # ── Forums / Ask ASU Staff ─────────────────────────────────────────────
+        qna_q = db_session.query(QnaPost)
+        if from_dt:
+            qna_q = qna_q.filter(QnaPost.created_at >= from_dt)
+        if to_dt:
+            qna_q = qna_q.filter(QnaPost.created_at <= to_dt)
+        all_posts = qna_q.all()
+        total_posts = len(all_posts)
+        bot_answered = sum(1 for p in all_posts if p.status == "satisfied")
+        staff_answered = sum(1 for p in all_posts if p.status == "needs_help")
+
+        tag_counts: dict[str, int] = {}
+        for post in all_posts:
+            if post.tags:
+                try:
+                    tags = _json.loads(post.tags)
+                except Exception:
+                    tags = []
+                for tag in tags:
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+        by_tag = sorted(
+            [{"tag": t, "count": c} for t, c in tag_counts.items()],
+            key=lambda x: -x["count"],
+        )
+
+    return jsonify(
+        {
+            "period": {
+                "from_date": request.args.get("from_date", ""),
+                "to_date": request.args.get("to_date", ""),
+            },
+            "core_activity": {
+                "messages_sent": messages_sent,
+                "unique_talkers": unique_talkers,
+                "voice_hours": None,
+                "unique_speakers": None,
+            },
+            "growth_funnel": {
+                "onboarding": {
+                    "total_joins": total_joins,
+                    "verified_users": period_verified,
+                    "unverified_users": period_unverified,
+                    "venue_users": None,
+                },
+                "retention": {
+                    "verified_retention_rate": retention_rate,
+                    "total_verified": total_verified_alltime,
+                    "currently_in_server": in_server_count,
+                    "verified_vs_unverified": {
+                        "verified": total_verified_alltime,
+                        "unverified": total_unverified_alltime,
+                    },
+                },
+            },
+            "channel_engagement": channels,
+            "readership": {
+                "monthly_visitors": None,
+                "monthly_readers_per_channel": None,
+                "weekly_readers_per_channel": None,
+                "channel_followers": None,
+            },
+            "demographics": {
+                "student_role": {
+                    "First-Year": role_counts.get("First Year", 0),
+                    "Transfer": role_counts.get("Transfer Student", 0),
+                    "Graduate": role_counts.get("Graduate Student", 0),
+                },
+                "residency": {
+                    "Arizona Resident": role_counts.get("Arizona Resident", 0),
+                    "Out-of-State": role_counts.get("Out of State", 0),
+                    "International": role_counts.get("International Student", 0),
+                },
+                "campus": {
+                    "Tempe": role_counts.get("Tempe", 0),
+                    "Downtown Phoenix": role_counts.get("Downtown Phoenix", 0),
+                    "Polytechnic": role_counts.get("Polytechnic", 0),
+                    "West Valley": role_counts.get("West Valley", 0),
+                    "LA Center": role_counts.get("LA Center", 0),
+                },
+                "college": {name: role_counts.get(name, 0) for name in _COLLEGE_ROLES},
+                "international_country": None,
+            },
+            "moderation": {
+                "banned_users": banned_count,
+                "support_tickets": None,
+                "inappropriate_speech_incidents": None,
+                "harassment_incidents": None,
+                "spam_phishing_attempts": None,
+            },
+            "programs": {
+                "gold_guides": {
+                    "active_guides": active_guides,
+                    "qna_sessions": total_posts,
+                    "messages_sent": gg_total,
+                    "contribution_distribution": guide_distribution,
+                },
+                "volunteers": {
+                    "active_volunteers": None,
+                    "messages_sent": None,
+                    "avg_messages_per_volunteer": None,
+                    "voice_hours": None,
+                    "contribution_distribution": None,
+                },
+            },
+            "forums": {
+                "ask_asu_staff": {
+                    "total_questions_answered": bot_answered + staff_answered,
+                    "total_messages": total_posts,
+                    "bot_answered": bot_answered,
+                    "staff_answered": staff_answered,
+                    "by_tag": by_tag,
+                },
+                "connect_by_major": {
+                    "posts_created": None,
+                    "messages_sent": None,
+                    "activity_by_major": None,
+                },
+                "roommate_finder": {
+                    "posts_by_campus": None,
+                },
+            },
+            "acquisition": {
+                "source_medium": None,
+                "users": None,
+                "sessions": None,
+                "pageviews": None,
+                "bounce_rate": None,
+                "session_duration": None,
+            },
+        }
+    )
+
+
 # ─── Role Exceptions ──────────────────────────────────────────────────────────
 
 def _serialize_exception(exc: UserRoleException) -> dict:
