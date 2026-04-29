@@ -260,7 +260,7 @@ export default function Analytics() {
         />
         <StatCard
           label="Voice Hours"
-          value={ca.voice_hours}
+          value={ca.voice_hours != null ? `${ca.voice_hours}h` : null}
           icon="fa-microphone"
           color="#10b981"
         />
@@ -378,8 +378,10 @@ export default function Analytics() {
                     <td className="px-4 py-2 text-right tabular-nums font-semibold">
                       {ch.messages.toLocaleString()}
                     </td>
-                    <td className="px-4 py-2 text-right">
-                      <NotTracked />
+                    <td className="px-4 py-2 text-right tabular-nums">
+                      {ch.voice_seconds != null
+                        ? `${(ch.voice_seconds / 3600).toFixed(1)}h`
+                        : <NotTracked />}
                     </td>
                   </tr>
                 ))}
@@ -530,10 +532,24 @@ export default function Analytics() {
           icon="fa-ticket-alt"
         />
         <StatCard
-          label="Banned Users"
+          label="Banned (all-time)"
           value={moderation.banned_users}
           icon="fa-ban"
           color="#ef4444"
+        />
+        <StatCard
+          label="Bans (period)"
+          value={moderation.period_bans ?? 0}
+          icon="fa-gavel"
+          color="#ef4444"
+          note="From moderation_events"
+        />
+        <StatCard
+          label="Unbans (period)"
+          value={moderation.period_unbans ?? 0}
+          icon="fa-user-check"
+          color="#10b981"
+          note="From moderation_events"
         />
         <StatCard
           label="Inappropriate Speech"

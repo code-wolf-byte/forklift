@@ -13,7 +13,20 @@ from sqlalchemy import func
 import csv
 import io
 
-from utils.database import CronJobConfig, GoldGuideContribution, MessageBackfill, MessageLog, QnaPost, User, UserRole, UserRoleException, session_scope
+from utils.database import (
+    CronJobConfig,
+    ForumPost,
+    GoldGuideContribution,
+    MessageBackfill,
+    MessageLog,
+    ModerationEvent,
+    QnaPost,
+    User,
+    UserRole,
+    UserRoleException,
+    VoiceSession,
+    session_scope,
+)
 
 AZ_TZ = ZoneInfo("America/Phoenix")
 
@@ -903,15 +916,15 @@ def admin_message_export_csv():
 def admin_message_backfill_start():
     """Trigger the one-year backfill on the running Discord bot."""
     from asu_discord.shared import get_running_bot, get_running_loop
-    from asu_discord.cogs.message_logger import MessageLoggerCog
+    from asu_discord.cogs.analytics import AnalyticsCog
 
     bot = get_running_bot()
     if bot is None:
         return jsonify({"error": "Discord bot is not running"}), 503
 
-    cog = bot.cogs.get("MessageLoggerCog")
-    if cog is None or not isinstance(cog, MessageLoggerCog):
-        return jsonify({"error": "MessageLoggerCog not loaded"}), 503
+    cog = bot.cogs.get("AnalyticsCog")
+    if cog is None or not isinstance(cog, AnalyticsCog):
+        return jsonify({"error": "AnalyticsCog not loaded"}), 503
 
     loop = get_running_loop()
     if loop is None:
@@ -920,8 +933,6 @@ def admin_message_backfill_start():
     if cog.backfill_running:
         return jsonify({"status": "already_running"})
 
-    # start_backfill() is synchronous (schedules an asyncio task); call it
-    # from the bot's event loop thread so ensure_future runs in the right loop.
     loop.call_soon_threadsafe(cog.start_backfill)
     return jsonify({"status": "started"})
 
@@ -931,11 +942,11 @@ def admin_message_backfill_start():
 def admin_message_backfill_status():
     """Return per-channel backfill progress."""
     from asu_discord.shared import get_running_bot
-    from asu_discord.cogs.message_logger import MessageLoggerCog
+    from asu_discord.cogs.analytics import AnalyticsCog
 
     bot = get_running_bot()
-    cog = bot.cogs.get("MessageLoggerCog") if bot else None
-    backfill_running = isinstance(cog, MessageLoggerCog) and cog.backfill_running
+    cog = bot.cogs.get("AnalyticsCog") if bot else None
+    backfill_running = isinstance(cog, AnalyticsCog) and cog.backfill_running
 
     with session_scope() as db_session:
         rows = (
@@ -1256,8 +1267,72 @@ def admin_analytics():
             demo_q = demo_q.filter(User.verified_at <= to_dt)
         role_counts = {name: cnt for name, cnt in demo_q.group_by(UserRole.role_name).all()}
 
-        # ── Moderation ─────────────────────────────────────────────────────────
+        # ── Voice (from voice_sessions) ────────────────────────────────────────
+        vs_q = db_session.query(VoiceSession).filter(VoiceSession.left_at.isnot(None))
+        if from_dt:
+            vs_q = vs_q.filter(VoiceSession.joined_at >= from_dt)
+        if to_dt:
+            vs_q = vs_q.filter(VoiceSession.joined_at <= to_dt)
+        total_voice_seconds = (
+            vs_q.with_entities(func.coalesce(func.sum(VoiceSession.duration_seconds), 0)).scalar()
+            or 0
+        )
+        voice_hours = round(total_voice_seconds / 3600, 1) if total_voice_seconds else None
+        unique_speakers = (
+            vs_q.with_entities(func.count(VoiceSession.discord_user_id.distinct())).scalar() or 0
+        ) or None
+
+        # Channel voice activity
+        vc_rows = (
+            vs_q.with_entities(
+                VoiceSession.channel_id,
+                VoiceSession.channel_name,
+                func.sum(VoiceSession.duration_seconds).label("dur"),
+                func.count(VoiceSession.id).label("sessions"),
+            )
+            .group_by(VoiceSession.channel_id, VoiceSession.channel_name)
+            .order_by(func.sum(VoiceSession.duration_seconds).desc())
+            .limit(25)
+            .all()
+        )
+        voice_by_channel = {
+            str(cid): {"channel_name": cname or cid, "voice_seconds": dur or 0, "sessions": ses}
+            for cid, cname, dur, ses in vc_rows
+        }
+
+        # ── Moderation (from moderation_events + User.banned) ──────────────────
         banned_count = db_session.query(User).filter(User.banned == True).count()  # noqa: E712
+        me_q = db_session.query(ModerationEvent)
+        if from_dt:
+            me_q = me_q.filter(ModerationEvent.occurred_at >= from_dt)
+        if to_dt:
+            me_q = me_q.filter(ModerationEvent.occurred_at <= to_dt)
+        period_bans = me_q.filter(ModerationEvent.event_type == "ban").count()
+        period_unbans = me_q.filter(ModerationEvent.event_type == "unban").count()
+
+        # ── Forum Posts (from forum_posts) ─────────────────────────────────────
+        fp_q = db_session.query(ForumPost)
+        if from_dt:
+            fp_q = fp_q.filter(ForumPost.created_at >= from_dt)
+        if to_dt:
+            fp_q = fp_q.filter(ForumPost.created_at <= to_dt)
+
+        connect_posts = (
+            fp_q.filter(ForumPost.parent_channel_name.ilike("%major%")).count()
+        )
+        roommate_posts = (
+            fp_q.filter(ForumPost.parent_channel_name.ilike("%roommate%")).count()
+        )
+        forum_by_channel = (
+            fp_q.with_entities(
+                ForumPost.parent_channel_id,
+                ForumPost.parent_channel_name,
+                func.count(ForumPost.id).label("posts"),
+            )
+            .group_by(ForumPost.parent_channel_id, ForumPost.parent_channel_name)
+            .order_by(func.count(ForumPost.id).desc())
+            .all()
+        )
 
         # ── Programs / Gold Guides ─────────────────────────────────────────────
         gg_q = db_session.query(GoldGuideContribution)
@@ -1325,8 +1400,8 @@ def admin_analytics():
             "core_activity": {
                 "messages_sent": messages_sent,
                 "unique_talkers": unique_talkers,
-                "voice_hours": None,
-                "unique_speakers": None,
+                "voice_hours": voice_hours,
+                "unique_speakers": unique_speakers,
             },
             "growth_funnel": {
                 "onboarding": {
@@ -1345,7 +1420,13 @@ def admin_analytics():
                     },
                 },
             },
-            "channel_engagement": channels,
+            "channel_engagement": [
+                {
+                    **ch,
+                    "voice_seconds": voice_by_channel.get(ch["channel_id"], {}).get("voice_seconds"),
+                }
+                for ch in channels
+            ],
             "readership": {
                 "monthly_visitors": None,
                 "monthly_readers_per_channel": None,
@@ -1375,6 +1456,8 @@ def admin_analytics():
             },
             "moderation": {
                 "banned_users": banned_count,
+                "period_bans": period_bans,
+                "period_unbans": period_unbans,
                 "support_tickets": None,
                 "inappropriate_speech_incidents": None,
                 "harassment_incidents": None,
@@ -1404,13 +1487,17 @@ def admin_analytics():
                     "by_tag": by_tag,
                 },
                 "connect_by_major": {
-                    "posts_created": None,
+                    "posts_created": connect_posts or None,
                     "messages_sent": None,
                     "activity_by_major": None,
                 },
                 "roommate_finder": {
-                    "posts_by_campus": None,
+                    "posts_by_campus": roommate_posts or None,
                 },
+                "all_forum_channels": [
+                    {"channel_id": cid, "channel_name": cname or cid, "posts": posts}
+                    for cid, cname, posts in forum_by_channel
+                ],
             },
             "acquisition": {
                 "source_medium": None,
