@@ -454,6 +454,8 @@ class VerificationCog(commands.Cog):
                     asyncio.create_task(asyncio.to_thread(cache_sf_profile, asurite, profile))
                 if not profile.get("error"):
                     await self.assign_roles_from_profile(member.id, profile)
+        except Exception:
+            logger.exception("Failed to assign Salesforce-based roles for user %s", member.id)
             await ctx.respond(
                 f"{member.mention} has been marked as verified, "
                 "but there was an error assigning additional roles.",

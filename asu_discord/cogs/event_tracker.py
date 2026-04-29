@@ -12,9 +12,9 @@ from utils.database import EventParticipant, ServerEvent, session_scope
 logger = logging.getLogger(__name__)
 
 # Only track in-server events — filter out external locations.
-_TRACKED_ENTITY_TYPES: dict[discord.ScheduledEventEntityType, str] = {
-    discord.ScheduledEventEntityType.voice: "voice",
-    discord.ScheduledEventEntityType.stage_instance: "stage_instance",
+_TRACKED_ENTITY_TYPES: dict[discord.ScheduledEventLocationType, str] = {
+    discord.ScheduledEventLocationType.voice: "voice",
+    discord.ScheduledEventLocationType.stage_instance: "stage_instance",
 }
 
 
@@ -26,7 +26,7 @@ class EventTrackerCog(commands.Cog):
         self.guild_id = guild_id
 
     def _is_tracked(self, event: discord.ScheduledEvent) -> bool:
-        return event.entity_type in _TRACKED_ENTITY_TYPES
+        return event.location.type in _TRACKED_ENTITY_TYPES
 
     def _upsert_event(self, db_session, event: discord.ScheduledEvent) -> ServerEvent | None:
         if not self._is_tracked(event):
@@ -42,8 +42,8 @@ class EventTrackerCog(commands.Cog):
             if event.end_time else None
         )
         status = event.status.name.lower() if event.status else "scheduled"
-        entity_type = _TRACKED_ENTITY_TYPES[event.entity_type]
-        channel_id = str(event.channel_id) if event.channel_id else None
+        entity_type = _TRACKED_ENTITY_TYPES[event.location.type]
+        channel_id = str(event.location.value.id) if event.location.value else None
 
         existing = (
             db_session.query(ServerEvent)
