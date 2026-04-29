@@ -81,6 +81,8 @@ class AppConfig:
     QNA_HELPER_ROLE_ID: str | None = _env_value("QNA_HELPER_ROLE_ID")
     AWS_ACCESS_KEY_ID: str | None = _env_value("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY: str | None = _env_value("AWS_SECRET_ACCESS_KEY")
+    SALESFORCE_API_CLIENT_ID: str | None = _env_value("SALESFORCE_API_CLIENT_ID")
+    SALESFORCE_API_CLIENT_SECRET: str | None = _env_value("SALESFORCE_API_CLIENT_SECRET")
     SSO_ATTRIBUTE_MAP: Dict[str, List[str]] = field(init=False)
     PUBLIC_BASE_URL: str = field(init=False)
     CAS_BASE_URL: str = field(init=False)

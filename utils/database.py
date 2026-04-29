@@ -289,6 +289,25 @@ class ForumPost(Base):
     inserted_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class UserSalesforceProfile(Base):
+    """Cached Salesforce profile data per verified user (country-of-origin tracking)."""
+
+    __tablename__ = "user_salesforce_profiles"
+
+    id = Column(Integer, primary_key=True)
+    asurite_id = Column(String(64), unique=True, nullable=False, index=True)
+    country = Column(String(128), nullable=True)
+    state = Column(String(128), nullable=True)
+    is_international = Column(Boolean, default=False, nullable=False)
+    has_opportunity = Column(Boolean, default=False, nullable=False)
+    fetch_error = Column(Text, nullable=True)                          # non-null if last fetch failed
+    fetched_at = Column(DateTime, nullable=False, index=True)          # naive UTC
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
 # Default rows seeded on first startup.
 _CRON_JOB_DEFAULTS = [
     {

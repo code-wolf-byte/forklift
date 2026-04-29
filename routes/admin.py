@@ -13,6 +13,8 @@ from sqlalchemy import func
 import csv
 import io
 
+import threading as _threading
+
 from utils.database import (
     CronJobConfig,
     ForumPost,
@@ -24,6 +26,7 @@ from utils.database import (
     User,
     UserRole,
     UserRoleException,
+    UserSalesforceProfile,
     VoiceSession,
     session_scope,
 )
@@ -1334,6 +1337,25 @@ def admin_analytics():
             .all()
         )
 
+        # ── International / Country of Origin ─────────────────────────────────
+        country_q = (
+            db_session.query(
+                UserSalesforceProfile.country,
+                func.count(UserSalesforceProfile.id).label("cnt"),
+            )
+            .filter(
+                UserSalesforceProfile.is_international == True,  # noqa: E712
+                UserSalesforceProfile.fetch_error.is_(None),
+            )
+            .group_by(UserSalesforceProfile.country)
+            .order_by(func.count(UserSalesforceProfile.id).desc())
+        )
+        country_rows = country_q.all()
+        international_country = (
+            [{"country": c or "Unknown", "count": cnt} for c, cnt in country_rows]
+            or None
+        )
+
         # ── Programs / Gold Guides ─────────────────────────────────────────────
         gg_q = db_session.query(GoldGuideContribution)
         if from_dt:
@@ -1452,7 +1474,7 @@ def admin_analytics():
                     "LA Center": role_counts.get("LA Center", 0),
                 },
                 "college": {name: role_counts.get(name, 0) for name in _COLLEGE_ROLES},
-                "international_country": None,
+                "international_country": international_country,
             },
             "moderation": {
                 "banned_users": banned_count,
@@ -1507,6 +1529,148 @@ def admin_analytics():
                 "bounce_rate": None,
                 "session_duration": None,
             },
+        }
+    )
+
+
+# ─── Salesforce Profile Cache ─────────────────────────────────────────────────
+
+_sf_refresh_lock = _threading.Lock()
+_sf_refresh_running = False
+_sf_refresh_last: dict = {
+    "started_at": None,
+    "finished_at": None,
+    "total": 0,
+    "errors": 0,
+    "error": None,
+}
+
+
+def _run_sf_refresh() -> None:
+    """Background thread: async-fetch Salesforce profiles for all verified users."""
+    global _sf_refresh_running
+    import asyncio
+
+    from utils.salesforce import async_bulk_fetch_profiles
+    from utils.settings import CONFIG
+
+    try:
+        client_id = CONFIG.SALESFORCE_API_CLIENT_ID or ""
+        client_secret = CONFIG.SALESFORCE_API_CLIENT_SECRET or ""
+        if not client_id or not client_secret:
+            _sf_refresh_last["error"] = "SALESFORCE_API_CLIENT_ID / SALESFORCE_API_CLIENT_SECRET not configured"
+            return
+
+        with session_scope() as db:
+            rows = (
+                db.query(User.asurite_id)
+                .filter(User.verified == True, User.asurite_id.isnot(None))  # noqa: E712
+                .all()
+            )
+        asuries = [r[0] for r in rows]
+        _sf_refresh_last["total"] = len(asuries)
+
+        profiles = asyncio.run(
+            async_bulk_fetch_profiles(asuries, client_id, client_secret)
+        )
+
+        errors = 0
+        now = datetime.utcnow()
+        for p in profiles:
+            try:
+                with session_scope() as db:
+                    existing = (
+                        db.query(UserSalesforceProfile)
+                        .filter(UserSalesforceProfile.asurite_id == p["asurite"])
+                        .one_or_none()
+                    )
+                    if existing:
+                        existing.country = p.get("country")
+                        existing.state = p.get("state")
+                        existing.is_international = bool(p.get("is_international"))
+                        existing.has_opportunity = bool(p.get("has_opportunity"))
+                        existing.fetch_error = p.get("error")
+                        existing.fetched_at = now
+                    else:
+                        db.add(
+                            UserSalesforceProfile(
+                                asurite_id=p["asurite"],
+                                country=p.get("country"),
+                                state=p.get("state"),
+                                is_international=bool(p.get("is_international")),
+                                has_opportunity=bool(p.get("has_opportunity")),
+                                fetch_error=p.get("error"),
+                                fetched_at=now,
+                            )
+                        )
+            except Exception:
+                logger.exception("Error upserting Salesforce profile for %s", p.get("asurite"))
+            if p.get("error"):
+                errors += 1
+
+        _sf_refresh_last["errors"] = errors
+        _sf_refresh_last["finished_at"] = datetime.utcnow().isoformat()
+    except Exception as exc:
+        _sf_refresh_last["error"] = str(exc)
+        _sf_refresh_last["finished_at"] = datetime.utcnow().isoformat()
+        logger.exception("Salesforce refresh failed")
+    finally:
+        _sf_refresh_running = False
+
+
+@admin_bp.route("/api/admin/salesforce/refresh", methods=["POST"])
+@require_admin
+def admin_salesforce_refresh():
+    """Trigger async Salesforce profile refresh for all verified users."""
+    global _sf_refresh_running
+
+    with _sf_refresh_lock:
+        if _sf_refresh_running:
+            return jsonify({"status": "already_running", "last": _sf_refresh_last})
+        _sf_refresh_running = True
+        _sf_refresh_last["started_at"] = datetime.utcnow().isoformat()
+        _sf_refresh_last["finished_at"] = None
+        _sf_refresh_last["error"] = None
+        _sf_refresh_last["errors"] = 0
+        _sf_refresh_last["total"] = 0
+
+    _threading.Thread(target=_run_sf_refresh, daemon=True).start()
+    return jsonify({"status": "started"})
+
+
+@admin_bp.route("/api/admin/salesforce/status", methods=["GET"])
+@require_admin
+def admin_salesforce_status():
+    """Return Salesforce profile cache status."""
+    with session_scope() as db:
+        profiles_cached = db.query(UserSalesforceProfile).count()
+        international_count = (
+            db.query(UserSalesforceProfile)
+            .filter(UserSalesforceProfile.is_international == True)  # noqa: E712
+            .count()
+        )
+        error_count = (
+            db.query(UserSalesforceProfile)
+            .filter(UserSalesforceProfile.fetch_error.isnot(None))
+            .count()
+        )
+        last_fetched_raw = (
+            db.query(func.max(UserSalesforceProfile.fetched_at)).scalar()
+        )
+
+    last_fetched = (
+        last_fetched_raw.replace(tzinfo=timezone.utc).astimezone(AZ_TZ).isoformat()
+        if last_fetched_raw else None
+    )
+
+    return jsonify(
+        {
+            "profiles_cached": profiles_cached,
+            "international_count": international_count,
+            "error_count": error_count,
+            "last_fetched": last_fetched,
+            "refresh_running": _sf_refresh_running,
+            "last_refresh": _sf_refresh_last,
         }
     )
 
