@@ -56,15 +56,15 @@ class ForkliftBot(commands.Bot):
                     DISCORD_CONFIG.unverified_role_id,
                 )
 
+        cog_kwargs: dict = {
+            "guild_id": int(DISCORD_CONFIG.guild_id),
+            "verified_role_id": int(DISCORD_CONFIG.verified_role_id),
+        }
+        if unverified_role_id is not None:
+            cog_kwargs["unverified_role_id"] = unverified_role_id
+
         try:
-            self.add_cog(
-                VerificationCog(
-                    self,
-                    guild_id=int(DISCORD_CONFIG.guild_id),
-                    verified_role_id=int(DISCORD_CONFIG.verified_role_id),
-                    unverified_role_id=unverified_role_id,
-                )
-            )
+            self.add_cog(VerificationCog(self, **cog_kwargs))
         except Exception:  # pragma: no cover - defensive
             logger.exception("Failed to load VerificationCog")
             raise

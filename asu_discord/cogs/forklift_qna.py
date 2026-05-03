@@ -94,7 +94,23 @@ class ForkmanQNA:
             session_id,
         )
 
-        kb_config: Dict[str, Any] = {"knowledgeBaseId": self.knowledge_base_id}
+        kb_config: Dict[str, Any] = {
+            "knowledgeBaseId": self.knowledge_base_id,
+            "generationConfiguration": {
+                "promptTemplate": {
+                    "textPromptTemplate": (
+                        "You are Forkman, a helpful Q&A assistant for the Devil2Devil Discord server "
+                        "about Arizona State University. "
+                        "Answer the question using ONLY the information in the search results below. "
+                        "If the answer is not found in the search results, respond with exactly: "
+                        "\"I'm sorry, I don't have information about that in my knowledge base. "
+                        "Please ask a moderator for help.\" "
+                        "Do not use any outside knowledge or make up information.\n\n"
+                        "Search results:\n$search_results$"
+                    )
+                }
+            },
+        }
         if self.model_arn:
             kb_config["modelArn"] = self.model_arn
 
