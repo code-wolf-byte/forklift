@@ -1,6 +1,5 @@
 import base64
 import time
-from functools import lru_cache
 import requests
 from requests.exceptions import ConnectionError as RequestsConnectionError, Timeout, RequestException
 
@@ -79,11 +78,14 @@ PROGRAM_CODE_TO_COLLEGE_ROLE = {
 }
 
 RETRY_DELAY_SECONDS = 5
+_TOKEN_URL = "https://weblogin.asu.edu/serviceauth/oauth2/client/token"
+_PROD_BASE = "https://crmapi-prod.apps.asu.edu"
+_NONPROD_BASE = "https://crmapi-nonprod.apps.asu.edu"
 
 
 class SalesforceAPI:
     """
-    Lightweight wrapper around the ESB Salesforce endpoints with the student
+    Lightweight wrapper around the CRM API Salesforce endpoints with the student
     parsing logic lifted from main.py.
     """
 
@@ -91,14 +93,33 @@ class SalesforceAPI:
         self.client_id = client_id
         self.client_secret = client_secret
         self.debug = debug
-        self.BASE = "https://esb.asu.edu" if debug else "https://esb-qa.asu.edu"
-        self.contact_endpoint = "/api/v1/asu-sf-contact/contact"
-        self.opportunity_endpoint = "/api/v1/asu-sf-opportunity/opportunity"
+        self.BASE = _NONPROD_BASE if debug else _PROD_BASE
+        self.contact_endpoint = "/v1/crm-contact/contact"
+        self.opportunity_endpoint = "/v1/crm-opportunity/opportunity"
+        self._token: str | None = None
+        self._token_expires_at: float = 0
 
-    @lru_cache(maxsize=1)
     def _get_headers(self):
-        token = base64.b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
-        return {"Authorization": f"Basic {token}"}
+        now = time.time()
+        if not self._token or self._token_expires_at <= now + 60:
+            resp = requests.post(
+                _TOKEN_URL,
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                    "scope": (
+                        f"{self.BASE}/v1/crm-contact/contact/read:all "
+                        f"{self.BASE}/v1/crm-opportunity/opportunity/read:all"
+                    ),
+                },
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            self._token = data["access_token"]
+            self._token_expires_at = now + data.get("expires_in", 3600)
+        return {"Authorization": f"Bearer {self._token}"}
 
     def make_request(self, method, endpoint, headers=None, params=None, data=None, json=None, timeout=10):
         """
@@ -260,15 +281,28 @@ import aiohttp as _aiohttp
 
 _logger = logging.getLogger(__name__)
 
-_ESB_BASE = "https://esb.asu.edu"
-_CONTACT_URL = f"{_ESB_BASE}/api/v1/asu-sf-contact/contact"
-_OPP_URL = f"{_ESB_BASE}/api/v1/asu-sf-opportunity/opportunity"
+_CRM_BASE = _PROD_BASE
+_CONTACT_URL = f"{_CRM_BASE}/v1/crm-contact/contact"
+_OPP_URL = f"{_CRM_BASE}/v1/crm-opportunity/opportunity"
 _ASYNC_TARGET_TERM_CODES = {"2267", "2261"}
 
 
 def _async_auth_header(client_id: str, client_secret: str) -> str:
-    token = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
-    return f"Basic {token}"
+    resp = requests.post(
+        _TOKEN_URL,
+        data={
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "scope": (
+                f"{_CRM_BASE}/v1/crm-contact/contact/read:all "
+                f"{_CRM_BASE}/v1/crm-opportunity/opportunity/read:all"
+            ),
+        },
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return f"Bearer {resp.json()['access_token']}"
 
 
 def _async_is_admitted_or_enrolled(opp: dict) -> bool:

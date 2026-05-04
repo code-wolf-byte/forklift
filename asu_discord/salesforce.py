@@ -1,6 +1,6 @@
-import base64
 import logging
 import os
+import time
 from typing import Any, Dict, Iterable
 import requests
 
@@ -8,13 +8,44 @@ from .models import StudentProfile
 
 logger = logging.getLogger(__name__)
 
-BASE = "https://esb.asu.edu"
-CONTACT_URL = f"{BASE}/api/v1/asu-sf-contact/contact"
-OPP_URL = f"{BASE}/api/v1/asu-sf-opportunity/opportunity"
+TOKEN_URL = "https://weblogin.asu.edu/serviceauth/oauth2/client/token"
+_DEFAULT_BASE = "https://crmapi-prod.apps.asu.edu"
+BASE = os.getenv("SALESFORCE_API_BASE_URL", _DEFAULT_BASE)
+CONTACT_URL = f"{BASE}/v1/crm-contact/contact"
+OPP_URL = f"{BASE}/v1/crm-opportunity/opportunity"
 
 # These credentials are expected to be provided via environment variables.
 CLIENT_ID = os.getenv("SALESFORCE_API_CLIENT_ID")
 CLIENT_SECRET = os.getenv("SALESFORCE_API_CLIENT_SECRET")
+
+_token_cache: dict = {}
+
+
+def _get_bearer_token() -> str:
+    now = time.time()
+    if _token_cache.get("token") and _token_cache.get("expires_at", 0) > now + 60:
+        return _token_cache["token"]
+    if not CLIENT_ID or not CLIENT_SECRET:
+        raise RuntimeError("Salesforce credentials not configured")
+    resp = requests.post(
+        TOKEN_URL,
+        data={
+            "grant_type": "client_credentials",
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "scope": (
+                f"{BASE}/v1/crm-contact/contact/read:all "
+                f"{BASE}/v1/crm-opportunity/opportunity/read:all"
+            ),
+        },
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    _token_cache["token"] = data["access_token"]
+    _token_cache["expires_at"] = now + data.get("expires_in", 3600)
+    return _token_cache["token"]
+
 
 # Map program codes (undergrad + graduate) to college role names.
 PROGRAM_CODE_TO_COLLEGE_ROLE = {
@@ -134,11 +165,13 @@ def get_student_profile(asurite: str) -> StudentProfile | None:
         logger.warning("Salesforce credentials are not configured")
         return None
 
-    # --------------------
-    # Basic Auth
-    # --------------------
-    token = base64.b64encode(f"{CLIENT_ID}:{CLIENT_SECRET}".encode()).decode()
-    headers = {"Authorization": f"Basic {token}"}
+    try:
+        bearer = _get_bearer_token()
+    except Exception as exc:
+        logger.warning("Failed to obtain Salesforce OAuth token: %s", exc)
+        return None
+
+    headers = {"Authorization": f"Bearer {bearer}"}
 
     # --------------------
     # 1. Contact Lookup
