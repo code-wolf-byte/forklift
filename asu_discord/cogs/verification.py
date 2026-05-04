@@ -13,7 +13,7 @@ from discord.commands import Option, slash_command
 from sqlalchemy import func, select
 
 from utils.settings import DISCORD_CONFIG
-from utils.database import User, session_scope, save_user_roles, get_user_by_discord_id, get_exceptions_for_discord_id
+from utils.database import User, UserRoleException, session_scope, save_user_roles, get_user_by_discord_id, get_exceptions_for_discord_id
 from services.google_sheets import write_user_left
 from ..models import SalesforceOpportunity, StudentProfile
 from ..roles import ROLE_ID_MAP
@@ -65,6 +65,15 @@ def _admin_command_kwargs(name: str, description: str) -> dict[str, Any]:
 
 
 TARGET_TERM_CODE: str = _VERIFICATION_CONFIG.get("target_term_code", "2267")
+
+CAMPUS_ROLES: list[str] = [
+    "Tempe",
+    "Downtown Phoenix",
+    "Polytechnic",
+    "LA Center",
+    "West Valley",
+    "Online",
+]
 
 
 def _is_enrolled_or_admitted(opp: SalesforceOpportunity) -> bool:
@@ -997,6 +1006,101 @@ class VerificationCog(commands.Cog):
 
         await ctx.followup.send(
             "Verification prompt posted with the Verify Here button.", ephemeral=True
+        )
+
+    @slash_command(
+        **{
+            "name": "changecampus",
+            "description": "Update your campus role in the Devil2Devil server.",
+            "dm_permission": False,
+            **({"guild_ids": TEST_GUILD_IDS} if TEST_GUILD_IDS else {}),
+        }
+    )
+    async def changecampus(
+        self,
+        ctx: discord.ApplicationContext,
+        campus: str = Option(
+            str,
+            "Your campus",
+            choices=CAMPUS_ROLES,
+            required=True,
+        ),
+    ) -> None:
+        """Allow a verified member to self-correct their campus role."""
+        if not await self._require_home_guild(ctx):
+            return
+
+        await ctx.defer(ephemeral=True)
+
+        with session_scope() as db_session:
+            db_user = (
+                db_session.query(User)
+                .filter(User.discord_user_id == str(ctx.author.id))
+                .one_or_none()
+            )
+            if db_user is None or not db_user.verified:
+                await ctx.followup.send(
+                    "You must be verified to change your campus role.",
+                    ephemeral=True,
+                )
+                return
+
+        guild = ctx.guild
+        member = ctx.author
+        reason = f"Campus change via /changecampus: {campus!r}"
+
+        # Swap campus roles on Discord
+        roles_to_remove = [
+            guild.get_role(ROLE_ID_MAP[name])
+            for name in CAMPUS_ROLES
+            if name != campus and name in ROLE_ID_MAP
+        ]
+        roles_to_remove = [r for r in roles_to_remove if r is not None and r in member.roles]
+        if roles_to_remove:
+            try:
+                await member.remove_roles(*roles_to_remove, reason=reason)
+            except discord.HTTPException as exc:
+                logger.warning("Failed to remove campus roles from %s: %s", member.id, exc)
+
+        new_role_id = ROLE_ID_MAP.get(campus)
+        if new_role_id is not None:
+            new_role = guild.get_role(new_role_id)
+            if new_role is not None and new_role not in member.roles:
+                try:
+                    await member.add_roles(new_role, reason=reason)
+                except discord.HTTPException as exc:
+                    logger.warning("Failed to add campus role %r to %s: %s", campus, member.id, exc)
+
+        # Write exceptions so Salesforce syncs honour the user's choice:
+        # "added" for the selected campus, "paused" for all others.
+        discord_user_id = str(ctx.author.id)
+        with session_scope() as db_session:
+            db_session.query(UserRoleException).filter(
+                UserRoleException.discord_user_id == discord_user_id,
+                UserRoleException.role_name.in_(CAMPUS_ROLES),
+            ).delete(synchronize_session=False)
+
+            db_session.add(UserRoleException(
+                discord_user_id=discord_user_id,
+                role_name=campus,
+                exception_type="added",
+                note="User self-selected via /changecampus",
+                created_by=discord_user_id,
+            ))
+            for other in CAMPUS_ROLES:
+                if other != campus:
+                    db_session.add(UserRoleException(
+                        discord_user_id=discord_user_id,
+                        role_name=other,
+                        exception_type="paused",
+                        note=f"Suppressed by /changecampus selection: {campus!r}",
+                        created_by=discord_user_id,
+                    ))
+
+        await ctx.followup.send(
+            f"Your campus has been updated to **{campus}**. ✅\n"
+            "An admin can review or override this in the admin panel.",
+            ephemeral=True,
         )
 
     @slash_command(**_admin_command_kwargs("email", "Look up the ASU email for a verified member."))

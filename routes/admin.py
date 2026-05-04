@@ -1875,6 +1875,39 @@ def admin_exceptions_delete(exception_id: int):
     return jsonify({"status": "deleted", "id": exception_id})
 
 
+@admin_bp.route("/api/admin/exceptions/campus")
+@require_admin
+def admin_campus_exceptions():
+    """All campus role exceptions — consolidated view for reviewing /changecampus requests."""
+    campus_roles = MEMBER_ROLE_CATEGORIES["Campus"]
+    with session_scope() as db_session:
+        exceptions = (
+            db_session.query(UserRoleException)
+            .filter(UserRoleException.role_name.in_(campus_roles))
+            .order_by(UserRoleException.created_at.desc())
+            .all()
+        )
+        discord_ids = list({e.discord_user_id for e in exceptions})
+        users_map: dict[str, User] = {}
+        if discord_ids:
+            users_map = {
+                u.discord_user_id: u
+                for u in db_session.query(User)
+                .filter(User.discord_user_id.in_(discord_ids))
+                .all()
+            }
+
+    result = []
+    for exc in exceptions:
+        u = users_map.get(exc.discord_user_id)
+        result.append({
+            **_serialize_exception(exc),
+            "asurite_id": u.asurite_id if u else None,
+            "discord_username": u.discord_username if u else None,
+        })
+    return jsonify(result)
+
+
 # ── Server Events ─────────────────────────────────────────────────────────────
 
 @admin_bp.route("/api/admin/events")
