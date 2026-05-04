@@ -374,6 +374,38 @@ class VerificationCog(commands.Cog):
             )
         else:
             logger.info("VerificationCog ready in guild %s (%s)", guild.id, guild.name)
+            asyncio.ensure_future(self._strip_unverified_role_from_verified_members(guild))
+
+    async def _strip_unverified_role_from_verified_members(self, guild: discord.Guild) -> None:
+        """On startup, remove the unverified role from any member already verified in the DB."""
+        unverified_role = self._get_unverified_role(guild)
+        if unverified_role is None:
+            logger.info("No unverified role configured; skipping startup strip")
+            return
+
+        with session_scope() as session:
+            verified_ids = [
+                row[0]
+                for row in session.query(User.discord_user_id)
+                .filter(User.verified == True, User.discord_user_id.isnot(None))  # noqa: E712
+                .all()
+            ]
+
+        removed = 0
+        for discord_id_str in verified_ids:
+            try:
+                member = guild.get_member(int(discord_id_str))
+            except (TypeError, ValueError):
+                continue
+            if member is None or unverified_role not in member.roles:
+                continue
+            try:
+                await member.remove_roles(unverified_role, reason="Startup: remove unverified role from verified member")
+                removed += 1
+            except discord.HTTPException as exc:
+                logger.warning("Failed to remove unverified role from %s on startup: %s", discord_id_str, exc)
+
+        logger.info("Startup strip complete: removed unverified role from %d member(s)", removed)
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
