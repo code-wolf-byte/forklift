@@ -27,9 +27,8 @@ const ENTITY_LABELS = {
 
 function formatDateTime(isoStr) {
   if (!isoStr) return "—";
-  return new Date(
-    isoStr.endsWith("Z") || isoStr.includes("+") ? isoStr : isoStr + "Z"
-  ).toLocaleString("en-US", {
+  const hasOffset = isoStr.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(isoStr);
+  return new Date(hasOffset ? isoStr : isoStr + "Z").toLocaleString("en-US", {
     timeZone: "America/Phoenix",
     month: "short",
     day: "numeric",
