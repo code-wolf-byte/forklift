@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 import yaml
 from flask import Blueprint, Response, abort, jsonify, redirect, request, send_from_directory, session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from utils.database import (
     CronJobConfig,
@@ -1909,6 +1909,176 @@ def admin_campus_exceptions():
 
 
 # ── Server Events ─────────────────────────────────────────────────────────────
+
+@admin_bp.route("/api/admin/events/voice-channels")
+@require_admin
+def voice_channels():
+    with session_scope() as db:
+        rows = (
+            db.query(VoiceSession.channel_name)
+            .distinct()
+            .order_by(VoiceSession.channel_name)
+            .all()
+        )
+    return jsonify([r[0] for r in rows if r[0]])
+
+
+@admin_bp.route("/api/admin/events/voice-search", methods=["POST"])
+@require_admin
+def voice_search():
+    data = request.get_json(force=True)
+    start_str = data.get("start_time")
+    end_str = data.get("end_time")
+    channel = data.get("channel_name") or None
+
+    if not start_str or not end_str:
+        return jsonify({"error": "start_time and end_time are required"}), 400
+
+    start_utc = (
+        datetime.fromisoformat(start_str)
+        .replace(tzinfo=AZ_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+    end_utc = (
+        datetime.fromisoformat(end_str)
+        .replace(tzinfo=AZ_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+
+    with session_scope() as db:
+        q = db.query(VoiceSession).filter(
+            VoiceSession.joined_at < end_utc,
+            or_(VoiceSession.left_at.is_(None), VoiceSession.left_at >= start_utc),
+        )
+        if channel:
+            q = q.filter(VoiceSession.channel_name == channel)
+        sessions = q.order_by(VoiceSession.joined_at).all()
+
+        user_ids = list({s.discord_user_id for s in sessions})
+        users_map: dict[str, User] = {}
+        if user_ids:
+            users_map = {
+                u.discord_user_id: u
+                for u in db.query(User).filter(User.discord_user_id.in_(user_ids)).all()
+            }
+
+        # One row per unique user: earliest joined_at, latest left_at
+        seen: dict[str, dict] = {}
+        for s in sessions:
+            uid = s.discord_user_id
+            if uid not in seen:
+                seen[uid] = {
+                    "discord_user_id": uid,
+                    "discord_username": s.discord_username,
+                    "channel_name": s.channel_name,
+                    "joined_at": s.joined_at,
+                    "left_at": s.left_at,
+                }
+            else:
+                if s.left_at is None:
+                    seen[uid]["left_at"] = None
+                elif seen[uid]["left_at"] is not None and s.left_at > seen[uid]["left_at"]:
+                    seen[uid]["left_at"] = s.left_at
+
+        def _to_az(dt):
+            if dt is None:
+                return None
+            return dt.replace(tzinfo=timezone.utc).astimezone(AZ_TZ).isoformat()
+
+        result = []
+        for uid, info in seen.items():
+            u = users_map.get(uid)
+            result.append({
+                "discord_user_id": uid,
+                "discord_username": info["discord_username"],
+                "email": u.email if u else None,
+                "asurite_id": u.asurite_id if u else None,
+                "channel_name": info["channel_name"],
+                "joined_at": _to_az(info["joined_at"]),
+                "left_at": _to_az(info["left_at"]),
+            })
+
+    return jsonify(result)
+
+
+@admin_bp.route("/api/admin/events/voice-save", methods=["POST"])
+@require_admin
+def voice_save():
+    data = request.get_json(force=True)
+    name = (data.get("name") or "").strip()
+    start_str = data.get("start_time")
+    end_str = data.get("end_time")
+    channel = data.get("channel_name") or None
+
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+    if not start_str or not end_str:
+        return jsonify({"error": "start_time and end_time are required"}), 400
+
+    start_utc = (
+        datetime.fromisoformat(start_str)
+        .replace(tzinfo=AZ_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+    end_utc = (
+        datetime.fromisoformat(end_str)
+        .replace(tzinfo=AZ_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+
+    with session_scope() as db:
+        sample = db.query(VoiceSession).first()
+        guild_id = sample.guild_id if sample else "0"
+
+        channel_id = None
+        if channel:
+            row = db.query(VoiceSession.channel_id).filter(VoiceSession.channel_name == channel).first()
+            if row:
+                channel_id = row[0]
+
+        q = db.query(VoiceSession).filter(
+            VoiceSession.joined_at < end_utc,
+            or_(VoiceSession.left_at.is_(None), VoiceSession.left_at >= start_utc),
+        )
+        if channel:
+            q = q.filter(VoiceSession.channel_name == channel)
+        sessions = q.order_by(VoiceSession.joined_at).all()
+
+        first_session: dict[str, VoiceSession] = {}
+        for s in sessions:
+            if s.discord_user_id not in first_session:
+                first_session[s.discord_user_id] = s
+
+        synthetic_id = f"manual_voice_{int(datetime.utcnow().timestamp() * 1000)}"
+        event = ServerEvent(
+            discord_event_id=synthetic_id,
+            guild_id=guild_id,
+            name=name,
+            start_time=start_utc,
+            end_time=end_utc,
+            status="completed",
+            entity_type="voice",
+            channel_id=channel_id,
+        )
+        db.add(event)
+        db.flush()
+
+        for s in first_session.values():
+            db.add(EventParticipant(
+                event_id=event.id,
+                discord_user_id=s.discord_user_id,
+                action="joined",
+                timestamp=s.joined_at,
+            ))
+
+        event_id = event.id
+
+    return jsonify({"id": event_id})
+
 
 @admin_bp.route("/api/admin/events")
 @require_admin
