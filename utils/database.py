@@ -83,6 +83,22 @@ class User(Base):
         return self._has_affiliation("employee@asu.edu")
 
 
+class DiscordMember(Base):
+    """Tracks every Discord guild join/leave event, keyed by Discord user ID.
+
+    Populated independently of the User table so joins are recorded even before
+    a member completes SAML verification.
+    """
+
+    __tablename__ = "discord_members"
+
+    id = Column(Integer, primary_key=True, index=True)
+    discord_user_id = Column(String(64), unique=True, index=True, nullable=False)
+    discord_username = Column(String(255), nullable=True)
+    joined_at = Column(DateTime, nullable=False)   # naive UTC
+    left_at = Column(DateTime, nullable=True)      # naive UTC; NULL = currently in server
+
+
 class UserRole(Base):
     """Tracks Discord roles assigned to users from Salesforce data."""
 
@@ -389,6 +405,45 @@ def init_db() -> None:
     _ensure_message_log_columns()
     _ensure_qna_columns()
     _seed_cron_job_config()
+    _backfill_discord_members_from_users()
+
+
+def _backfill_discord_members_from_users() -> None:
+    """Seed DiscordMember from existing User rows that have a discord_user_id and joined_at.
+
+    Runs at startup so historical join/leave data is available before the bot
+    connects. The on_ready Discord-API backfill then fills in any current members
+    that are missing or have a newer joined_at.
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    with session_scope() as session:
+        existing_ids = {
+            row[0]
+            for row in session.query(DiscordMember.discord_user_id).all()
+        }
+        users = (
+            session.query(User)
+            .filter(
+                User.discord_user_id.isnot(None),
+                User.joined_at.isnot(None),
+            )
+            .all()
+        )
+        new_rows = [
+            DiscordMember(
+                discord_user_id=u.discord_user_id,
+                discord_username=u.discord_username,
+                joined_at=u.joined_at,
+                left_at=u.left_at,
+            )
+            for u in users
+            if u.discord_user_id not in existing_ids
+        ]
+        if new_rows:
+            session.bulk_save_objects(new_rows)
+    _log.info("DiscordMember backfill from users table: inserted %d row(s)", len(new_rows))
 
 
 def _ensure_qna_columns() -> None:

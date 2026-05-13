@@ -17,6 +17,7 @@ from sqlalchemy import func, or_
 
 from utils.database import (
     CronJobConfig,
+    DiscordMember,
     EventParticipant,
     ForumPost,
     GoldGuideContribution,
@@ -1206,53 +1207,55 @@ def admin_analytics():
         )
 
         # ── Growth & Funnel / Onboarding ───────────────────────────────────────
-        joins_q = db_session.query(User).filter(User.joined_at.isnot(None))
+        joins_q = db_session.query(DiscordMember)
         if from_dt:
-            joins_q = joins_q.filter(User.joined_at >= from_dt)
+            joins_q = joins_q.filter(DiscordMember.joined_at >= from_dt)
         if to_dt:
-            joins_q = joins_q.filter(User.joined_at <= to_dt)
+            joins_q = joins_q.filter(DiscordMember.joined_at <= to_dt)
         total_joins = joins_q.count()
 
-        verified_q = db_session.query(User).filter(User.verified == True)  # noqa: E712
-        if from_dt:
-            verified_q = verified_q.filter(User.verified_at >= from_dt)
-        if to_dt:
-            verified_q = verified_q.filter(User.verified_at <= to_dt)
-        period_verified = verified_q.count()
-
-        unverified_q = db_session.query(User).filter(
-            User.verified == False, User.joined_at.isnot(None)  # noqa: E712
+        verified_discord_ids = db_session.query(User.discord_user_id).filter(
+            User.verified == True, User.discord_user_id.isnot(None)  # noqa: E712
         )
-        if from_dt:
-            unverified_q = unverified_q.filter(User.joined_at >= from_dt)
-        if to_dt:
-            unverified_q = unverified_q.filter(User.joined_at <= to_dt)
-        period_unverified = unverified_q.count()
+        period_verified = joins_q.filter(
+            DiscordMember.discord_user_id.in_(verified_discord_ids)
+        ).count()
+        period_unverified = total_joins - period_verified
 
         # ── Growth & Funnel / Retention ────────────────────────────────────────
-        total_verified_alltime = (
-            db_session.query(User).filter(User.verified == True).count()  # noqa: E712
-        )
+        verified_period_q = db_session.query(User).filter(User.verified == True)  # noqa: E712
+        if from_dt:
+            verified_period_q = verified_period_q.filter(User.verified_at >= from_dt)
+        if to_dt:
+            verified_period_q = verified_period_q.filter(User.verified_at <= to_dt)
+        total_verified = verified_period_q.count()
         in_server_count = (
             db_session.query(User)
             .filter(User.verified == True, User.left_at.is_(None))  # noqa: E712
             .count()
         )
-        total_unverified_alltime = (
-            db_session.query(User)
-            .filter(User.verified == False, User.discord_user_id.isnot(None))  # noqa: E712
-            .count()
-        )
 
+        from sqlalchemy import or_
         retention_rate = None
-        if from_dt:
+        if not from_dt:
+            all_time_verified = (
+                db_session.query(User).filter(User.verified == True).count()  # noqa: E712
+            )
+            if all_time_verified > 0:
+                retention_rate = round((in_server_count / all_time_verified) * 100, 1)
+        else:
             verified_at_start = (
                 db_session.query(User)
-                .filter(User.verified == True, User.verified_at < from_dt)  # noqa: E712
+                .filter(
+                    User.verified == True,  # noqa: E712
+                    User.verified_at < from_dt,
+                    or_(User.left_at.is_(None), User.left_at >= from_dt),
+                )
                 .count()
             )
             leaves_q = db_session.query(User).filter(
                 User.verified == True,  # noqa: E712
+                User.verified_at < from_dt,
                 User.left_at.isnot(None),
                 User.left_at >= from_dt,
             )
@@ -1261,7 +1264,7 @@ def admin_analytics():
             leaves_count = leaves_q.count()
             if verified_at_start > 0:
                 retention_rate = round(
-                    ((verified_at_start - leaves_count) / verified_at_start) * 100, 1
+                    (max(0, verified_at_start - leaves_count) / verified_at_start) * 100, 1
                 )
 
         # ── Channel Engagement ─────────────────────────────────────────────────
@@ -1464,11 +1467,11 @@ def admin_analytics():
                 },
                 "retention": {
                     "verified_retention_rate": retention_rate,
-                    "total_verified": total_verified_alltime,
+                    "total_verified": total_verified,
                     "currently_in_server": in_server_count,
                     "verified_vs_unverified": {
-                        "verified": total_verified_alltime,
-                        "unverified": total_unverified_alltime,
+                        "verified": period_verified,
+                        "unverified": period_unverified,
                     },
                 },
             },

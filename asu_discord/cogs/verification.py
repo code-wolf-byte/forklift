@@ -13,7 +13,7 @@ from discord.commands import Option, slash_command
 from sqlalchemy import func, select
 
 from utils.settings import DISCORD_CONFIG
-from utils.database import User, UserRoleException, session_scope, save_user_roles, get_user_by_discord_id, get_exceptions_for_discord_id
+from utils.database import DiscordMember, User, UserRoleException, session_scope, save_user_roles, get_user_by_discord_id, get_exceptions_for_discord_id
 from services.google_sheets import write_user_left
 from ..models import SalesforceOpportunity, StudentProfile
 from ..roles import ROLE_ID_MAP
@@ -384,6 +384,7 @@ class VerificationCog(commands.Cog):
         else:
             logger.info("VerificationCog ready in guild %s (%s)", guild.id, guild.name)
             asyncio.ensure_future(self._strip_unverified_role_from_verified_members(guild))
+            asyncio.ensure_future(self._backfill_discord_members(guild))
 
     async def _strip_unverified_role_from_verified_members(self, guild: discord.Guild) -> None:
         """On startup, remove the unverified role from any member already verified in the DB."""
@@ -416,44 +417,98 @@ class VerificationCog(commands.Cog):
 
         logger.info("Startup strip complete: removed unverified role from %d member(s)", removed)
 
+    async def _backfill_discord_members(self, guild: discord.Guild) -> None:
+        """On startup, ensure every current guild member has a DiscordMember row."""
+        with session_scope() as session:
+            existing_ids = {
+                row[0]
+                for row in session.query(DiscordMember.discord_user_id).all()
+            }
+            new_rows = []
+            for member in guild.members:
+                discord_id = str(member.id)
+                if discord_id in existing_ids:
+                    continue
+                joined = (
+                    member.joined_at.replace(tzinfo=None)
+                    if member.joined_at
+                    else datetime.utcnow()
+                )
+                new_rows.append(
+                    DiscordMember(
+                        discord_user_id=discord_id,
+                        discord_username=str(member),
+                        joined_at=joined,
+                    )
+                )
+            if new_rows:
+                session.bulk_save_objects(new_rows)
+        logger.info("Discord member backfill complete: inserted %d row(s)", len(new_rows))
+
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
-        """Track when a linked Discord user joins the guild."""
+        """Track every guild join in DiscordMember; also update User if already linked."""
         if member.guild.id != self.guild_id:
             return
 
+        now = datetime.utcnow()
+        discord_id = str(member.id)
+
         with session_scope() as session:
-            user = (
-                session.query(User)
-                .filter(User.discord_user_id == str(member.id))
+            dm = (
+                session.query(DiscordMember)
+                .filter(DiscordMember.discord_user_id == discord_id)
                 .one_or_none()
             )
-            if user is None:
-                return
+            if dm is None:
+                session.add(
+                    DiscordMember(
+                        discord_user_id=discord_id,
+                        discord_username=str(member),
+                        joined_at=now,
+                    )
+                )
+            else:
+                dm.discord_username = str(member)
+                dm.joined_at = now
+                dm.left_at = None
 
-            user.joined_at = datetime.utcnow()
-            user.left_at = None
+            user = (
+                session.query(User)
+                .filter(User.discord_user_id == discord_id)
+                .one_or_none()
+            )
+            if user is not None:
+                user.joined_at = now
+                user.left_at = None
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member) -> None:
-        """Track when a linked Discord user leaves the guild."""
+        """Track every guild leave in DiscordMember; also update User if linked."""
         if member.guild.id != self.guild_id:
             return
 
+        now = datetime.utcnow()
+        discord_id = str(member.id)
+
         with session_scope() as session:
-            user = (
-                session.query(User)
-                .filter(User.discord_user_id == str(member.id))
+            dm = (
+                session.query(DiscordMember)
+                .filter(DiscordMember.discord_user_id == discord_id)
                 .one_or_none()
             )
-            if user is None:
-                return
+            if dm is not None:
+                dm.left_at = now
 
-            now = datetime.utcnow()
-            user.left_at = now
-
-            if user.verified and user.email:
-                write_user_left(user.email, now)
+            user = (
+                session.query(User)
+                .filter(User.discord_user_id == discord_id)
+                .one_or_none()
+            )
+            if user is not None:
+                user.left_at = now
+                if user.verified and user.email:
+                    write_user_left(user.email, now)
 
     # Alias to match common terminology
     on_member_leave = on_member_remove
