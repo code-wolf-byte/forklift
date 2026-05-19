@@ -1304,36 +1304,46 @@ def admin_analytics():
         role_counts = {name: cnt for name, cnt in demo_q.group_by(UserRole.role_name).all()}
 
         # ── Voice (from voice_sessions) ────────────────────────────────────────
+        # Select sessions that overlap the period (started before end, ended after start),
+        # then clip each session's duration to the period boundary in Python so sessions
+        # that straddle the period edges are counted correctly rather than dropped.
         vs_q = db_session.query(VoiceSession).filter(VoiceSession.left_at.isnot(None))
         if from_dt:
-            vs_q = vs_q.filter(VoiceSession.joined_at >= from_dt)
+            vs_q = vs_q.filter(VoiceSession.left_at > from_dt)
         if to_dt:
-            vs_q = vs_q.filter(VoiceSession.joined_at <= to_dt)
-        total_voice_seconds = (
-            vs_q.with_entities(func.coalesce(func.sum(VoiceSession.duration_seconds), 0)).scalar()
-            or 0
-        )
-        voice_hours = round(total_voice_seconds / 3600, 1) if total_voice_seconds else None
-        unique_speakers = (
-            vs_q.with_entities(func.count(VoiceSession.discord_user_id.distinct())).scalar() or 0
-        ) or None
+            vs_q = vs_q.filter(VoiceSession.joined_at < to_dt)
+        voice_sessions = vs_q.all()
 
-        # Channel voice activity
-        vc_rows = (
-            vs_q.with_entities(
-                VoiceSession.channel_id,
-                VoiceSession.channel_name,
-                func.sum(VoiceSession.duration_seconds).label("dur"),
-                func.count(VoiceSession.id).label("sessions"),
-            )
-            .group_by(VoiceSession.channel_id, VoiceSession.channel_name)
-            .order_by(func.sum(VoiceSession.duration_seconds).desc())
-            .limit(25)
-            .all()
-        )
+        total_voice_seconds = 0
+        ch_seconds: dict[str, int] = {}
+        ch_sessions: dict[str, int] = {}
+        ch_names: dict[str, str] = {}
+        unique_speaker_ids: set[str] = set()
+        incomplete_voice_sessions = 0
+        for s in voice_sessions:
+            clip_start = max(s.joined_at, from_dt) if from_dt else s.joined_at
+            clip_end = min(s.left_at, to_dt) if to_dt else s.left_at
+            clipped = int(max(0, (clip_end - clip_start).total_seconds()))
+            total_voice_seconds += clipped
+            cid = str(s.channel_id)
+            ch_seconds[cid] = ch_seconds.get(cid, 0) + clipped
+            ch_sessions[cid] = ch_sessions.get(cid, 0) + 1
+            ch_names[cid] = s.channel_name or cid
+            unique_speaker_ids.add(s.discord_user_id)
+            if not s.is_complete:
+                incomplete_voice_sessions += 1
+
+        voice_hours = round(total_voice_seconds / 3600, 1) if total_voice_seconds else None
+        unique_speakers = len(unique_speaker_ids) or None
+
+        top_voice_channels = sorted(ch_seconds.items(), key=lambda x: -x[1])[:25]
         voice_by_channel = {
-            str(cid): {"channel_name": cname or cid, "voice_seconds": dur or 0, "sessions": ses}
-            for cid, cname, dur, ses in vc_rows
+            cid: {
+                "channel_name": ch_names[cid],
+                "voice_seconds": ch_seconds[cid],
+                "sessions": ch_sessions[cid],
+            }
+            for cid, _ in top_voice_channels
         }
 
         # ── Moderation (from moderation_events + User.banned) ──────────────────
@@ -1457,6 +1467,7 @@ def admin_analytics():
                 "unique_talkers": unique_talkers,
                 "voice_hours": voice_hours,
                 "unique_speakers": unique_speakers,
+                "incomplete_voice_sessions": incomplete_voice_sessions or None,
             },
             "growth_funnel": {
                 "onboarding": {

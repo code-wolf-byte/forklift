@@ -176,30 +176,36 @@ class AnalyticsCog(commands.Cog):
     # ═════════════════════════════════════════════════════════════════════════
 
     async def _reconcile_voice_sessions(self) -> None:
-        """Close sessions left open because the bot restarted mid-session.
+        """Reconcile voice sessions after a bot restart.
 
-        For each VoiceSession with ``left_at=NULL``:
-        - If the user is still in voice → leave the session open (correct).
-        - If the user is gone        → close with ``is_complete=False`` so we
-          still capture the partial duration from ``joined_at`` to now.
+        Two passes:
+        1. Close sessions left open for users who are no longer in voice
+           (bot went down while they were in a channel).
+        2. Open new sessions for users currently in voice with no open session
+           (they joined while the bot was offline). ``joined_at`` is set to now
+           since we cannot recover the actual join time, so duration is tracked
+           from reconnect onward rather than being lost entirely.
         """
         guild = self.bot.get_guild(self.guild_id)
         if guild is None:
             logger.warning("AnalyticsCog: guild %s not in cache, skipping reconciliation", self.guild_id)
             return
 
-        in_voice: set[str] = {
-            str(m.id)
+        # Map discord_user_id → (channel_id, channel_name, username) for every
+        # non-bot member currently in a voice channel.
+        in_voice: dict[str, tuple[str, str, str]] = {
+            str(m.id): (str(vc.id), vc.name, m.name)
             for vc in guild.voice_channels
             for m in vc.members
+            if not m.bot
         }
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
 
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._close_orphaned_sessions, in_voice, now_utc)
+        await loop.run_in_executor(None, self._reconcile_sessions, in_voice, now_utc)
         logger.info("AnalyticsCog: voice reconciliation complete (guild %s)", self.guild_id)
 
-    def _close_orphaned_sessions(self, in_voice: set[str], now_utc: datetime) -> None:
+    def _reconcile_sessions(self, in_voice: dict[str, tuple[str, str, str]], now_utc: datetime) -> None:
         try:
             with session_scope() as db:
                 open_sessions = (
@@ -210,8 +216,11 @@ class AnalyticsCog(commands.Cog):
                     )
                     .all()
                 )
+
+                tracked_user_ids: set[str] = set()
                 orphaned = 0
                 for s in open_sessions:
+                    tracked_user_ids.add(s.discord_user_id)
                     if s.discord_user_id in in_voice:
                         continue  # user is still in voice — session is valid
                     s.left_at = now_utc
@@ -220,10 +229,30 @@ class AnalyticsCog(commands.Cog):
                         s.duration_seconds = int(max(0, elapsed))
                     s.is_complete = False  # truncated by bot restart
                     orphaned += 1
+
+                # Open sessions for users in voice who have no tracked session —
+                # they joined while the bot was offline.
+                untracked = 0
+                for user_id, (channel_id, channel_name, username) in in_voice.items():
+                    if user_id in tracked_user_ids:
+                        continue
+                    db.add(VoiceSession(
+                        discord_user_id=user_id,
+                        discord_username=username,
+                        guild_id=str(self.guild_id),
+                        channel_id=channel_id,
+                        channel_name=channel_name,
+                        joined_at=now_utc,  # actual join time unknown; captured from reconnect onward
+                        is_complete=False,  # join was not observed
+                    ))
+                    untracked += 1
+
                 if orphaned:
                     logger.info("Closed %d orphaned voice session(s)", orphaned)
+                if untracked:
+                    logger.info("Opened %d untracked voice session(s) (joined while bot was offline)", untracked)
         except Exception:
-            logger.exception("Failed to reconcile orphaned voice sessions")
+            logger.exception("Failed to reconcile voice sessions")
 
     @commands.Cog.listener()
     async def on_voice_state_update(
