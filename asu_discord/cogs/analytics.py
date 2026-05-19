@@ -77,7 +77,7 @@ class AnalyticsCog(commands.Cog):
         if message.guild.id != self.guild_id:
             return
         if not isinstance(
-            message.channel, (discord.TextChannel, discord.Thread, discord.ForumChannel)
+            message.channel, (discord.TextChannel, discord.Thread, discord.ForumChannel, discord.VoiceChannel)
         ):
             return
 
@@ -713,10 +713,23 @@ class AnalyticsCog(commands.Cog):
 
     async def _collect_backfill_targets(
         self, guild: discord.Guild
-    ) -> list[discord.TextChannel | discord.Thread]:
-        targets: list[discord.TextChannel | discord.Thread] = []
+    ) -> list[discord.TextChannel | discord.Thread | discord.VoiceChannel]:
+        targets: list[discord.TextChannel | discord.Thread | discord.VoiceChannel] = []
         for ch in guild.channels:
             if isinstance(ch, discord.TextChannel):
+                targets.append(ch)
+                targets.extend(ch.threads)
+                try:
+                    async for thread in ch.archived_threads(limit=None):
+                        targets.append(thread)
+                    await asyncio.sleep(_PAGE_SLEEP_S)
+                except discord.Forbidden:
+                    logger.warning(
+                        "No permission to list archived threads in #%s — skipping", ch.name
+                    )
+                except Exception:
+                    logger.exception("Failed to list archived threads in #%s", ch.name)
+            elif isinstance(ch, discord.VoiceChannel):
                 targets.append(ch)
             elif isinstance(ch, discord.ForumChannel):
                 targets.extend(ch.threads)
