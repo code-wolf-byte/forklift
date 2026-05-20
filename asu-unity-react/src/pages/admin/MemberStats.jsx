@@ -175,7 +175,6 @@ export default function MemberStats() {
   }
 
   const total = stats?.total_verified ?? 0;
-  const inServer = stats?.currently_in_server ?? 0;
   const periodLabel = applied.from || applied.to
     ? `${applied.from || "start"} → ${applied.to || "today"}`
     : "All time";
@@ -241,18 +240,12 @@ export default function MemberStats() {
       </Card>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
         <SummaryCard
           value={total.toLocaleString()}
           label="Verified Members"
           icon="fa-user-check"
           color="#8c1d40"
-        />
-        <SummaryCard
-          value={inServer.toLocaleString()}
-          label="Currently in Server"
-          icon="fa-users"
-          color="#10b981"
         />
         <SummaryCard
           value={withAllRequired.toLocaleString()}

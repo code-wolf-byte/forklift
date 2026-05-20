@@ -1064,24 +1064,22 @@ class VerificationCog(commands.Cog):
         )
 
     @slash_command(
-        **{
-            "name": "changecampus",
-            "description": "Update your campus role in the Devil2Devil server.",
-            "dm_permission": False,
-            **({"guild_ids": TEST_GUILD_IDS} if TEST_GUILD_IDS else {}),
-        }
+        **_admin_command_kwargs(
+            "changecampus", "Update a member's campus role in the Devil2Devil server."
+        )
     )
     async def changecampus(
         self,
         ctx: discord.ApplicationContext,
+        member: discord.Member = Option(discord.Member, "Member to update"),
         campus: str = Option(
             str,
-            "Your campus",
+            "Campus to assign",
             choices=CAMPUS_ROLES,
             required=True,
         ),
     ) -> None:
-        """Allow a verified member to self-correct their campus role."""
+        """Allow an admin to update a member's campus role."""
         if not await self._require_home_guild(ctx):
             return
 
@@ -1090,19 +1088,18 @@ class VerificationCog(commands.Cog):
         with session_scope() as db_session:
             db_user = (
                 db_session.query(User)
-                .filter(User.discord_user_id == str(ctx.author.id))
+                .filter(User.discord_user_id == str(member.id))
                 .one_or_none()
             )
             if db_user is None or not db_user.verified:
                 await ctx.followup.send(
-                    "You must be verified to change your campus role.",
+                    f"{member.mention} must be verified to have their campus role changed.",
                     ephemeral=True,
                 )
                 return
 
         guild = ctx.guild
-        member = ctx.author
-        reason = f"Campus change via /changecampus: {campus!r}"
+        reason = f"Campus change via /changecampus by {ctx.author}: {campus!r}"
 
         # Swap campus roles on Discord
         roles_to_remove = [
@@ -1126,9 +1123,10 @@ class VerificationCog(commands.Cog):
                 except discord.HTTPException as exc:
                     logger.warning("Failed to add campus role %r to %s: %s", campus, member.id, exc)
 
-        # Write exceptions so Salesforce syncs honour the user's choice:
+        # Write exceptions so Salesforce syncs honour the admin's choice:
         # "added" for the selected campus, "paused" for all others.
-        discord_user_id = str(ctx.author.id)
+        discord_user_id = str(member.id)
+        admin_id = str(ctx.author.id)
         with session_scope() as db_session:
             db_session.query(UserRoleException).filter(
                 UserRoleException.discord_user_id == discord_user_id,
@@ -1139,8 +1137,8 @@ class VerificationCog(commands.Cog):
                 discord_user_id=discord_user_id,
                 role_name=campus,
                 exception_type="added",
-                note="User self-selected via /changecampus",
-                created_by=discord_user_id,
+                note=f"Admin-set via /changecampus by {ctx.author}",
+                created_by=admin_id,
             ))
             for other in CAMPUS_ROLES:
                 if other != campus:
@@ -1148,13 +1146,12 @@ class VerificationCog(commands.Cog):
                         discord_user_id=discord_user_id,
                         role_name=other,
                         exception_type="paused",
-                        note=f"Suppressed by /changecampus selection: {campus!r}",
-                        created_by=discord_user_id,
+                        note=f"Suppressed by /changecampus selection: {campus!r} (set by {ctx.author})",
+                        created_by=admin_id,
                     ))
 
         await ctx.followup.send(
-            f"Your campus has been updated to **{campus}**. ✅\n"
-            "An admin can review or override this in the admin panel.",
+            f"{member.mention}'s campus has been updated to **{campus}**. ✅",
             ephemeral=True,
         )
 

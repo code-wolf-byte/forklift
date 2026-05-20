@@ -213,9 +213,9 @@ export default function Analytics() {
   const askAsu = forums.ask_asu_staff || {};
   const moderation = d.moderation || {};
 
-  const totalVerified = retention.total_verified || 0;
-  const totalUnverified = (retention.verified_vs_unverified || {}).unverified || 0;
-  const totalAllTime = totalVerified + totalUnverified;
+  const splitVerified = onboarding.verified_users || 0;
+  const splitUnverified = onboarding.unverified_users || 0;
+  const splitTotal = onboarding.total_joins || 0;
 
   const collegeEntries = Object.entries(demo.college || {}).sort(([, a], [, b]) => b - a);
   const collegeTotal = collegeEntries.reduce((s, [, c]) => s + c, 0);
@@ -450,22 +450,22 @@ export default function Analytics() {
               tooltip="All-time count of verified members whose left_at is null — i.e., still present in the server right now."
             />
           </div>
-          {totalAllTime > 0 && (
+          {splitTotal > 0 && (
             <Card>
               <CardContent className="p-3">
-                <SubLabel tooltip="All-time ratio of members who completed verification vs. those who joined but never verified.">
+                <SubLabel tooltip="Of members who joined the server in the selected period, how many completed verification vs. never verified.">
                   Verified vs Unverified Split
                 </SubLabel>
                 <ProgressBar
                   name="Verified"
-                  count={totalVerified}
-                  total={totalAllTime}
+                  count={splitVerified}
+                  total={splitTotal}
                   color="#10b981"
                 />
                 <ProgressBar
                   name="Unverified"
-                  count={totalUnverified}
-                  total={totalAllTime}
+                  count={splitUnverified}
+                  total={splitTotal}
                   color="#f59e0b"
                 />
               </CardContent>
