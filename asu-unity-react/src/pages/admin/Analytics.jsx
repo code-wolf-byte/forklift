@@ -352,28 +352,28 @@ export default function Analytics() {
           label="Messages Sent"
           value={ca.messages_sent}
           icon="fa-comment"
-          tooltip="Total messages logged across all channels during the period. Populated by the message backfill and real-time listener."
+          tooltip="Total messages logged across all tracked channels during the period. Accuracy depends on the backfill being complete — gaps exist for channels or time ranges not yet backfilled."
         />
         <StatCard
           label="Unique Talkers"
           value={ca.unique_talkers}
           icon="fa-user"
           color="#3b82f6"
-          tooltip="Number of distinct members who sent at least one message during the period. A measure of how many people actively participated."
+          tooltip="Distinct members who sent at least one message in any tracked channel during the period. Subject to the same backfill coverage as Messages Sent — under-counts if backfill is incomplete."
         />
         <StatCard
           label="Voice Hours"
           value={ca.voice_hours != null ? `${ca.voice_hours}h` : null}
           icon="fa-microphone"
           color="#10b981"
-          tooltip="Total cumulative time members spent in voice channels during the period, summed across all sessions. Tracked per-session in voice_sessions."
+          tooltip="Total time members spent in voice channels, summed across all completed sessions (left_at is set). Sessions clipped to the selected period boundaries. Ongoing sessions with no left_at are excluded."
         />
         <StatCard
           label="Unique Speakers"
           value={ca.unique_speakers}
           icon="fa-headphones"
           color="#f59e0b"
-          tooltip="Number of distinct members who joined at least one voice channel during the period. Complements Voice Hours by showing breadth vs. depth."
+          tooltip="Distinct members who joined at least one voice channel during the period. Only counts members with at least one completed session — members currently in voice with no left_at are excluded."
         />
       </div>
 
@@ -389,7 +389,7 @@ export default function Analytics() {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-6">
         {/* Onboarding */}
         <div>
-          <SubLabel tooltip="Counts for members who joined or verified during the selected period.">
+          <SubLabel tooltip="All counts are based on joined_at from the discord_members table — the date the member joined the server, not when they verified.">
             Onboarding
           </SubLabel>
           <div className="grid grid-cols-2 gap-3">
@@ -397,21 +397,21 @@ export default function Analytics() {
               label="Total Joins"
               value={onboarding.total_joins}
               icon="fa-sign-in-alt"
-              tooltip="Members whose joined_at timestamp falls within the selected period. Recorded when the bot detects a new guild member."
+              tooltip="Members whose joined_at falls within the period. Recorded by the on_member_join bot event. May under-count if the bot was offline during joins."
             />
             <StatCard
               label="Verified Users"
               value={onboarding.verified_users}
               icon="fa-user-check"
               color="#10b981"
-              tooltip="Members who completed both CAS (ASU login) and Discord linking during the period. Their verified_at timestamp is used for filtering."
+              tooltip="Of members who joined in the period, how many are currently verified. Filtered by joined_at — not verified_at — so a member who joined now but verified later would still count here once verified."
             />
             <StatCard
               label="Unverified Users"
               value={onboarding.unverified_users}
               icon="fa-user-clock"
               color="#f59e0b"
-              tooltip="Members who joined during the period but did not complete verification. Calculated as: joined in range AND verified = false."
+              tooltip="Of members who joined in the period, how many have not completed verification. Calculated as total joins minus verified users."
             />
             <StatCard
               label="Venue Users"
@@ -425,35 +425,27 @@ export default function Analytics() {
 
         {/* Retention */}
         <div>
-          <SubLabel tooltip="How well the server keeps members who were already verified before the period started.">
+          <SubLabel tooltip="Retention measures how well the server keeps verified members who were already present before the selected period.">
             Retention
           </SubLabel>
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            <StatCard
-              label="Retention Rate"
-              value={
-                retention.verified_retention_rate !== null &&
-                retention.verified_retention_rate !== undefined
-                  ? `${retention.verified_retention_rate}%`
-                  : null
-              }
-              icon="fa-chart-line"
-              color="#10b981"
-              note={applied.from ? periodLabel : "Select a date range"}
-              tooltip="% of verified members who were in the server at the start of the period and did not leave by the end. Formula: (verified_at_start − leaves) ÷ verified_at_start × 100. Requires a date range to calculate."
-            />
-            <StatCard
-              label="Currently in Server"
-              value={retention.currently_in_server}
-              icon="fa-users"
-              color="#3b82f6"
-              tooltip="All-time count of verified members whose left_at is null — i.e., still present in the server right now."
-            />
-          </div>
+          <StatCard
+            label="Retention Rate"
+            value={
+              retention.verified_retention_rate !== null &&
+              retention.verified_retention_rate !== undefined
+                ? `${retention.verified_retention_rate}%`
+                : null
+            }
+            icon="fa-chart-line"
+            color="#10b981"
+            note={applied.from ? periodLabel : "Select a date range"}
+            tooltip="% of verified members who were present at the start of the period and had not left by the end. Formula: (verified_at_start − leaves in period) ÷ verified_at_start × 100. A member counts as 'left' when the bot records an on_member_remove event. Requires a date range to calculate."
+            className="mb-3"
+          />
           {splitTotal > 0 && (
             <Card>
               <CardContent className="p-3">
-                <SubLabel tooltip="Of members who joined the server in the selected period, how many completed verification vs. never verified.">
+                <SubLabel tooltip="Of all members who joined during the selected period, what share completed verification. Both numbers come from the same joined_at-filtered query so they always sum to total joins.">
                   Verified vs Unverified Split
                 </SubLabel>
                 <ProgressBar
