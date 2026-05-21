@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import ActivityChart from "./ActivityChart.jsx";
 import SeriesBuilder, { seriesLabel, seriesParams } from "./SeriesBuilder.jsx";
+import { getUrlParam, replaceUrlParams } from "@/utils/adminUrl";
 
 const COLORS = ["#8c1d40", "#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444"];
 const SCALE_PRESETS = [7, 14, 30, 90];
@@ -42,13 +43,16 @@ function Avatar({ userId, avatarHash, username }) {
 }
 
 export default function ServerJoins({ isDark }) {
-  const [filters, setFilters] = useState({
-    from_date: daysAgoISO(30),
-    to_date: todayISO(),
+  const [filters, setFilters] = useState(() => ({
+    from_date: getUrlParam("from_date", daysAgoISO(30)),
+    to_date: getUrlParam("to_date", todayISO()),
     role: "",
-  });
+  }));
   const [applied, setApplied] = useState(filters);
-  const [activeScale, setActiveScale] = useState(30);
+  const [activeScale, setActiveScale] = useState(() => {
+    const s = parseInt(getUrlParam("scale", "30"), 10);
+    return SCALE_PRESETS.includes(s) ? s : 30;
+  });
   const [roles, setRoles] = useState([]);
   const [data, setData] = useState(null);
   const [page, setPage] = useState(1);
@@ -107,11 +111,13 @@ export default function ServerJoins({ isDark }) {
     setApplied((prev) => ({ ...prev, from_date: newFrom, to_date: newTo }));
     setActiveScale(days);
     setPage(1);
+    replaceUrlParams({ from_date: newFrom, to_date: newTo, scale: days });
   };
 
   const handleApply = () => {
     setPage(1);
     setApplied(filters);
+    replaceUrlParams({ from_date: filters.from_date, to_date: filters.to_date, scale: "" });
   };
 
   const addSeries = () => {

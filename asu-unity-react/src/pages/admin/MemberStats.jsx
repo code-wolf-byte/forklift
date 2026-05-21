@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { getUrlParam, replaceUrlParams } from "@/utils/adminUrl";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const monthStartISO = () => {
@@ -132,9 +133,12 @@ function SummaryCard({ value, label, icon, color }) {
 export default function MemberStats() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
-  const [applied, setApplied] = useState({ from: "", to: "" });
+  const [fromDate, setFromDate] = useState(() => getUrlParam("from_date", ""));
+  const [toDate, setToDate] = useState(() => getUrlParam("to_date", ""));
+  const [applied, setApplied] = useState(() => ({
+    from: getUrlParam("from_date", ""),
+    to: getUrlParam("to_date", ""),
+  }));
 
   useEffect(() => {
     setLoading(true);
@@ -147,20 +151,26 @@ export default function MemberStats() {
       .catch(() => setLoading(false));
   }, [applied]);
 
-  const handleApply = () => setApplied({ from: fromDate, to: toDate });
+  const handleApply = () => {
+    setApplied({ from: fromDate, to: toDate });
+    replaceUrlParams({ from_date: fromDate, to_date: toDate });
+  };
 
   const handlePreset = (preset) => {
     if (preset === "alltime") {
       setFromDate(""); setToDate("");
       setApplied({ from: "", to: "" });
+      replaceUrlParams({ from_date: "", to_date: "" });
     } else if (preset === "month") {
       const f = monthStartISO(), t = todayISO();
       setFromDate(f); setToDate(t);
       setApplied({ from: f, to: t });
+      replaceUrlParams({ from_date: f, to_date: t });
     } else if (preset === "today") {
       const t = todayISO();
       setFromDate(t); setToDate(t);
       setApplied({ from: t, to: t });
+      replaceUrlParams({ from_date: t, to_date: t });
     }
   };
 

@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getUrlParam, replaceUrlParams } from "@/utils/adminUrl";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const monthStartISO = () => {
@@ -40,9 +41,12 @@ function StatCard({ value, label, icon, color }) {
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [fromDate, setFromDate] = useState(monthStartISO());
-  const [toDate, setToDate] = useState(todayISO());
-  const [applied, setApplied] = useState({ from: monthStartISO(), to: todayISO() });
+  const [fromDate, setFromDate] = useState(() => getUrlParam("from_date", monthStartISO()));
+  const [toDate, setToDate] = useState(() => getUrlParam("to_date", todayISO()));
+  const [applied, setApplied] = useState(() => ({
+    from: getUrlParam("from_date", monthStartISO()),
+    to: getUrlParam("to_date", todayISO()),
+  }));
 
   useEffect(() => {
     setLoading(true);
@@ -52,7 +56,10 @@ export default function Dashboard() {
       .catch(() => setLoading(false));
   }, [applied]);
 
-  const handleApply = () => setApplied({ from: fromDate, to: toDate });
+  const handleApply = () => {
+    setApplied({ from: fromDate, to: toDate });
+    replaceUrlParams({ from_date: fromDate, to_date: toDate });
+  };
 
   if (loading && !stats) {
     return (

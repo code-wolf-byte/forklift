@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { getUrlParam, replaceUrlParams } from "@/utils/adminUrl";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -416,20 +417,26 @@ const PRESETS = [
 ];
 
 export default function MessageLogs() {
-  const [tab, setTab] = useState("heatmap");
+  const [tab, setTab] = useState(() => getUrlParam("tab", "heatmap"));
   const [showBackfill, setShowBackfill] = useState(false);
 
-  const [fromDate, setFromDate] = useState(daysAgoISO(30));
-  const [toDate, setToDate] = useState(todayISO());
+  const [fromDate, setFromDate] = useState(() => getUrlParam("from_date", daysAgoISO(30)));
+  const [toDate, setToDate] = useState(() => getUrlParam("to_date", todayISO()));
   const [hasRoles, setHasRoles] = useState([]);
   const [notRoles, setNotRoles] = useState([]);
-  const [activePreset, setActivePreset] = useState(30);
-
-  const [applied, setApplied] = useState({
-    from: daysAgoISO(30), to: todayISO(), hasRoles: [], notRoles: [],
+  const [activePreset, setActivePreset] = useState(() => {
+    const p = parseInt(getUrlParam("preset", "30"), 10);
+    return PRESETS.some((x) => x.days === p) ? p : 30;
   });
 
-  const [heatmapGroupby, setHeatmapGroupby] = useState("dow");
+  const [applied, setApplied] = useState(() => ({
+    from: getUrlParam("from_date", daysAgoISO(30)),
+    to: getUrlParam("to_date", todayISO()),
+    hasRoles: [],
+    notRoles: [],
+  }));
+
+  const [heatmapGroupby, setHeatmapGroupby] = useState(() => getUrlParam("groupby", "dow"));
 
   const [roles, setRoles] = useState([]);
   const [heatmapData, setHeatmapData] = useState(null);
@@ -474,6 +481,7 @@ export default function MessageLogs() {
   const handleApply = () => {
     setApplied({ from: fromDate, to: toDate, hasRoles, notRoles });
     setActivePreset(null);
+    replaceUrlParams({ from_date: fromDate, to_date: toDate, preset: "" });
   };
 
   const handlePreset = (days) => {
@@ -481,6 +489,17 @@ export default function MessageLogs() {
     setFromDate(f); setToDate(t);
     setApplied((a) => ({ ...a, from: f, to: t }));
     setActivePreset(days);
+    replaceUrlParams({ from_date: f, to_date: t, preset: days });
+  };
+
+  const handleTabChange = (newTab) => {
+    setTab(newTab);
+    replaceUrlParams({ tab: newTab });
+  };
+
+  const handleGroupbyChange = (newGroupby) => {
+    setHeatmapGroupby(newGroupby);
+    replaceUrlParams({ groupby: newGroupby });
   };
 
   const csvFilename = `message_logs_${applied.from || "start"}_to_${applied.to || "end"}.csv`;
@@ -575,7 +594,7 @@ export default function MessageLogs() {
               key={id}
               size="sm"
               variant={tab === id ? "default" : "outline"}
-              onClick={() => setTab(id)}
+              onClick={() => handleTabChange(id)}
             >
               <i className={`fas ${icon} mr-1`} />{label}
             </Button>
@@ -601,14 +620,14 @@ export default function MessageLogs() {
                 <Button
                   size="sm"
                   variant={heatmapGroupby === "dow" ? "default" : "outline"}
-                  onClick={() => setHeatmapGroupby("dow")}
+                  onClick={() => handleGroupbyChange("dow")}
                 >
                   By Day
                 </Button>
                 <Button
                   size="sm"
                   variant={heatmapGroupby === "date" ? "default" : "outline"}
-                  onClick={() => setHeatmapGroupby("date")}
+                  onClick={() => handleGroupbyChange("date")}
                 >
                   By Date
                 </Button>
