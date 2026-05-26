@@ -143,26 +143,22 @@ def admin_stats():
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     today_naive = today_start.replace(tzinfo=None)
 
-    # Period for retention/leaves stats — defaults to current month in AZ time
+    # Period for retention/leaves stats — defaults to current month in UTC
     from_date_str = request.args.get("from_date")
     to_date_str = request.args.get("to_date")
 
-    now_az = datetime.now(AZ_TZ)
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     if from_date_str:
         from_dt = _parse_az_date(from_date_str)
     else:
-        from_dt = (
-            now_az.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            .astimezone(timezone.utc)
-            .replace(tzinfo=None)
-        )
-        from_date_str = now_az.replace(day=1).date().isoformat()
+        from_dt = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        from_date_str = from_dt.date().isoformat()
 
     if to_date_str:
         to_dt = _parse_az_date(to_date_str, end_of_day=True)
     else:
-        to_dt = now_az.astimezone(timezone.utc).replace(tzinfo=None)
-        to_date_str = now_az.date().isoformat()
+        to_dt = now_utc
+        to_date_str = now_utc.date().isoformat()
 
     with session_scope() as db_session:
         total_users = db_session.query(User).count()
@@ -563,14 +559,14 @@ def admin_member_stats():
 # ─── Activity helpers ─────────────────────────────────────────────────────────
 
 def _parse_az_date(date_str: str | None, *, end_of_day: bool = False) -> datetime | None:
-    """Parse a YYYY-MM-DD string in AZ time and return a naive UTC datetime."""
+    """Parse a YYYY-MM-DD string as UTC midnight and return a naive UTC datetime."""
     if not date_str:
         return None
     try:
         dt = datetime.fromisoformat(date_str)
         if end_of_day:
             dt = dt.replace(hour=23, minute=59, second=59)
-        return dt.replace(tzinfo=AZ_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
     except ValueError:
         return None
 
@@ -1140,12 +1136,12 @@ def admin_gold_guide_stats():
     to_dt = None
     if from_date_str:
         try:
-            from_dt = datetime.strptime(from_date_str, "%Y-%m-%d").replace(tzinfo=AZ_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+            from_dt = datetime.strptime(from_date_str, "%Y-%m-%d")
         except ValueError:
             return jsonify({"error": "Invalid from_date, expected YYYY-MM-DD"}), 400
     if to_date_str:
         try:
-            to_dt = (datetime.strptime(to_date_str, "%Y-%m-%d") + timedelta(days=1)).replace(tzinfo=AZ_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+            to_dt = datetime.strptime(to_date_str, "%Y-%m-%d") + timedelta(days=1)
         except ValueError:
             return jsonify({"error": "Invalid to_date, expected YYYY-MM-DD"}), 400
 
