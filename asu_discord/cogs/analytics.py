@@ -83,6 +83,13 @@ class AnalyticsCog(commands.Cog):
 
         loop = asyncio.get_running_loop()
 
+        # Resolve parent channel for threads
+        parent_channel_id: str | None = None
+        parent_channel_name: str | None = None
+        if isinstance(message.channel, discord.Thread):
+            parent_channel_id = str(message.channel.parent_id) if message.channel.parent_id else None
+            parent_channel_name = message.channel.parent.name if message.channel.parent else None
+
         # Persist to message_logs
         await loop.run_in_executor(
             None,
@@ -94,6 +101,8 @@ class AnalyticsCog(commands.Cog):
             str(message.author.id),
             message.created_at.replace(tzinfo=None),
             message.content or None,
+            parent_channel_id,
+            parent_channel_name,
         )
 
         # Gold Guide contribution in a QnA thread
@@ -115,6 +124,8 @@ class AnalyticsCog(commands.Cog):
         discord_user_id: str,
         sent_at: datetime,
         content: str | None,
+        parent_channel_id: str | None = None,
+        parent_channel_name: str | None = None,
     ) -> None:
         try:
             with session_scope() as db:
@@ -129,6 +140,8 @@ class AnalyticsCog(commands.Cog):
                         message_id=message_id,
                         channel_id=channel_id,
                         channel_name=channel_name,
+                        parent_channel_id=parent_channel_id,
+                        parent_channel_name=parent_channel_name,
                         guild_id=guild_id,
                         discord_user_id=discord_user_id,
                         sent_at=sent_at,
@@ -803,6 +816,11 @@ class AnalyticsCog(commands.Cog):
 
         for ch in channels:
             channel_id = str(ch.id)
+            bf_parent_id: str | None = None
+            bf_parent_name: str | None = None
+            if isinstance(ch, discord.Thread):
+                bf_parent_id = str(ch.parent_id) if ch.parent_id else None
+                bf_parent_name = ch.parent.name if ch.parent else None
 
             with session_scope() as db:
                 row = (
@@ -844,6 +862,8 @@ class AnalyticsCog(commands.Cog):
                             str(m.author.id),
                             m.created_at.replace(tzinfo=None),
                             m.content or None,
+                            bf_parent_id,
+                            bf_parent_name,
                         )
                         for m in non_bot
                     ]
@@ -904,7 +924,10 @@ class AnalyticsCog(commands.Cog):
                 without_content = {r.message_id: r for r in existing_rows if r.content is None}
 
                 new_rows = []
-                for mid, cid, cname, gid, uid, ts, content in batch:
+                for row_data in batch:
+                    mid, cid, cname, gid, uid, ts, content = row_data[:7]
+                    parent_cid = row_data[7] if len(row_data) > 7 else None
+                    parent_cname = row_data[8] if len(row_data) > 8 else None
                     if mid in with_content:
                         continue
                     if mid in without_content:
@@ -916,6 +939,8 @@ class AnalyticsCog(commands.Cog):
                             message_id=mid,
                             channel_id=cid,
                             channel_name=cname,
+                            parent_channel_id=parent_cid,
+                            parent_channel_name=parent_cname,
                             guild_id=gid,
                             discord_user_id=uid,
                             sent_at=ts,

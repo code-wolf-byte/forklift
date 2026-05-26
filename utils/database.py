@@ -220,6 +220,8 @@ class MessageLog(Base):
     message_id = Column(String(64), unique=True, nullable=False, index=True)
     channel_id = Column(String(64), nullable=False, index=True)
     channel_name = Column(String(255), nullable=True)
+    parent_channel_id = Column(String(64), nullable=True, index=True)
+    parent_channel_name = Column(String(255), nullable=True)
     guild_id = Column(String(64), nullable=False, index=True)
     discord_user_id = Column(String(64), nullable=False, index=True)
     content = Column(Text, nullable=True)
@@ -475,6 +477,14 @@ def _ensure_message_log_columns() -> None:
     if "content" not in columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE message_logs ADD COLUMN content TEXT"))
+
+    if "parent_channel_id" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE message_logs ADD COLUMN parent_channel_id VARCHAR(64)"))
+
+    if "parent_channel_name" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE message_logs ADD COLUMN parent_channel_name VARCHAR(255)"))
 
 
 def _ensure_cron_job_config_columns() -> None:

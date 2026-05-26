@@ -1271,6 +1271,8 @@ def admin_analytics():
         ch_q = db_session.query(
             MessageLog.channel_id,
             MessageLog.channel_name,
+            MessageLog.parent_channel_id,
+            MessageLog.parent_channel_name,
             func.count(MessageLog.id).label("cnt"),
         )
         if from_dt:
@@ -1278,15 +1280,58 @@ def admin_analytics():
         if to_dt:
             ch_q = ch_q.filter(MessageLog.sent_at <= to_dt)
         ch_rows = (
-            ch_q.group_by(MessageLog.channel_id, MessageLog.channel_name)
+            ch_q.group_by(
+                MessageLog.channel_id,
+                MessageLog.channel_name,
+                MessageLog.parent_channel_id,
+                MessageLog.parent_channel_name,
+            )
             .order_by(func.count(MessageLog.id).desc())
-            .limit(25)
             .all()
         )
-        channels = [
-            {"rank": i + 1, "channel_id": cid, "channel_name": cname or cid, "messages": cnt}
-            for i, (cid, cname, cnt) in enumerate(ch_rows)
-        ]
+
+        # Group threads under their parent channel
+        ch_parent_map: dict[str, dict] = {}  # parent_channel_id -> aggregated data
+        ch_standalone: dict[str, dict] = {}  # channel_id -> data for channels without parent
+        for cid, cname, parent_cid, parent_cname, cnt in ch_rows:
+            if parent_cid:
+                if parent_cid not in ch_parent_map:
+                    ch_parent_map[parent_cid] = {
+                        "channel_id": parent_cid,
+                        "channel_name": parent_cname or parent_cid,
+                        "messages": 0,
+                        "threads": [],
+                    }
+                ch_parent_map[parent_cid]["messages"] += cnt
+                ch_parent_map[parent_cid]["threads"].append({
+                    "channel_id": cid,
+                    "channel_name": cname or cid,
+                    "messages": cnt,
+                })
+            else:
+                if cid not in ch_standalone:
+                    ch_standalone[cid] = {
+                        "channel_id": cid,
+                        "channel_name": cname or cid,
+                        "messages": cnt,
+                        "threads": [],
+                    }
+                else:
+                    ch_standalone[cid]["messages"] += cnt
+
+        # Merge parent_map into standalone (parent may also have direct messages)
+        for parent_cid, parent_data in ch_parent_map.items():
+            if parent_cid in ch_standalone:
+                ch_standalone[parent_cid]["messages"] += parent_data["messages"]
+                ch_standalone[parent_cid]["threads"].extend(parent_data["threads"])
+            else:
+                ch_standalone[parent_cid] = parent_data
+
+        for ch_data in ch_standalone.values():
+            ch_data["threads"].sort(key=lambda x: -x["messages"])
+
+        all_channels_sorted = sorted(ch_standalone.values(), key=lambda x: -x["messages"])[:25]
+        channels = [{"rank": i + 1, **ch} for i, ch in enumerate(all_channels_sorted)]
 
         # ── Demographics ───────────────────────────────────────────────────────
         demo_q = (
@@ -1490,6 +1535,13 @@ def admin_analytics():
                 {
                     **ch,
                     "voice_seconds": voice_by_channel.get(ch["channel_id"], {}).get("voice_seconds"),
+                    "threads": [
+                        {
+                            **t,
+                            "voice_seconds": voice_by_channel.get(t["channel_id"], {}).get("voice_seconds"),
+                        }
+                        for t in ch.get("threads", [])
+                    ],
                 }
                 for ch in channels
             ],

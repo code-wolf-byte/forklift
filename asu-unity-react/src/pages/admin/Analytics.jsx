@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -127,6 +127,16 @@ export default function Analytics() {
   }));
   const [sfStatus, setSfStatus] = useState(null);
   const [sfRefreshing, setSfRefreshing] = useState(false);
+  const [expandedChannels, setExpandedChannels] = useState(new Set());
+
+  const toggleChannel = (channelId) => {
+    setExpandedChannels((prev) => {
+      const next = new Set(prev);
+      if (next.has(channelId)) next.delete(channelId);
+      else next.add(channelId);
+      return next;
+    });
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -481,8 +491,8 @@ export default function Analytics() {
       <SectionHeader
         title="Channel Engagement"
         icon="fa-hashtag"
-        subtitle="Top 25 channels by message volume for the period"
-        tooltip="Ranks channels by message count. Voice Activity shows accumulated voice time in the same channel during the period — only applicable to voice channels."
+        subtitle="Top 25 channels by message volume — click channels with threads to expand"
+        tooltip="Ranks channels by message count. Channels that have threads show a thread count badge and expand on click to reveal individual thread stats. Voice Activity shows accumulated voice time — only applicable to voice channels."
       />
       {channels.length > 0 ? (
         <Card className="mb-6">
@@ -500,26 +510,75 @@ export default function Analytics() {
                 </tr>
               </thead>
               <tbody>
-                {channels.map((ch) => (
-                  <tr
-                    key={ch.channel_id}
-                    className="border-b last:border-0 hover:bg-muted/30 transition-colors"
-                  >
-                    <td className="px-4 py-2 text-muted-foreground tabular-nums">{ch.rank}</td>
-                    <td className="px-4 py-2 font-medium">
-                      <i className="fas fa-hashtag text-xs mr-1.5 text-muted-foreground" />
-                      {ch.channel_name}
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums font-semibold">
-                      {ch.messages.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums">
-                      {ch.voice_seconds != null
-                        ? `${(ch.voice_seconds / 3600).toFixed(1)}h`
-                        : <NotTracked />}
-                    </td>
-                  </tr>
-                ))}
+                {channels.map((ch) => {
+                  const hasThreads = ch.threads && ch.threads.length > 0;
+                  const isExpanded = expandedChannels.has(ch.channel_id);
+                  return (
+                    <React.Fragment key={ch.channel_id}>
+                      <tr
+                        className={`border-b transition-colors ${hasThreads ? "cursor-pointer hover:bg-muted/40" : "hover:bg-muted/30"}`}
+                        onClick={hasThreads ? () => toggleChannel(ch.channel_id) : undefined}
+                      >
+                        <td className="px-4 py-2 text-muted-foreground tabular-nums">{ch.rank}</td>
+                        <td className="px-4 py-2 font-medium">
+                          {hasThreads ? (
+                            <span className="flex items-center gap-1.5">
+                              <i
+                                className={`fas fa-chevron-right text-[10px] text-muted-foreground transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
+                              />
+                              <i className="fas fa-hashtag text-xs text-muted-foreground" />
+                              {ch.channel_name}
+                              <span className="ml-1.5 text-[10px] font-normal text-muted-foreground/60 bg-muted px-1.5 py-0.5 rounded-full">
+                                {ch.threads.length} thread{ch.threads.length !== 1 ? "s" : ""}
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1.5">
+                              <i className="fas fa-hashtag text-xs text-muted-foreground" />
+                              {ch.channel_name}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums font-semibold">
+                          {ch.messages.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums">
+                          {ch.voice_seconds != null ? (
+                            `${(ch.voice_seconds / 3600).toFixed(1)}h`
+                          ) : (
+                            <NotTracked />
+                          )}
+                        </td>
+                      </tr>
+                      {hasThreads && isExpanded &&
+                        ch.threads.map((t) => (
+                          <tr
+                            key={t.channel_id}
+                            className="border-b last:border-0 bg-muted/20 hover:bg-muted/40 transition-colors"
+                          >
+                            <td className="px-4 py-1.5 text-muted-foreground/50 tabular-nums text-xs" />
+                            <td className="py-1.5 pr-4 font-normal text-muted-foreground">
+                              <span className="flex items-center gap-1.5 pl-8">
+                                <i className="fas fa-level-right text-[10px] text-muted-foreground/40" />
+                                <i className="fas fa-comment-alt text-[10px] text-muted-foreground/60" />
+                                <span className="text-xs">{t.channel_name}</span>
+                              </span>
+                            </td>
+                            <td className="px-4 py-1.5 text-right tabular-nums text-xs font-medium text-muted-foreground">
+                              {t.messages.toLocaleString()}
+                            </td>
+                            <td className="px-4 py-1.5 text-right tabular-nums text-xs text-muted-foreground">
+                              {t.voice_seconds != null ? (
+                                `${(t.voice_seconds / 3600).toFixed(1)}h`
+                              ) : (
+                                <NotTracked />
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </CardContent>
