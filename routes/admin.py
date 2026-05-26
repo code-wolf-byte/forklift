@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import logging
@@ -968,6 +969,32 @@ def admin_message_backfill_start():
         return jsonify({"status": "already_running"})
 
     loop.call_soon_threadsafe(cog.start_backfill)
+    return jsonify({"status": "started"})
+
+
+@admin_bp.route("/api/admin/message-logs/sync-thread-parents", methods=["POST"])
+@require_full_admin
+def admin_sync_thread_parents():
+    """Populate parent_channel_id on existing message_log rows that are threads."""
+    from asu_discord.shared import get_running_bot, get_running_loop
+    from asu_discord.cogs.analytics import AnalyticsCog
+
+    bot = get_running_bot()
+    if bot is None:
+        return jsonify({"error": "Discord bot is not running"}), 503
+
+    cog = bot.cogs.get("AnalyticsCog")
+    if cog is None or not isinstance(cog, AnalyticsCog):
+        return jsonify({"error": "AnalyticsCog not loaded"}), 503
+
+    loop = get_running_loop()
+    if loop is None:
+        return jsonify({"error": "Bot event loop unavailable"}), 503
+
+    if cog._thread_parent_sync_running:
+        return jsonify({"status": "already_running"})
+
+    asyncio.run_coroutine_threadsafe(cog._sync_thread_parents(), loop)
     return jsonify({"status": "started"})
 
 

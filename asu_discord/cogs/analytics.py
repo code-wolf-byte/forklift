@@ -64,7 +64,68 @@ class AnalyticsCog(commands.Cog):
         # These run as background tasks — they're slow but fully idempotent.
         asyncio.ensure_future(self._backfill_forum_posts())
         asyncio.ensure_future(self._backfill_moderation_events())
+        asyncio.ensure_future(self._sync_thread_parents())
         self._maybe_start_backfill()  # message backfill (also a background task)
+
+    _thread_parent_sync_running: bool = False
+
+    async def _sync_thread_parents(self) -> None:
+        """Populate parent_channel_id on message_log rows that belong to threads."""
+        if self._thread_parent_sync_running:
+            return
+        self._thread_parent_sync_running = True
+        try:
+            guild = self.bot.get_guild(self.guild_id)
+            if guild is None:
+                return
+
+            thread_parents: dict[str, tuple[str, str | None]] = {}
+
+            for ch in guild.channels:
+                if isinstance(ch, (discord.TextChannel, discord.ForumChannel)):
+                    for thread in ch.threads:
+                        thread_parents[str(thread.id)] = (str(ch.id), ch.name)
+                    try:
+                        async for thread in ch.archived_threads(limit=None):
+                            if str(thread.id) not in thread_parents:
+                                thread_parents[str(thread.id)] = (str(ch.id), ch.name)
+                        await asyncio.sleep(_PAGE_SLEEP_S)
+                    except discord.Forbidden:
+                        pass
+                    except Exception:
+                        logger.exception(
+                            "AnalyticsCog: failed to list archived threads in #%s for parent sync",
+                            ch.name,
+                        )
+
+            if not thread_parents:
+                return
+
+            def _do_update() -> int:
+                updated = 0
+                with session_scope() as db:
+                    for thread_id, (parent_id, parent_name) in thread_parents.items():
+                        n = (
+                            db.query(MessageLog)
+                            .filter(
+                                MessageLog.channel_id == thread_id,
+                                MessageLog.parent_channel_id.is_(None),
+                            )
+                            .update(
+                                {
+                                    MessageLog.parent_channel_id: parent_id,
+                                    MessageLog.parent_channel_name: parent_name,
+                                },
+                                synchronize_session=False,
+                            )
+                        )
+                        updated += n
+                return updated
+
+            updated = await asyncio.get_running_loop().run_in_executor(None, _do_update)
+            logger.info("AnalyticsCog: synced parent_channel_id for %d message rows", updated)
+        finally:
+            self._thread_parent_sync_running = False
 
     # ═════════════════════════════════════════════════════════════════════════
     # MESSAGE LOGGING  (previously MessageLoggerCog)
