@@ -1794,6 +1794,89 @@ def admin_salesforce_status():
     )
 
 
+# ─── Purge Unregistered Roles ─────────────────────────────────────────────────
+
+_purge_unregistered_lock = threading.Lock()
+_purge_unregistered_running = False
+_purge_unregistered_last: dict = {
+    "started_at": None,
+    "finished_at": None,
+    "stripped": 0,
+    "errors": 0,
+    "error": None,
+}
+
+
+def _run_purge_unregistered() -> None:
+    """Background thread: strip managed roles from guild members not in the DB."""
+    global _purge_unregistered_running
+
+    try:
+        from asu_discord.shared import get_running_bot, get_running_loop
+
+        bot = get_running_bot()
+        loop = get_running_loop()
+        if bot is None or loop is None or loop.is_closed():
+            raise RuntimeError("Discord bot is not running")
+
+        cog = bot.get_cog("VerificationCog")
+        if cog is None:
+            raise RuntimeError("VerificationCog is not loaded")
+
+        with session_scope() as db:
+            registered_ids = {
+                row[0]
+                for row in db.query(User.discord_user_id)
+                .filter(User.discord_user_id.isnot(None))
+                .all()
+            }
+
+        future = asyncio.run_coroutine_threadsafe(
+            cog.strip_unregistered_members(registered_ids),
+            loop,
+        )
+        stripped, errors = future.result(timeout=300)
+        _purge_unregistered_last["stripped"] = stripped
+        _purge_unregistered_last["errors"] = errors
+        _purge_unregistered_last["finished_at"] = datetime.utcnow().isoformat()
+    except Exception as exc:
+        _purge_unregistered_last["error"] = str(exc)
+        _purge_unregistered_last["finished_at"] = datetime.utcnow().isoformat()
+        logger.exception("Purge unregistered roles failed")
+    finally:
+        _purge_unregistered_running = False
+
+
+@admin_bp.route("/api/admin/purge-unregistered-roles", methods=["POST"])
+@require_full_admin
+def admin_purge_unregistered_roles():
+    """Trigger background removal of verified and managed roles from non-registered guild members."""
+    global _purge_unregistered_running
+
+    with _purge_unregistered_lock:
+        if _purge_unregistered_running:
+            return jsonify({"status": "already_running", "last": _purge_unregistered_last})
+        _purge_unregistered_running = True
+        _purge_unregistered_last["started_at"] = datetime.utcnow().isoformat()
+        _purge_unregistered_last["finished_at"] = None
+        _purge_unregistered_last["error"] = None
+        _purge_unregistered_last["errors"] = 0
+        _purge_unregistered_last["stripped"] = 0
+
+    threading.Thread(target=_run_purge_unregistered, daemon=True).start()
+    return jsonify({"status": "started"})
+
+
+@admin_bp.route("/api/admin/purge-unregistered-roles/status", methods=["GET"])
+@require_full_admin
+def admin_purge_unregistered_status():
+    """Return current status of the purge-unregistered-roles operation."""
+    return jsonify({
+        "running": _purge_unregistered_running,
+        "last": _purge_unregistered_last,
+    })
+
+
 # ─── Role Exceptions ──────────────────────────────────────────────────────────
 
 def _serialize_exception(exc: UserRoleException) -> dict:

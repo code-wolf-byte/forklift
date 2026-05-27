@@ -786,6 +786,49 @@ class VerificationCog(commands.Cog):
             ", ".join(sorted(effective_names)) if effective_names else "none",
         )
 
+    async def strip_unregistered_members(
+        self, registered_discord_ids: set[str]
+    ) -> tuple[int, int]:
+        """Remove verified and all ROLE_ID_MAP roles from guild members not in the DB.
+
+        Returns (stripped_count, error_count).
+        """
+        await self.bot.wait_until_ready()
+        guild = await self._resolve_guild()
+
+        verified_role = self._get_verified_role(guild)
+        managed_role_ids = set(ROLE_ID_MAP.values())
+        if verified_role is not None:
+            managed_role_ids.add(verified_role.id)
+
+        stripped = 0
+        errors = 0
+        for member in guild.members:
+            if str(member.id) in registered_discord_ids:
+                continue
+            roles_to_remove = [r for r in member.roles if r.id in managed_role_ids]
+            if not roles_to_remove:
+                continue
+            try:
+                await member.remove_roles(
+                    *roles_to_remove,
+                    reason="Admin: purge roles from non-registered member",
+                )
+                stripped += 1
+                logger.info("Stripped roles from non-registered member %s", member.id)
+            except discord.HTTPException as exc:
+                logger.warning(
+                    "Failed to strip roles from non-registered member %s: %s",
+                    member.id,
+                    exc,
+                )
+                errors += 1
+
+        logger.info(
+            "strip_unregistered_members complete: stripped=%d errors=%d", stripped, errors
+        )
+        return stripped, errors
+
     @slash_command(
         **_moderation_command_kwargs(
             "unverify", "Remove the verification role from a member."
