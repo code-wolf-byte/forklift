@@ -215,6 +215,16 @@ def admin_stats():
     )
 
 
+@admin_bp.route("/api/admin/live-member-counts")
+@require_admin
+def admin_live_member_counts():
+    from asu_discord.api import get_live_member_counts
+    counts = get_live_member_counts()
+    if counts is None:
+        return jsonify({"error": "Bot or guild unavailable"}), 503
+    return jsonify(counts)
+
+
 @admin_bp.route("/api/admin/users")
 @require_admin
 def admin_users():

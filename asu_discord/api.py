@@ -342,6 +342,38 @@ def check_member_has_any_role(discord_user_id: str, role_ids: list[str]) -> bool
     return bool(member_role_ids & set(role_ids))
 
 
+def get_live_member_counts() -> dict | None:
+    """Return live verified/unverified counts from the bot's guild cache.
+
+    Returns None if the bot or guild is unavailable.
+    """
+    bot = get_running_bot()
+    if bot is None:
+        return None
+    cfg = _config()
+    guild = bot.get_guild(int(cfg.guild_id))
+    if guild is None:
+        return None
+
+    verified_role_id = str(cfg.verified_role_id) if cfg.verified_role_id else None
+    unverified_role_id = str(cfg.unverified_role_id) if cfg.unverified_role_id else None
+
+    total = 0
+    verified = 0
+    unverified = 0
+    for member in guild.members:
+        if member.bot:
+            continue
+        total += 1
+        role_ids = {str(r.id) for r in member.roles}
+        if verified_role_id and verified_role_id in role_ids:
+            verified += 1
+        elif unverified_role_id and unverified_role_id in role_ids:
+            unverified += 1
+
+    return {"total": total, "verified": verified, "unverified": unverified}
+
+
 def _safe_json(response: requests.Response) -> Dict[str, Any]:
     try:
         data = response.json()
@@ -363,6 +395,7 @@ __all__ = [
     "exchange_code_for_token",
     "fetch_user_profile",
     "get_guild_channels",
+    "get_live_member_counts",
     "get_member_info",
     "refresh_roles_from_profile",
     "remove_role_from_member",

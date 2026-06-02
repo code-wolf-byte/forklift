@@ -168,7 +168,7 @@ export default function Analytics() {
   }, [applied]);
 
   useEffect(() => {
-    fetch("/api/admin/stats")
+    fetch("/api/admin/live-member-counts")
       .then((r) => r.json())
       .then((d) => setLiveStats(d))
       .catch(() => {});
@@ -286,14 +286,14 @@ export default function Analytics() {
       <div className="grid grid-cols-2 gap-3 mb-5">
         <StatCard
           label="Verified Members"
-          value={liveStats ? liveStats.verified_count : undefined}
+          value={liveStats ? liveStats.verified : undefined}
           icon="fa-user-check"
           color="#10b981"
-          tooltip="Current number of verified members in the Discord server. Live — not affected by the date filter."
+          tooltip="Current number of verified members in the Discord server. Live from the bot cache — not affected by the date filter."
         />
         <StatCard
           label="Unverified Members"
-          value={liveStats ? liveStats.total_users - liveStats.verified_count : undefined}
+          value={liveStats ? liveStats.unverified : undefined}
           icon="fa-user-clock"
           color="#f59e0b"
           tooltip="Current number of members who have joined but not yet completed verification. Live — not affected by the date filter."
