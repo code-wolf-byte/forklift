@@ -646,35 +646,25 @@ export default function Analytics() {
         subtitle="Passive engagement — requires Discord Insights access"
         tooltip="Readership tracks members who read channels without posting. Discord does not expose this data via bot API — it requires access to the server's Discord Insights dashboard."
       />
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <StatCard
-          label="Monthly Visitors"
-          value={null}
-          icon="fa-user-friends"
-          tooltip="Unique members who viewed any channel in the past 30 days. Requires Discord Insights — not accessible via bot API."
-        />
-        <StatCard
-          label="Monthly Readers / Channel"
-          value={null}
-          icon="fa-book-open"
-          color="#3b82f6"
-          tooltip="Average number of unique readers per channel per month. Requires Discord Insights."
-        />
-        <StatCard
-          label="Weekly Readers / Channel"
-          value={null}
-          icon="fa-calendar-week"
-          color="#10b981"
-          tooltip="Average number of unique readers per channel per week. Requires Discord Insights."
-        />
-        <StatCard
-          label="Channel Followers"
-          value={null}
-          icon="fa-bell"
-          color="#f59e0b"
-          tooltip="Members who follow individual announcement channels to receive cross-server notifications. Requires Discord Insights."
-        />
-      </div>
+      <Card className="mb-6">
+        <CardContent className="py-5 px-5">
+          <p className="text-sm text-muted-foreground mb-3">
+            Readership data is not accessible via the bot API. View it directly in the Discord Insights dashboard.
+            {" "}
+            <strong>Note:</strong> Discord Insights only retains the last 120 days of data.
+          </p>
+          <a
+            href={`https://discord.com/developers/servers/1187144343400751234/analytics/engagement?interval=2${applied.from ? `&start=${applied.from}` : ""}&end=${applied.to || new Date().toISOString().slice(0, 10)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 text-sm font-medium text-blue-500 hover:text-blue-400 hover:underline"
+          >
+            <i className="fab fa-discord" />
+            Open Discord Insights — Engagement
+            <i className="fas fa-external-link-alt text-xs" />
+          </a>
+        </CardContent>
+      </Card>
 
       {/* ════════════════════════════════════════════════════════════════════════
           Demographics
