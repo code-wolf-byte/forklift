@@ -125,6 +125,7 @@ export default function Analytics() {
     from: getUrlParam("from_date", ""),
     to: getUrlParam("to_date", ""),
   }));
+  const [liveStats, setLiveStats] = useState(null);
   const [sfStatus, setSfStatus] = useState(null);
   const [sfRefreshing, setSfRefreshing] = useState(false);
   const [expandedChannels, setExpandedChannels] = useState(new Set());
@@ -165,6 +166,13 @@ export default function Analytics() {
       })
       .catch(() => setLoading(false));
   }, [applied]);
+
+  useEffect(() => {
+    fetch("/api/admin/stats")
+      .then((r) => r.json())
+      .then((d) => setLiveStats(d))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch("/api/admin/salesforce/status")
@@ -270,9 +278,27 @@ export default function Analytics() {
   return (
     <>
       <h2 className="text-2xl font-bold mb-1">Analytics</h2>
-      <p className="text-sm text-muted-foreground mb-5">
+      <p className="text-sm text-muted-foreground mb-4">
         Comprehensive server metrics across engagement, demographics, programs, and forums.
       </p>
+
+      {/* ── Live server membership ── */}
+      <div className="grid grid-cols-2 gap-3 mb-5">
+        <StatCard
+          label="Verified Members"
+          value={liveStats ? liveStats.verified_count : undefined}
+          icon="fa-user-check"
+          color="#10b981"
+          tooltip="Current number of verified members in the Discord server. Live — not affected by the date filter."
+        />
+        <StatCard
+          label="Unverified Members"
+          value={liveStats ? liveStats.total_users - liveStats.verified_count : undefined}
+          icon="fa-user-clock"
+          color="#f59e0b"
+          tooltip="Current number of members who have joined but not yet completed verification. Live — not affected by the date filter."
+        />
+      </div>
 
       {/* ── Date filter ── */}
       <Card className="mb-6">
