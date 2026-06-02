@@ -1454,13 +1454,19 @@ def admin_analytics():
                 UserSalesforceProfile.country,
                 func.count(UserSalesforceProfile.id).label("cnt"),
             )
+            .join(User, User.asurite_id == UserSalesforceProfile.asurite_id)
             .filter(
                 UserSalesforceProfile.is_international == True,  # noqa: E712
                 UserSalesforceProfile.fetch_error.is_(None),
+                User.verified == True,  # noqa: E712
             )
             .group_by(UserSalesforceProfile.country)
             .order_by(func.count(UserSalesforceProfile.id).desc())
         )
+        if from_dt:
+            country_q = country_q.filter(User.verified_at >= from_dt)
+        if to_dt:
+            country_q = country_q.filter(User.verified_at <= to_dt)
         country_rows = country_q.all()
         international_country = (
             [{"country": c or "Unknown", "count": cnt} for c, cnt in country_rows]
