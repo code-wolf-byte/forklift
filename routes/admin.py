@@ -680,7 +680,7 @@ def _chart_activity(date_col):
     return jsonify(_chart_data(dates, from_dt, to_dt))
 
 
-# ─── Verifications chart ──────────────────────────────────────────────────────
+# ─── Verifications ────────────────────────────────────────────────────────────
 
 @admin_bp.route("/api/admin/verifications/chart")
 @require_admin
@@ -690,10 +690,17 @@ def admin_verifications_chart():
     with session_scope() as db_session:
         dates = [
             u.verified_at
-            for u in _activity_query(db_session, User.verified_at, from_dt, to_dt).all()
-            if u.verified
+            for u in _activity_query(db_session, User.verified_at, from_dt, to_dt)
+            .filter(User.verified == True)  # noqa: E712
+            .all()
         ]
     return jsonify(_chart_data(dates, from_dt, to_dt))
+
+
+@admin_bp.route("/api/admin/verifications")
+@require_admin
+def admin_verifications():
+    return _paginated_activity(User.verified_at, "verified_at")
 
 
 # ─── Server joins ─────────────────────────────────────────────────────────────

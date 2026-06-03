@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getUrlParam, replaceUrlParams } from "@/utils/adminUrl";
-import ActivityChart from "./ActivityChart.jsx";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const monthStartISO = () => {
@@ -127,7 +126,6 @@ export default function Analytics() {
     to: getUrlParam("to_date", ""),
   }));
   const [liveStats, setLiveStats] = useState(null);
-  const [verifChart, setVerifChart] = useState(null);
   const [sfStatus, setSfStatus] = useState(null);
   const [sfRefreshing, setSfRefreshing] = useState(false);
   const [expandedChannels, setExpandedChannels] = useState(new Set());
@@ -167,10 +165,6 @@ export default function Analytics() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-    fetch(`/api/admin/verifications/chart?${params}`)
-      .then((r) => r.json())
-      .then(setVerifChart)
-      .catch(() => {});
   }, [applied]);
 
   useEffect(() => {
@@ -457,6 +451,10 @@ export default function Analytics() {
           <SubLabel tooltip="All counts are based on joined_at from the discord_members table — the date the member joined the server, not when they verified.">
             Onboarding
           </SubLabel>
+          <p className="text-[11px] text-amber-600 dark:text-amber-400 mb-2">
+            <i className="fas fa-exclamation-triangle mr-1" />
+            Join data is only recorded since May 2026 and is not historically accurate for earlier dates.
+          </p>
           <div className="grid grid-cols-2 gap-3">
             <StatCard
               label="Total Joins"
@@ -530,19 +528,6 @@ export default function Analytics() {
           )}
         </div>
       </div>
-
-      {/* Verifications over time chart */}
-      <Card className="mb-6">
-        <CardContent className="p-4">
-          <div className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted-foreground mb-3">
-            Verifications Over Time
-          </div>
-          <ActivityChart
-            datasets={[{ data: verifChart || [], label: "Verifications", color: "#10b981" }]}
-            isDark={false}
-          />
-        </CardContent>
-      </Card>
 
       {/* ════════════════════════════════════════════════════════════════════════
           Channel Engagement
