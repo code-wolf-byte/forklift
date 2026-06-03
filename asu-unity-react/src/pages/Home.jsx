@@ -1,41 +1,4 @@
-import heroImage from "../assets/devil2devil-hero.jpeg";
 import profileGif from "../assets/devil2devil-profile.gif";
-
-// ─── Hero ─────────────────────────────────────────────────────────────────────
-
-function HeroSection() {
-  return (
-    <div className="uds-hero-lg">
-      <div className="hero-overlay" />
-      <img
-        className="hero"
-        src={heroImage}
-        alt=""
-        loading="lazy"
-        decoding="async"
-      />
-      <h1>
-        <span className="highlight-gold">Devil2Devil</span>
-      </h1>
-      <div className="content hero-cta">
-        <p className="text-white">
-          Find new friends, join communities and make connections in ASU's
-          Devil2Devil Discord server for admitted students.
-        </p>
-        <div className="d-flex flex-wrap gap-3 align-items-center mt-4 hero-cta-buttons">
-          <a
-            className="btn btn-maroon text-white"
-            href="https://devil2devil.asu.edu/"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Learn more
-          </a>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ─── Verification step card ────────────────────────────────────────────────────
 
@@ -320,7 +283,6 @@ export default function Home({ status }) {
 
   return (
     <>
-      <HeroSection />
       <VerificationSection
         casComplete={cas_complete}
         discordComplete={discord_complete}
