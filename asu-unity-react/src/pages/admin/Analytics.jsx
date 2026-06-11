@@ -63,9 +63,9 @@ function StatCard({ label, value, icon, color = "#8c1d40", note, tooltip }) {
   );
 }
 
-function SectionHeader({ title, icon, subtitle, tooltip }) {
-  return (
-    <div className="flex items-center gap-2.5 mb-3 mt-7 pb-2 border-b">
+function SectionHeader({ title, icon, subtitle, tooltip, collapsible, collapsed, onToggle }) {
+  const content = (
+    <>
       {icon && (
         <div
           className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
@@ -74,14 +74,37 @@ function SectionHeader({ title, icon, subtitle, tooltip }) {
           <i className={`fas ${icon} fa-sm`} />
         </div>
       )}
-      <div>
+      <div className="min-w-0">
         <h3 className="text-base font-bold mb-0 flex items-center">
           {title}
           {tooltip && <Tooltip text={tooltip} />}
         </h3>
         {subtitle && <p className="text-xs text-muted-foreground mb-0">{subtitle}</p>}
       </div>
-    </div>
+      {collapsible && (
+        <i
+          className={`fas fa-chevron-down fa-sm text-muted-foreground ml-auto shrink-0 transition-transform ${
+            collapsed ? "-rotate-90" : ""
+          }`}
+        />
+      )}
+    </>
+  );
+
+  if (collapsible) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-center gap-2.5 mb-3 mt-7 pb-2 border-b text-left cursor-pointer bg-transparent border-x-0 border-t-0"
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2.5 mb-3 mt-7 pb-2 border-b">{content}</div>
   );
 }
 
@@ -128,30 +151,7 @@ export default function Analytics() {
   const [liveStats, setLiveStats] = useState(null);
   const [sfStatus, setSfStatus] = useState(null);
   const [sfRefreshing, setSfRefreshing] = useState(false);
-  const [expandedChannels, setExpandedChannels] = useState(new Set());
-  const [syncingThreads, setSyncingThreads] = useState(false);
-
-  const toggleChannel = (channelId) => {
-    setExpandedChannels((prev) => {
-      const next = new Set(prev);
-      if (next.has(channelId)) next.delete(channelId);
-      else next.add(channelId);
-      return next;
-    });
-  };
-
-  const handleSyncThreadParents = () => {
-    setSyncingThreads(true);
-    fetch("/api/admin/message-logs/sync-thread-parents", { method: "POST" })
-      .then((r) => r.json())
-      .then(() => {
-        setTimeout(() => {
-          setApplied((prev) => ({ ...prev }));
-          setSyncingThreads(false);
-        }, 8000);
-      })
-      .catch(() => setSyncingThreads(false));
-  };
+  const [channelsCollapsed, setChannelsCollapsed] = useState(true);
 
   useEffect(() => {
     setLoading(true);
@@ -532,45 +532,16 @@ export default function Analytics() {
       {/* ════════════════════════════════════════════════════════════════════════
           Channel Engagement
       ════════════════════════════════════════════════════════════════════════ */}
-      <div className="flex items-start justify-between gap-2 mb-3 mt-7 pb-2 border-b">
-        <div className="flex items-center gap-2.5">
-          <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-            style={{ background: "#8c1d4018", color: "#8c1d40" }}
-          >
-            <i className="fas fa-hashtag fa-sm" />
-          </div>
-          <div>
-            <h3 className="text-base font-bold mb-0 flex items-center">
-              Channel Engagement
-              <Tooltip text="Ranks channels by message count. Channels that have threads show a thread count badge and expand on click to reveal individual thread stats. Voice Activity shows accumulated voice time — only applicable to voice channels." />
-            </h3>
-            <p className="text-xs text-muted-foreground mb-0">
-              Top 25 channels by message volume — click channels with threads to expand
-            </p>
-          </div>
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={handleSyncThreadParents}
-          disabled={syncingThreads}
-          className="shrink-0 mt-0.5"
-        >
-          {syncingThreads ? (
-            <>
-              <i className="fas fa-spinner fa-spin mr-1.5" />
-              Syncing…
-            </>
-          ) : (
-            <>
-              <i className="fas fa-code-branch mr-1.5" />
-              Sync Threads
-            </>
-          )}
-        </Button>
-      </div>
-      {channels.length > 0 ? (
+      <SectionHeader
+        title="Channel Engagement"
+        icon="fa-hashtag"
+        subtitle="Top 25 channels by message volume for the period"
+        tooltip="Ranks channels by message count. Voice Activity shows accumulated voice time in the same channel during the period — only applicable to voice channels."
+        collapsible
+        collapsed={channelsCollapsed}
+        onToggle={() => setChannelsCollapsed((c) => !c)}
+      />
+      {channelsCollapsed ? null : channels.length > 0 ? (
         <Card className="mb-6">
           <CardContent className="p-0">
             <table className="w-full text-sm">

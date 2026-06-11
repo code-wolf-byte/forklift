@@ -5,7 +5,7 @@ import threading
 from datetime import datetime
 from typing import Callable
 
-from flask import Flask, abort, jsonify, redirect, render_template, send_from_directory, session, url_for
+from flask import Flask, abort, jsonify, redirect, send_from_directory, session, url_for
 
 from cron import start_upload_scheduler
 from routes.admin import admin_bp
@@ -229,17 +229,19 @@ def verified():
 @app.route("/<path:path>")
 def index(path):
     react_index = os.path.join(REACT_BUILD_DIR, "index.html")
-    if os.path.exists(react_index):
-        # Serve static assets (JS, CSS, images) directly
-        if path and os.path.exists(os.path.join(REACT_BUILD_DIR, path)):
-            return send_from_directory(REACT_BUILD_DIR, path)
-        # SPA fallback — all other paths serve index.html
-        return send_from_directory(REACT_BUILD_DIR, "index.html")
-    # Dev fallback: no React build present, serve old Jinja template
-    if path:
-        abort(404)
-    context = _verification_context()
-    return render_template("index.html", **context)
+    if not os.path.exists(react_index):
+        abort(
+            503,
+            description=(
+                "React frontend build not found. Run `npm run build` in "
+                "asu-unity-react/ or set REACT_BUILD_DIR to the build output."
+            ),
+        )
+    # Serve static assets (JS, CSS, images) directly
+    if path and os.path.exists(os.path.join(REACT_BUILD_DIR, path)):
+        return send_from_directory(REACT_BUILD_DIR, path)
+    # SPA fallback — all other paths serve index.html
+    return send_from_directory(REACT_BUILD_DIR, "index.html")
 
 
 if __name__ == "__main__":
