@@ -96,7 +96,7 @@ function SectionHeader({ title, icon, subtitle, tooltip, collapsible, collapsed,
       <button
         type="button"
         onClick={onToggle}
-        className="w-full flex items-center gap-2.5 mb-3 mt-7 pb-2 border-b text-left cursor-pointer bg-transparent border-x-0 border-t-0"
+        className="w-full flex items-center gap-2.5 mb-3 mt-7 pb-2 border-b text-left cursor-pointer bg-transparent border-x-0 border-t-0 text-inherit"
       >
         {content}
       </button>
@@ -152,6 +152,7 @@ export default function Analytics() {
   const [sfStatus, setSfStatus] = useState(null);
   const [sfRefreshing, setSfRefreshing] = useState(false);
   const [channelsCollapsed, setChannelsCollapsed] = useState(true);
+  const [demographicsCollapsed, setDemographicsCollapsed] = useState(true);
   const [expandedChannels, setExpandedChannels] = useState(new Set());
 
   useEffect(() => {
@@ -685,8 +686,11 @@ export default function Analytics() {
         icon="fa-chart-pie"
         subtitle="Role breakdown for verified members"
         tooltip="Shows how verified members are distributed across academic level, residency, campus, college, and country of origin. Roles are assigned during Salesforce sync at verification. Date filter applies to verified_at."
+        collapsible
+        collapsed={demographicsCollapsed}
+        onToggle={() => setDemographicsCollapsed((c) => !c)}
       />
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-4">
+      {demographicsCollapsed ? null : <><div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-4">
         {/* Student Role */}
         <Card>
           <CardContent className="p-4">
@@ -794,7 +798,7 @@ export default function Analytics() {
             </p>
           )}
         </CardContent>
-      </Card>
+      </Card></>}
 
       {/* ════════════════════════════════════════════════════════════════════════
           Moderation
