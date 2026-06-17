@@ -802,16 +802,10 @@ export default function Analytics() {
       <SectionHeader
         title="Moderation"
         icon="fa-shield-alt"
-        subtitle="Bans, unbans, and safety incidents"
-        tooltip="Tracks moderation actions taken in the server. Bans and unbans are recorded in the moderation_events table by the bot in real time and backfilled from the Discord audit log on startup."
+        subtitle="Bans, unbans, kicks, timeouts, and message deletions"
+        tooltip="Tracks moderation actions taken in the server. All events are recorded in the moderation_events table by the bot in real time and backfilled from the Discord audit log on startup."
       />
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3 mb-6">
-        <StatCard
-          label="Support Tickets"
-          value={moderation.support_tickets}
-          icon="fa-ticket-alt"
-          tooltip="Formal support tickets submitted via a moderation ticketing bot. Not currently tracked — requires integration with a ticket system."
-        />
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
         <StatCard
           label="Banned (all-time)"
           value={moderation.banned_users}
@@ -834,25 +828,25 @@ export default function Analytics() {
           tooltip="Members unbanned via the /whitelist command during the selected period. Recorded in moderation_events with event_type = 'unban'."
         />
         <StatCard
-          label="Inappropriate Speech"
-          value={moderation.inappropriate_speech_incidents}
-          icon="fa-exclamation-triangle"
+          label="Kicks (period)"
+          value={moderation.period_kicks ?? 0}
+          icon="fa-boot"
           color="#f59e0b"
-          tooltip="Messages flagged for inappropriate language by an automod or manual report. Not currently tracked."
+          tooltip="Members kicked from the server during the selected period. Detected via the Discord audit log when a member is removed by a moderator."
         />
         <StatCard
-          label="Harassment Incidents"
-          value={moderation.harassment_incidents}
-          icon="fa-user-slash"
+          label="Timeouts (period)"
+          value={moderation.period_timeouts ?? 0}
+          icon="fa-clock"
           color="#f59e0b"
-          tooltip="Reported harassment cases. Not currently tracked — would require a ticketing or report system."
+          tooltip="Members timed out by a moderator during the selected period. Detected when a member's timeout expiry is set via Discord."
         />
         <StatCard
-          label="Spam / Phishing"
-          value={moderation.spam_phishing_attempts}
-          icon="fa-fish"
+          label="Deleted Messages (period)"
+          value={moderation.period_message_deletes ?? 0}
+          icon="fa-trash-alt"
           color="#6b7280"
-          tooltip="Messages flagged as spam or phishing by automod. Not currently tracked."
+          tooltip="Messages deleted by a moderator during the selected period. Detected via the Discord audit log when a message is removed by someone other than the author."
         />
       </div>
 
