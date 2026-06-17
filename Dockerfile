@@ -13,7 +13,7 @@ COPY asu-unity-react/.npmrc ./
 # Install JS dependencies using a secret mount so the token is never stored in a layer.
 # Build with: docker build --secret id=npm_token,env=NPM_AUTH_TOKEN .
 RUN --mount=type=secret,id=npm_token \
-    NPM_AUTH_TOKEN=$(cat /run/secrets/npm_token) npm ci --legacy-peer-deps
+    NPM_AUTH_TOKEN=$(cat /run/secrets/npm_token) npm install --legacy-peer-deps
 
 # Copy the rest of the React source
 COPY asu-unity-react/ .
