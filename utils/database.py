@@ -305,7 +305,12 @@ class VoiceSession(Base):
 
 
 class ModerationEvent(Base):
-    """One row per moderation action recorded by AnalyticsCog (ban, unban)."""
+    """One row per moderation action recorded by AnalyticsCog.
+
+    event_type: "ban" | "unban" | "kick" | "timeout" | "timeout_remove" | "message_delete"
+    channel_id / message_id: set for "message_delete" events only.
+    extra_data: JSON string; "timeout_until" for timeouts, "content" for message_delete.
+    """
 
     __tablename__ = "moderation_events"
 
@@ -313,11 +318,14 @@ class ModerationEvent(Base):
     discord_user_id = Column(String(64), nullable=False, index=True)
     discord_username = Column(String(255), nullable=True)
     guild_id = Column(String(64), nullable=False, index=True)
-    event_type = Column(String(32), nullable=False, index=True)  # "ban" | "unban"
+    event_type = Column(String(32), nullable=False, index=True)
     reason = Column(Text, nullable=True)
     moderator_discord_id = Column(String(64), nullable=True)
     moderator_username = Column(String(255), nullable=True)
     occurred_at = Column(DateTime, nullable=False, index=True)   # naive UTC
+    channel_id = Column(String(64), nullable=True)               # message_delete only
+    message_id = Column(String(64), nullable=True)               # message_delete only
+    extra_data = Column(Text, nullable=True)                     # JSON
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
@@ -406,6 +414,7 @@ def init_db() -> None:
     _ensure_cron_job_config_columns()
     _ensure_message_log_columns()
     _ensure_qna_columns()
+    _ensure_moderation_event_columns()
     _seed_cron_job_config()
     _backfill_discord_members_from_users()
 
@@ -446,6 +455,23 @@ def _backfill_discord_members_from_users() -> None:
         if new_rows:
             session.bulk_save_objects(new_rows)
     _log.info("DiscordMember backfill from users table: inserted %d row(s)", len(new_rows))
+
+
+def _ensure_moderation_event_columns() -> None:
+    """Add columns to moderation_events introduced after the initial schema."""
+    inspector = inspect(engine)
+    if not inspector.has_table(ModerationEvent.__tablename__):
+        return
+
+    columns = {col["name"] for col in inspector.get_columns(ModerationEvent.__tablename__)}
+
+    with engine.begin() as conn:
+        if "channel_id" not in columns:
+            conn.execute(text("ALTER TABLE moderation_events ADD COLUMN channel_id VARCHAR(64)"))
+        if "message_id" not in columns:
+            conn.execute(text("ALTER TABLE moderation_events ADD COLUMN message_id VARCHAR(64)"))
+        if "extra_data" not in columns:
+            conn.execute(text("ALTER TABLE moderation_events ADD COLUMN extra_data TEXT"))
 
 
 def _ensure_qna_columns() -> None:

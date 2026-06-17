@@ -1456,6 +1456,9 @@ def admin_analytics():
             me_q = me_q.filter(ModerationEvent.occurred_at <= to_dt)
         period_bans = me_q.filter(ModerationEvent.event_type == "ban").count()
         period_unbans = me_q.filter(ModerationEvent.event_type == "unban").count()
+        period_kicks = me_q.filter(ModerationEvent.event_type == "kick").count()
+        period_timeouts = me_q.filter(ModerationEvent.event_type == "timeout").count()
+        period_message_deletes = me_q.filter(ModerationEvent.event_type == "message_delete").count()
 
         # ── Forum Posts (from forum_posts) ─────────────────────────────────────
         fp_q = db_session.query(ForumPost)
@@ -1638,6 +1641,9 @@ def admin_analytics():
                 "banned_users": banned_count,
                 "period_bans": period_bans,
                 "period_unbans": period_unbans,
+                "period_kicks": period_kicks,
+                "period_timeouts": period_timeouts,
+                "period_message_deletes": period_message_deletes,
                 "support_tickets": None,
                 "inappropriate_speech_incidents": None,
                 "harassment_incidents": None,

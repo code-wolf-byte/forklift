@@ -152,6 +152,7 @@ export default function Analytics() {
   const [sfStatus, setSfStatus] = useState(null);
   const [sfRefreshing, setSfRefreshing] = useState(false);
   const [channelsCollapsed, setChannelsCollapsed] = useState(true);
+  const [expandedChannels, setExpandedChannels] = useState(new Set());
 
   useEffect(() => {
     setLoading(true);
@@ -202,6 +203,15 @@ export default function Analytics() {
         }, 3000);
       })
       .catch(() => setSfRefreshing(false));
+  };
+
+  const toggleChannel = (channelId) => {
+    setExpandedChannels((prev) => {
+      const next = new Set(prev);
+      if (next.has(channelId)) next.delete(channelId);
+      else next.add(channelId);
+      return next;
+    });
   };
 
   const handleApply = () => {

@@ -1,110 +1,27 @@
-## Forklift
+# Forklift
 
-This Flask app links an ASU SSO session with a Discord account so admitted or
-current students can join the Devil2Devil community with the verified role.
-The HTML template mirrors the public ASU site while exposing states for new,
-ASU-authenticated, and fully verified users.
+This project is a command-line tool for managing and deploying applications to various cloud platforms. It provides a unified interface for interacting with different cloud providers such as AWS, Azure, and GCP.
 
-## Local development
+## Features
+
+- Deploy applications to multiple cloud platforms
+- Manage application configurations
+- Monitor deployment status
+- Rollback deployments
+- Support for Docker containers
+
+## Getting Started
+
+1. Install the tool
+2. Configure your cloud provider credentials
+3. Deploy your application
+
+## Usage
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env  # update secrets before running
-python main.py
+forklift deploy
 ```
 
-The server listens on `http://127.0.0.1:8000/`. Adjust values in `.env` to match
-your CAS endpoints, Discord application, and cookie preferences.
+## Contributing
 
-## Required environment variables
-
-```
-DISCORD_CLIENT_ID=<Discord application client id>
-DISCORD_CLIENT_SECRET=<Discord application client secret>
-DISCORD_REDIRECT_URI=https://your-domain/auth/discord/callback
-DISCORD_BOT_TOKEN=<Discord bot token with Manage Roles permission>
-DISCORD_GUILD_ID=<Target guild snowflake>
-DISCORD_VERIFIED_ROLE_ID=<Role snowflake to assign after verification>
-FLASK_SECRET_KEY=<random string used for Flask sessions>
-DATABASE_URL=sqlite:////absolute/path/to/forklift.db
-```
-
-Optional overrides:
-
-```
-FORKLIFT_ENABLE_DISCORD_BOT=true
-DISCORD_SCOPE=identify
-DISCORD_TEST_GUILD_IDS=1082823852322725888
-DISCORD_SUCCESS_REDIRECT=/verified
-DISCORD_FAILURE_REDIRECT=/verification-error
-PUBLIC_BASE_URL=https://verify.example.asu.edu
-CAS_BASE_URL=https://cas.example.edu/cas
-CAS_LOGIN_URL=
-CAS_VALIDATE_URL=
-CAS_LOGOUT_URL=
-CAS_SERVICE_URL=https://verify.example.asu.edu/auth/cas/callback
-CAS_ENABLED=true
-# CAS attribute mapping (prefers CAS_ATTR_*, falls back to SAML_ATTR_* for compatibility)
-CAS_ATTR_ASURITE=uid
-CAS_ATTR_EMAIL=mail
-CAS_ATTR_FULL_NAME=displayName
-CAS_ATTR_FIRST_NAME=givenName
-CAS_ATTR_LAST_NAME=sn
-CAS_ATTR_AFFILIATIONS=eduPersonAffiliation
-SFTP_UPLOAD_ENABLED=true
-SFTP_HOST=sftp.example.com
-SFTP_PORT=22
-SFTP_USERNAME=forklift
-SFTP_PASSWORD=super-secret
-SFTP_KEY_FILE=/path/to/private/key
-SFTP_REMOTE_DIR=/Export
-SFTP_FILENAME_PREFIX=D2D_Verified
-SFTP_STATE_PATH=/app/data/upload_emails_to_sftp.state
-SFTP_TIMEOUT=30
-```
-
-## Verification flow
-
-1. `/auth/cas/login` starts ASU SSO through CAS and persists key identity attributes when CAS returns to `/auth/cas/callback`.
-2. On success the browser continues to `/auth/discord/login` for Discord OAuth2
-   consent.
-3. `/auth/discord/callback` exchanges the authorization code and assigns the
-   verified role to members who are already in the guild.
-4. The combined record is stored in the `users` table and the session is marked
-   complete so the landing page shows the verified state.
-
-## SFTP email export
-
-When `SFTP_UPLOAD_ENABLED=true`, the app starts a daily scheduler that uploads a
-CSV of verified users (`email,verified_at`) over SFTP to `SFTP_REMOTE_DIR`
-(default: `/Export`). Filenames default to `D2D_Verified_YYYYMMDD.csv`. The
-first run sends all verified users; subsequent runs send only those verified
-since the previous upload. A state file (default:
-`/app/data/upload_emails_to_sftp.state`) tracks the last successful upload.
-Provide either `SFTP_PASSWORD` or `SFTP_KEY_FILE` for authentication.
-
-## Discord bot
-
-The project ships with a lightweight Discord bot (powered by [py-cord]) that can
-manage verification directly in the guild. Instantiate it with:
-
-```python
-from asu_discord import create_bot
-from utils.settings import DISCORD_CONFIG
-
-bot = create_bot(command_prefix="!")
-bot.run(DISCORD_CONFIG.bot_token)
-```
-
-The bot loads a verification cog that exposes `!verify @member` and
-`!unverify @member` commands (requires the `Manage Roles` permission) to assign
-or remove the configured verification role. Use `/setup_verification` (requires
-`Manage Server`) to post the Devil2Devil verification embed and "Verify
-Here" button in the current channel. Populate `DISCORD_TEST_GUILD_IDS` (comma-
-separated) to register the slash command as a guild command for those IDs so it
-appears immediately while testing. Set `FORKLIFT_ENABLE_DISCORD_BOT=true` to run
-the bot inside the Flask container; disable it if you prefer a separate process.
-
-[py-cord]: https://pypi.org/project/py-cord/
+Contributions are welcome! Please read the contributing guidelines before submitting a pull request.

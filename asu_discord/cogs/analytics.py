@@ -526,6 +526,9 @@ class AnalyticsCog(commands.Cog):
         moderator_discord_id: str | None,
         moderator_username: str | None,
         occurred_at: datetime,
+        channel_id: str | None = None,
+        message_id: str | None = None,
+        extra_data: str | None = None,
     ) -> None:
         try:
             with session_scope() as db:
@@ -539,12 +542,164 @@ class AnalyticsCog(commands.Cog):
                         moderator_discord_id=moderator_discord_id,
                         moderator_username=moderator_username,
                         occurred_at=occurred_at,
+                        channel_id=channel_id,
+                        message_id=message_id,
+                        extra_data=extra_data,
                     )
                 )
         except Exception:
             logger.exception(
                 "Failed to save moderation event %s for user %s", event_type, discord_user_id
             )
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member) -> None:
+        if member.guild.id != self.guild_id:
+            return
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        mod_id: str | None = None
+        mod_name: str | None = None
+        reason: str | None = None
+        found = False
+        try:
+            await asyncio.sleep(1)
+            async for entry in member.guild.audit_logs(
+                limit=10, action=discord.AuditLogAction.kick
+            ):
+                if entry.target and entry.target.id == member.id:
+                    found = True
+                    reason = entry.reason
+                    if entry.user:
+                        mod_id = str(entry.user.id)
+                        mod_name = entry.user.name
+                    break
+        except Exception:
+            logger.warning("Could not read audit log for member remove of user %s", member.id)
+            return
+
+        if not found:
+            return  # voluntary leave or ban (ban is handled by on_member_ban)
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            self._save_moderation_event,
+            str(member.id),
+            str(member),
+            str(member.guild.id),
+            "kick",
+            reason,
+            mod_id,
+            mod_name,
+            now_utc,
+        )
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
+        if after.guild.id != self.guild_id:
+            return
+
+        before_timeout = before.timed_out_until
+        after_timeout = after.timed_out_until
+        if before_timeout == after_timeout:
+            return
+
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        if after_timeout is not None and (before_timeout is None or after_timeout > before_timeout):
+            event_type = "timeout"
+            extra_data = json.dumps({"timeout_until": after_timeout.isoformat()})
+        elif after_timeout is None and before_timeout is not None:
+            event_type = "timeout_remove"
+            extra_data = None
+        else:
+            return
+
+        mod_id: str | None = None
+        mod_name: str | None = None
+        reason: str | None = None
+        try:
+            await asyncio.sleep(1)
+            async for entry in after.guild.audit_logs(
+                limit=10, action=discord.AuditLogAction.member_update
+            ):
+                if entry.target and entry.target.id == after.id:
+                    reason = entry.reason
+                    if entry.user:
+                        mod_id = str(entry.user.id)
+                        mod_name = entry.user.name
+                    break
+        except Exception:
+            logger.warning("Could not read audit log for timeout of user %s", after.id)
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            self._save_moderation_event,
+            str(after.id),
+            str(after),
+            str(after.guild.id),
+            event_type,
+            reason,
+            mod_id,
+            mod_name,
+            now_utc,
+            None,
+            None,
+            extra_data,
+        )
+
+    @commands.Cog.listener()
+    async def on_message_delete(self, message: discord.Message) -> None:
+        if not message.guild or message.guild.id != self.guild_id:
+            return
+        if message.author.bot:
+            return
+
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        mod_id: str | None = None
+        mod_name: str | None = None
+        found = False
+        try:
+            await asyncio.sleep(1)
+            async for entry in message.guild.audit_logs(
+                limit=10, action=discord.AuditLogAction.message_delete
+            ):
+                if entry.target and entry.target.id == message.author.id:
+                    found = True
+                    if entry.user:
+                        mod_id = str(entry.user.id)
+                        mod_name = entry.user.name
+                    break
+        except Exception:
+            logger.warning(
+                "Could not read audit log for message delete in channel %s", message.channel.id
+            )
+            return
+
+        if not found:
+            return  # author deleted their own message
+
+        extra_data = json.dumps({"content": message.content}) if message.content else None
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            self._save_moderation_event,
+            str(message.author.id),
+            str(message.author),
+            str(message.guild.id),
+            "message_delete",
+            None,
+            mod_id,
+            mod_name,
+            now_utc,
+            str(message.channel.id),
+            str(message.id),
+            extra_data,
+        )
 
     # ═════════════════════════════════════════════════════════════════════════
     # NON-QnA FORUM POST TRACKING  (new)
@@ -713,27 +868,28 @@ class AnalyticsCog(commands.Cog):
             return
 
         with session_scope() as db:
-            existing = (
-                db.query(ModerationEvent)
+            seeded_types = {
+                row[0]
+                for row in db.query(ModerationEvent.event_type)
                 .filter(ModerationEvent.guild_id == str(self.guild_id))
-                .count()
-            )
-        if existing > 0:
-            logger.info(
-                "AnalyticsCog: moderation_events already populated (%d rows) — skipping backfill",
-                existing,
-            )
-            return
+                .distinct()
+                .all()
+            }
 
         logger.info(
-            "AnalyticsCog: backfilling moderation events from audit log (guild %s)", self.guild_id
+            "AnalyticsCog: backfilling moderation events from audit log (guild %s, already seeded: %s)",
+            self.guild_id, seeded_types,
         )
 
         events: list[dict] = []
         for action, event_type in (
             (discord.AuditLogAction.ban, "ban"),
             (discord.AuditLogAction.unban, "unban"),
+            (discord.AuditLogAction.kick, "kick"),
         ):
+            if event_type in seeded_types:
+                logger.info("AnalyticsCog: skipping %s backfill — already seeded", event_type)
+                continue
             try:
                 async for entry in guild.audit_logs(limit=None, action=action):
                     if entry.target is None:
