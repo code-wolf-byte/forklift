@@ -807,11 +807,11 @@ export default function Analytics() {
       />
       <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
         <StatCard
-          label="Banned (all-time)"
+          label="Banned (from verifying)"
           value={moderation.banned_users}
           icon="fa-ban"
           color="#ef4444"
-          tooltip="Total number of members currently flagged as banned in the database (users.banned = true). Not filtered by date — reflects current state."
+          tooltip="Members currently flagged as banned in the database (users.banned = true). These users are blocked from completing the verification flow. Not filtered by date — reflects current state."
         />
         <StatCard
           label="Bans (period)"
