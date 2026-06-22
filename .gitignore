@@ -33,3 +33,5 @@ build/
 *.docx
 *.pptx
 *.zip
+node_modules/
+*.tar.gz

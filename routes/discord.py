@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-from flask import Blueprint, redirect, request, session, url_for
+from flask import Blueprint, jsonify, redirect, request, session, url_for
 from sqlalchemy.exc import IntegrityError
 
 _ADMIN_CONFIG_PATH = Path(__file__).parent.parent / "config" / "verification.yaml"
@@ -72,6 +72,36 @@ def discord_login():
 
     authorize_url = build_authorize_url(state_token)
     return redirect(authorize_url)
+
+
+@discord_bp.route("/auth/discord/prepare", methods=["POST"])
+def discord_prepare():
+    """Return the Discord OAuth2 URL as JSON for client-side navigation.
+
+    Client-side navigation (window.location.href) triggers mobile app links,
+    allowing the Discord app to open instead of the mobile browser.
+    """
+    if not CONFIG.CAS_ENABLED:
+        return jsonify({"error": "ASU single sign-on is disabled"}), 503
+    if DISCORD_CONFIG is None:
+        return jsonify({"error": "Discord integration is not configured"}), 503
+
+    verification_state = session.get("verification_state")
+    if not verification_state or not verification_state.get("cas_complete"):
+        return jsonify({"error": "CAS verification required", "redirect": url_for("cas.cas_login")}), 403
+
+    user_id = verification_state.get("user_id")
+    if user_id:
+        with session_scope() as db_session:
+            user = db_session.get(User, user_id)
+            if user is not None and user.banned:
+                return jsonify({"error": BANNED_VERIFICATION_MESSAGE}), 403
+
+    state_token = secrets.token_urlsafe(32)
+    session["discord_oauth_state"] = state_token
+
+    authorize_url = build_authorize_url(state_token)
+    return jsonify({"authorize_url": authorize_url})
 
 
 @discord_bp.route("/auth/discord/callback")

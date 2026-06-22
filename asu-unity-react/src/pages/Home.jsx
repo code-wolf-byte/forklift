@@ -1,4 +1,34 @@
+import { useState } from "react";
 import profileGif from "../assets/devil2devil-profile.gif";
+
+function useDiscordRedirect() {
+  const [loading, setLoading] = useState(false);
+
+  const handleClick = async (e) => {
+    e.preventDefault();
+    if (loading) return;
+    setLoading(true);
+    try {
+      const res = await fetch("/auth/discord/prepare", { method: "POST" });
+      const data = await res.json();
+      if (data.authorize_url) {
+        window.location.href = data.authorize_url;
+        return;
+      }
+      if (data.redirect) {
+        window.location.href = data.redirect;
+        return;
+      }
+    } catch {
+      // Fall back to the standard server-side redirect
+      window.location.href = "/auth/discord/login";
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { handleClick, loading };
+}
 
 // ─── Verification step card ────────────────────────────────────────────────────
 
@@ -41,6 +71,7 @@ function VerificationSection({
   discordUser,
   isAdmin,
 }) {
+  const { handleClick: handleDiscordClick, loading: discordLoading } = useDiscordRedirect();
   const step2Enabled = casComplete;
   const step3Enabled = discordComplete;
 
@@ -138,13 +169,19 @@ function VerificationSection({
               enabled={step2Enabled}
             >
               {discordConfigured && discordLoginUrl ? (
-                <a
-                  href={discordLoginUrl}
+                <button
+                  type="button"
+                  onClick={handleDiscordClick}
+                  disabled={!step2Enabled || discordLoading}
                   className={`btn btn-maroon${!step2Enabled ? " disabled" : ""}`}
                   aria-disabled={!step2Enabled || undefined}
                 >
-                  {discordComplete ? "Manage Discord Link" : "Connect Discord"}
-                </a>
+                  {discordLoading
+                    ? "Connecting…"
+                    : discordComplete
+                    ? "Manage Discord Link"
+                    : "Connect Discord"}
+                </button>
               ) : (
                 <div className="alert alert-secondary small mb-0">
                   Discord integration is not configured.
