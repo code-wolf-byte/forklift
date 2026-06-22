@@ -1,6 +1,6 @@
-import base64
 import logging
 import os
+import time
 from typing import Any, Dict, Iterable
 import requests
 
@@ -8,13 +8,63 @@ from .models import StudentProfile
 
 logger = logging.getLogger(__name__)
 
-BASE = "https://esb.asu.edu"
-CONTACT_URL = f"{BASE}/api/v1/asu-sf-contact/contact"
-OPP_URL = f"{BASE}/api/v1/asu-sf-opportunity/opportunity"
+TOKEN_URL = "https://weblogin.asu.edu/serviceauth/oauth2/client/token"
+_DEFAULT_BASE = "https://crmapi-prod.apps.asu.edu"
+BASE = os.getenv("SALESFORCE_API_BASE_URL", _DEFAULT_BASE)
+CONTACT_URL = f"{BASE}/v1/crm-contact/contact"
+OPP_URL = f"{BASE}/v1/crm-opportunity/opportunity"
 
 # These credentials are expected to be provided via environment variables.
 CLIENT_ID = os.getenv("SALESFORCE_API_CLIENT_ID")
 CLIENT_SECRET = os.getenv("SALESFORCE_API_CLIENT_SECRET")
+
+NONPROD_CLIENT_ID = os.getenv("SALESFORCE_NONPROD_CLIENT_ID")
+NONPROD_CLIENT_SECRET = os.getenv("SALESFORCE_NONPROD_CLIENT_SECRET")
+_DEFAULT_NONPROD_BASE = "https://crmapi-nonprod.apps.asu.edu"
+NONPROD_BASE = os.getenv("SALESFORCE_NONPROD_BASE_URL", _DEFAULT_NONPROD_BASE)
+# Scope audience as registered with the OAuth server; may differ from the actual API hostname.
+NONPROD_SCOPE_BASE = os.getenv("SALESFORCE_NONPROD_SCOPE_BASE_URL", NONPROD_BASE)
+
+_token_cache: dict = {}
+_nonprod_token_cache: dict = {}
+
+
+def _get_bearer_token_for(
+    client_id: str,
+    client_secret: str,
+    base_url: str,
+    cache: dict,
+    scope_base_url: str | None = None,
+) -> str:
+    now = time.time()
+    if cache.get("token") and cache.get("expires_at", 0) > now + 60:
+        return cache["token"]
+    _scope_base = scope_base_url or base_url
+    resp = requests.post(
+        TOKEN_URL,
+        data={
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "scope": (
+                f"{_scope_base}/v1/crm-contact/contact/read:all "
+                f"{_scope_base}/v1/crm-opportunity/opportunity/read:all"
+            ),
+        },
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    cache["token"] = data["access_token"]
+    cache["expires_at"] = now + data.get("expires_in", 3600)
+    return cache["token"]
+
+
+def _get_bearer_token() -> str:
+    if not CLIENT_ID or not CLIENT_SECRET:
+        raise RuntimeError("Salesforce credentials not configured")
+    return _get_bearer_token_for(CLIENT_ID, CLIENT_SECRET, BASE, _token_cache)
+
 
 # Map program codes (undergrad + graduate) to college role names.
 PROGRAM_CODE_TO_COLLEGE_ROLE = {
@@ -123,29 +173,55 @@ def _deposit_paid_from_opportunity(opp: Dict[str, Any]) -> bool:
     return status == "paid"
 
 
-def get_student_profile(asurite: str) -> StudentProfile | None:
+def get_student_profile(
+    asurite: str,
+    *,
+    client_id: str | None = None,
+    client_secret: str | None = None,
+    base_url: str | None = None,
+    scope_base_url: str | None = None,
+) -> StudentProfile | None:
     """
     Look up a student's Salesforce profile by ASURITE.
 
     Returns a StudentProfile on success, or None when credentials are missing,
     the API is unreachable, no contact is found, or no opportunities exist.
+    Pass client_id/client_secret/base_url to query a non-default environment.
+    scope_base_url overrides the scope audience in the OAuth token request when
+    the registered scope URL differs from the actual API hostname.
     """
-    if not CLIENT_ID or not CLIENT_SECRET:
+    _cid = client_id if client_id is not None else CLIENT_ID
+    _csecret = client_secret if client_secret is not None else CLIENT_SECRET
+    _base = base_url if base_url is not None else BASE
+    _scope_base = scope_base_url  # None means use _base (handled in _get_bearer_token_for)
+    _contact_url = f"{_base}/v1/crm-contact/contact"
+    _opp_url = f"{_base}/v1/crm-opportunity/opportunity"
+
+    if _base == BASE:
+        _cache = _token_cache
+    elif _base == NONPROD_BASE:
+        _cache = _nonprod_token_cache
+    else:
+        _cache = {}
+
+    if not _cid or not _csecret:
         logger.warning("Salesforce credentials are not configured")
         return None
 
-    # --------------------
-    # Basic Auth
-    # --------------------
-    token = base64.b64encode(f"{CLIENT_ID}:{CLIENT_SECRET}".encode()).decode()
-    headers = {"Authorization": f"Basic {token}"}
+    try:
+        bearer = _get_bearer_token_for(_cid, _csecret, _base, _cache, scope_base_url=_scope_base)
+    except Exception as exc:
+        logger.warning("Failed to obtain Salesforce OAuth token: %s", exc)
+        return None
+
+    headers = {"Authorization": f"Bearer {bearer}"}
 
     # --------------------
     # 1. Contact Lookup
     # --------------------
     try:
         contact_resp = requests.get(
-            f"{CONTACT_URL}?asurite={asurite}", headers=headers, timeout=10
+            f"{_contact_url}?asurite={asurite}", headers=headers, timeout=10
         )
     except requests.RequestException as exc:
         logger.warning("Failed to contact Salesforce for student profile for %s: %s", asurite, exc)
@@ -171,7 +247,7 @@ def get_student_profile(asurite: str) -> StudentProfile | None:
     for career in ["Undergraduate", "Graduate"]:
         try:
             opp_resp = requests.get(
-                f"{OPP_URL}?contactId={contact_id}&career={career}",
+                f"{_opp_url}?contactId={contact_id}&career={career}",
                 headers=headers,
                 timeout=10,
             )

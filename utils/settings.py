@@ -83,6 +83,7 @@ class AppConfig:
     AWS_SECRET_ACCESS_KEY: str | None = _env_value("AWS_SECRET_ACCESS_KEY")
     SALESFORCE_API_CLIENT_ID: str | None = _env_value("SALESFORCE_API_CLIENT_ID")
     SALESFORCE_API_CLIENT_SECRET: str | None = _env_value("SALESFORCE_API_CLIENT_SECRET")
+    SALESFORCE_API_BASE_URL: str | None = _env_value("SALESFORCE_API_BASE_URL")
     SSO_ATTRIBUTE_MAP: Dict[str, List[str]] = field(init=False)
     PUBLIC_BASE_URL: str = field(init=False)
     CAS_BASE_URL: str = field(init=False)
