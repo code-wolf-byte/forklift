@@ -1,6 +1,25 @@
 import { useState } from "react";
 import profileGif from "../assets/devil2devil-profile.gif";
 
+const isAndroid = /android/i.test(navigator.userAgent);
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+
+function toAndroidIntentUrl(url) {
+  const parsed = new URL(url);
+  const fallback = encodeURIComponent(url);
+  return `intent://${parsed.host}${parsed.pathname}${parsed.search}#Intent;scheme=https;package=com.discord;S.browser_fallback_url=${fallback};end`;
+}
+
+function navigateWithIOSFallback(appUrl, webUrl) {
+  const start = Date.now();
+  window.location.href = appUrl;
+  setTimeout(() => {
+    if (Date.now() - start < 1800) {
+      window.location.href = webUrl;
+    }
+  }, 1500);
+}
+
 function useDiscordRedirect() {
   const [loading, setLoading] = useState(false);
 
@@ -12,7 +31,15 @@ function useDiscordRedirect() {
       const res = await fetch("/auth/discord/prepare", { method: "POST" });
       const data = await res.json();
       if (data.authorize_url) {
-        window.location.href = data.authorize_url;
+        if (isAndroid) {
+          window.location.href = toAndroidIntentUrl(data.authorize_url);
+        } else if (isIOS) {
+          const parsed = new URL(data.authorize_url);
+          const appUrl = `discord://${parsed.host}${parsed.pathname}${parsed.search}`;
+          navigateWithIOSFallback(appUrl, data.authorize_url);
+        } else {
+          window.location.href = data.authorize_url;
+        }
         return;
       }
       if (data.redirect) {
@@ -20,7 +47,6 @@ function useDiscordRedirect() {
         return;
       }
     } catch {
-      // Fall back to the standard server-side redirect
       window.location.href = "/auth/discord/login";
     } finally {
       setLoading(false);
