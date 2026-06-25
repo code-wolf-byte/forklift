@@ -41,7 +41,9 @@ class User(Base):
     affiliations = Column(String(255), nullable=True)
     saml_session_index = Column(String(128), nullable=True)
     saml_attributes = Column(Text, nullable=True)
-    discord_user_id = Column(String(64), unique=True, index=True, nullable=True)
+    # ASURITE is the only unique identity. A Discord account may be re-linked to a
+    # new ASURITE record, so discord_user_id is intentionally NOT unique.
+    discord_user_id = Column(String(64), index=True, nullable=True)
     discord_username = Column(String(255), nullable=True)
     discord_global_name = Column(String(255), nullable=True)
     discord_avatar = Column(String(255), nullable=True)
@@ -411,6 +413,7 @@ _LEGACY_STATE_FILES: dict[str, Path] = {
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_user_columns()
+    _ensure_user_discord_id_not_unique()
     _ensure_cron_job_config_columns()
     _ensure_message_log_columns()
     _ensure_qna_columns()
@@ -562,6 +565,47 @@ def _ensure_user_columns() -> None:
     with engine.begin() as conn:
         for ddl in ddl_statements:
             conn.execute(text(ddl))
+
+
+def _ensure_user_discord_id_not_unique() -> None:
+    """Drop any legacy UNIQUE index on users.discord_user_id.
+
+    ASURITE is now the only unique identity; a Discord account may be re-linked to a
+    different ASURITE. Existing databases were created with a unique index on
+    discord_user_id, so replace it with a plain (non-unique) index.
+    """
+    inspector = inspect(engine)
+    if not inspector.has_table(User.__tablename__):
+        return
+
+    unique_indexes = [
+        idx
+        for idx in inspector.get_indexes(User.__tablename__)
+        if idx.get("unique") and idx.get("column_names") == ["discord_user_id"]
+    ]
+    if not unique_indexes:
+        return
+
+    with engine.begin() as conn:
+        for idx in unique_indexes:
+            name = idx["name"]
+            conn.execute(text(f'DROP INDEX {_quote_ident(name)}'))
+        # Recreate a non-unique index so lookups by discord_user_id stay fast.
+        existing_names = {
+            i["name"] for i in inspect(engine).get_indexes(User.__tablename__)
+        }
+        if "ix_users_discord_user_id" not in existing_names:
+            conn.execute(
+                text(
+                    "CREATE INDEX ix_users_discord_user_id "
+                    "ON users (discord_user_id)"
+                )
+            )
+
+
+def _quote_ident(name: str) -> str:
+    """Quote an identifier for the active dialect."""
+    return engine.dialect.identifier_preparer.quote(name)
 
 
 def _seed_cron_job_config() -> None:

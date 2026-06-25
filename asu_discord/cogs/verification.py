@@ -476,7 +476,8 @@ class VerificationCog(commands.Cog):
             user = (
                 session.query(User)
                 .filter(User.discord_user_id == discord_id)
-                .one_or_none()
+                .order_by(User.id.desc())
+                .first()
             )
             if user is not None:
                 user.joined_at = now
@@ -503,7 +504,8 @@ class VerificationCog(commands.Cog):
             user = (
                 session.query(User)
                 .filter(User.discord_user_id == discord_id)
-                .one_or_none()
+                .order_by(User.id.desc())
+                .first()
             )
             if user is not None:
                 user.left_at = now
@@ -542,7 +544,12 @@ class VerificationCog(commands.Cog):
 
         try:
             with session_scope() as session:
-                user = session.query(User).filter(User.discord_user_id == str(member.id)).one_or_none()
+                user = (
+                    session.query(User)
+                    .filter(User.discord_user_id == str(member.id))
+                    .order_by(User.id.desc())
+                    .first()
+                )
             asurite = user.asurite_id if user else None
             if asurite:
                 profile = await asyncio.to_thread(get_student_profile, asurite)
@@ -888,7 +895,8 @@ class VerificationCog(commands.Cog):
                 linked = (
                     db_session.query(User)
                     .filter(User.discord_user_id == str(member.id))
-                    .one_or_none()
+                    .order_by(User.id.desc())
+                    .first()
                 )
             if linked is None or not linked.asurite_id:
                 await ctx.followup.send(
@@ -1000,7 +1008,8 @@ class VerificationCog(commands.Cog):
             db_user = (
                 db_session.query(User)
                 .filter(User.discord_user_id == str(member.id))
-                .one_or_none()
+                .order_by(User.id.desc())
+                .first()
             )
             if db_user is None:
                 no_record = True
@@ -1132,7 +1141,8 @@ class VerificationCog(commands.Cog):
             db_user = (
                 db_session.query(User)
                 .filter(User.discord_user_id == str(member.id))
-                .one_or_none()
+                .order_by(User.id.desc())
+                .first()
             )
             if db_user is None or not db_user.verified:
                 await ctx.followup.send(
@@ -1212,7 +1222,8 @@ class VerificationCog(commands.Cog):
             db_user = (
                 db_session.query(User)
                 .filter(User.discord_user_id == str(user.id))
-                .one_or_none()
+                .order_by(User.id.desc())
+                .first()
             )
 
         if db_user is None:

@@ -101,7 +101,8 @@ def admin_me():
         user = (
             db_session.query(User)
             .filter(User.discord_user_id == discord_user_id)
-            .one_or_none()
+            .order_by(User.id.desc())
+            .first()
         )
         if user is None:
             return jsonify({"error": "User not found"}), 404
@@ -231,11 +232,23 @@ def admin_users():
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(100, max(1, request.args.get("per_page", 50, type=int)))
     offset = (page - 1) * per_page
+    search = (request.args.get("q") or "").strip()
 
     with session_scope() as db_session:
-        total = db_session.query(User).count()
+        base_query = db_session.query(User)
+        if search:
+            like = f"%{search}%"
+            base_query = base_query.filter(
+                or_(
+                    User.asurite_id.ilike(like),
+                    User.discord_username.ilike(like),
+                    User.discord_user_id.ilike(like),
+                )
+            )
+
+        total = base_query.count()
         users = (
-            db_session.query(User).order_by(User.id.desc()).offset(offset).limit(per_page).all()
+            base_query.order_by(User.id.desc()).offset(offset).limit(per_page).all()
         )
         user_list = [
             {
@@ -1965,7 +1978,8 @@ def admin_exceptions_for_user(discord_user_id: str):
         db_user = (
             db_session.query(User)
             .filter(User.discord_user_id == discord_user_id)
-            .one_or_none()
+            .order_by(User.id.desc())
+            .first()
         )
         db_roles = (
             db_session.query(UserRole)
