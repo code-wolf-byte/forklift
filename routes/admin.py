@@ -38,6 +38,7 @@ from utils.database import (
     VoiceSession,
     session_scope,
 )
+from utils.settings import CONFIG
 
 AZ_TZ = ZoneInfo("America/Phoenix")
 
@@ -58,6 +59,8 @@ REACT_BUILD_DIR = os.getenv(
 
 def _auth_complete() -> bool:
     """Return True if the session has both CAS and Discord complete."""
+    if CONFIG.DEV_MODE:
+        return True
     verification_state = session.get("verification_state") or {}
     cas_complete = bool(verification_state.get("cas_complete"))
     discord_complete = bool(
@@ -71,6 +74,8 @@ def require_admin(f):
 
     @wraps(f)
     def decorated(*args, **kwargs):
+        if CONFIG.DEV_MODE:
+            return f(*args, **kwargs)
         if not (_auth_complete() and (session.get("is_admin") or session.get("is_officer"))):
             abort(403)
         return f(*args, **kwargs)
@@ -83,6 +88,8 @@ def require_full_admin(f):
 
     @wraps(f)
     def decorated(*args, **kwargs):
+        if CONFIG.DEV_MODE:
+            return f(*args, **kwargs)
         if not (_auth_complete() and session.get("is_admin")):
             abort(403)
         return f(*args, **kwargs)
@@ -92,6 +99,18 @@ def require_full_admin(f):
 
 @admin_bp.route("/api/admin/me")
 def admin_me():
+    if CONFIG.DEV_MODE:
+        return jsonify(
+            {
+                "asurite_id": "devmode",
+                "discord_username": "Dev Mode",
+                "discord_user_id": None,
+                "discord_avatar": None,
+                "is_admin": True,
+                "is_officer": False,
+            }
+        )
+
     verification_state = session.get("verification_state") or {}
     if not _auth_complete():
         return jsonify({"error": "Unauthorized"}), 403
@@ -2665,7 +2684,9 @@ def admin_event_detail(event_id: int):
 @admin_bp.route("/admin")
 @admin_bp.route("/admin/<path:path>")
 def admin_spa(path=""):
-    if not (_auth_complete() and (session.get("is_admin") or session.get("is_officer"))):
+    if not CONFIG.DEV_MODE and not (
+        _auth_complete() and (session.get("is_admin") or session.get("is_officer"))
+    ):
         return redirect("/")
 
     react_index = os.path.join(REACT_BUILD_DIR, "index.html")

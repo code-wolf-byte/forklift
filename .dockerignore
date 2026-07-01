@@ -22,3 +22,7 @@ certs/*.key
 certs/*.crt
 *.sqlite
 *.db
+.env
+.env.*
+data/
+.claude/

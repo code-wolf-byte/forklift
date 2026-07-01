@@ -8,14 +8,48 @@ from typing import Optional
 
 import discord
 from discord.ext import commands
+from discord.commands import Option, slash_command
 
 from utils.database import Ticket, TicketCategory, TicketSettings, session_scope
+from utils.settings import DISCORD_CONFIG
 
 logger = logging.getLogger(__name__)
 
 TICKET_SELECT_CUSTOM_ID = "ticket_open_select"
 TICKET_CLOSE_CUSTOM_ID = "ticket_close"
 TICKET_DELETE_CUSTOM_ID = "ticket_delete"
+
+TEST_GUILD_IDS: list[int] = []
+if DISCORD_CONFIG and DISCORD_CONFIG.test_guild_ids:
+    TEST_GUILD_IDS = [int(gid) for gid in DISCORD_CONFIG.test_guild_ids]
+
+
+def _ticket_command_kwargs(name: str, description: str) -> dict:
+    kwargs: dict = {
+        "name": name,
+        "description": description,
+        "dm_permission": False,
+        "default_member_permissions": discord.Permissions(manage_channels=True),
+    }
+    if TEST_GUILD_IDS:
+        kwargs["guild_ids"] = TEST_GUILD_IDS
+    return kwargs
+
+
+async def _category_autocomplete(ctx: discord.AutocompleteContext):
+    """Offer the requesting guild's configured ticket categories as choices."""
+    guild_id = ctx.interaction.guild_id
+    if guild_id is None:
+        return []
+    settings = _load_settings_dict(str(guild_id))
+    if not settings:
+        return []
+    query = (ctx.value or "").lower()
+    return [
+        discord.OptionChoice(name=c["label"], value=str(c["id"]))
+        for c in settings["categories"]
+        if query in c["label"].lower()
+    ]
 
 _MANAGE_PERMS = discord.Permissions(view_channel=True, send_messages=True, manage_messages=True)
 _OPENER_PERMS = discord.Permissions(view_channel=True, send_messages=True, read_message_history=True)
@@ -311,19 +345,29 @@ class TicketingCog(commands.Cog):
         await interaction.response.send_modal(TicketOpenModal(self, category_id))
 
     async def create_ticket(
-        self, interaction: discord.Interaction, *, category_id: int, subject: str, description: str
+        self,
+        interaction: discord.Interaction,
+        *,
+        category_id: int,
+        subject: str,
+        description: str,
+        opener: discord.Member | None = None,
     ) -> None:
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message("This can only be used in the server.", ephemeral=True)
             return
 
+        opener = opener or interaction.user
+        on_behalf_of = opener.id != interaction.user.id
+
         # Re-check for a race between opening the modal and submitting it.
-        existing = self._member_open_ticket(str(guild.id), str(interaction.user.id))
+        existing = self._member_open_ticket(str(guild.id), str(opener.id))
         if existing is not None:
-            await interaction.response.send_message(
-                "You already have an open ticket.", ephemeral=True
+            message = (
+                f"{opener.mention} already has an open ticket." if on_behalf_of else "You already have an open ticket."
             )
+            await interaction.response.send_message(message, ephemeral=True)
             return
 
         settings = _load_settings_dict(str(guild.id))
@@ -341,17 +385,20 @@ class TicketingCog(commands.Cog):
 
         overwrites: dict = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            interaction.user: discord.PermissionOverwrite.from_pair(_OPENER_PERMS, discord.Permissions.none()),
+            opener: discord.PermissionOverwrite.from_pair(_OPENER_PERMS, discord.Permissions.none()),
         }
         for role in staff_roles:
             overwrites[role] = discord.PermissionOverwrite.from_pair(_MANAGE_PERMS, discord.Permissions.none())
 
-        slug = _slugify(getattr(interaction.user, "name", "member"))
+        slug = _slugify(getattr(opener, "name", "member"))
+        reason = (
+            f"Ticket opened by {interaction.user} for {opener}" if on_behalf_of else f"Ticket opened by {interaction.user}"
+        )
         channel = await guild.create_text_channel(
             name=f"ticket-{slug}",
             category=parent_category,
             overwrites=overwrites,
-            reason=f"Ticket opened by {interaction.user}",
+            reason=reason,
         )
 
         with session_scope() as db:
@@ -359,8 +406,8 @@ class TicketingCog(commands.Cog):
                 guild_id=str(guild.id),
                 channel_id=str(channel.id),
                 category_id=category_id,
-                opener_discord_id=str(interaction.user.id),
-                opener_username=str(interaction.user),
+                opener_discord_id=str(opener.id),
+                opener_username=str(opener),
                 subject=subject,
                 description=description,
                 status="open",
@@ -372,14 +419,46 @@ class TicketingCog(commands.Cog):
             description=description or "(no description provided)",
             color=discord.Color.from_rgb(140, 29, 64),
         )
-        embed.add_field(name="Opened by", value=interaction.user.mention, inline=True)
+        embed.add_field(name="Opened by", value=opener.mention, inline=True)
         embed.add_field(name="Category", value=category["label"], inline=True)
 
         role_mentions = " ".join(role.mention for role in staff_roles)
-        content = f"{interaction.user.mention} {role_mentions}".strip()
+        content = f"{opener.mention} {role_mentions}".strip()
 
         await channel.send(content=content or None, embed=embed, view=TicketControlView(self))
-        await interaction.followup.send(f"Your ticket has been created: {channel.mention}", ephemeral=True)
+        confirmation = (
+            f"Ticket created for {opener.mention}: {channel.mention}"
+            if on_behalf_of
+            else f"Your ticket has been created: {channel.mention}"
+        )
+        await interaction.followup.send(confirmation, ephemeral=True)
+
+    @slash_command(**_ticket_command_kwargs("new-ticket", "Open a ticket on behalf of a member."))
+    async def new_ticket(
+        self,
+        ctx: discord.ApplicationContext,
+        user: discord.Member = Option(discord.Member, "Member to open the ticket for"),
+        category: str = Option(str, "Ticket category", autocomplete=_category_autocomplete),
+        subject: str = Option(str, "Ticket subject", required=False, default=""),
+        description: str = Option(str, "Ticket description", required=False, default=""),
+    ) -> None:
+        if ctx.guild is None or ctx.guild.id != self.guild_id:
+            await ctx.respond("This command can only be used in the configured server.", ephemeral=True)
+            return
+
+        try:
+            category_id = int(category)
+        except (TypeError, ValueError):
+            await ctx.respond("Invalid ticket category.", ephemeral=True)
+            return
+
+        await self.create_ticket(
+            ctx.interaction,
+            category_id=category_id,
+            subject=subject,
+            description=description,
+            opener=user,
+        )
 
     async def close_ticket(self, interaction: discord.Interaction) -> None:
         channel = interaction.channel
@@ -408,6 +487,8 @@ class TicketingCog(commands.Cog):
             )
             return
 
+        await interaction.response.defer()
+
         opener_target = discord.Object(id=int(ticket["opener_discord_id"]))
         await channel.set_permissions(
             opener_target, overwrite=discord.PermissionOverwrite(view_channel=False)
@@ -420,7 +501,7 @@ class TicketingCog(commands.Cog):
                 row.closed_by = str(member.id)
                 row.closed_at = datetime.utcnow()
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Ticket closed by {member.mention}.", view=TicketDeleteView(self)
         )
 
