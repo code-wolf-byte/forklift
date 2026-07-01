@@ -165,7 +165,6 @@ export default function Analytics() {
     programs: true,
     forums: true,
     acquisition: true,
-    suggested: true,
   });
   const [expandedChannels, setExpandedChannels] = useState(new Set());
   const [goldGuideListCollapsed, setGoldGuideListCollapsed] = useState(true);
@@ -1369,56 +1368,6 @@ export default function Analytics() {
           tooltip="Average time users spend on the verification page per session. Longer duration may indicate friction in the flow. Requires Google Analytics."
         />
       </div>
-      )}
-
-      {/* ════════════════════════════════════════════════════════════════════════
-          Suggested Additions
-      ════════════════════════════════════════════════════════════════════════ */}
-      <SectionHeader
-        title="Suggested Additions"
-        icon="fa-lightbulb"
-        subtitle="Metrics recommended for future tracking"
-        tooltip="These metrics are not currently tracked but would provide valuable insight if implemented. Each would require additional data collection, instrumentation, or external integrations."
-        collapsible
-        collapsed={collapsedSections.suggested}
-        onToggle={() => toggleSection("suggested")}
-      />
-      {!collapsedSections.suggested && (
-      <Card className="mb-6">
-        <CardContent className="p-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-8 gap-y-1.5">
-            {[
-              "Join to Verify Conversion Rate",
-              "Time to First Message",
-              "7-Day Retention",
-              "30-Day Retention",
-              "Messages per Active User",
-              "Lurker vs Contributor Rate",
-              "Replies per Thread",
-              "New vs Returning Users per Channel",
-              "Channel Retention",
-              "Event Attendance",
-              "Event Impact on Activity",
-              "Event Impact on Retention",
-              "Reports per 1k Users",
-              "Moderation Response Time",
-              "Repeat Offenders",
-              "DM Connections After Join",
-              "Group Formation Success Rate",
-              "Retention by Source",
-              "Engagement by Source",
-              "Response Time to Questions",
-              "Answer Rate",
-              "User Satisfaction Score",
-            ].map((label) => (
-              <div key={label} className="flex items-center gap-2 text-sm text-muted-foreground">
-                <i className="fas fa-circle text-[5px] shrink-0 opacity-40" />
-                {label}
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
       )}
     </>
   );
