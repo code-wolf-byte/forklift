@@ -14,6 +14,7 @@ import MessageLogs from "./admin/MessageLogs.jsx";
 import QnA from "./admin/QnA.jsx";
 import Exceptions from "./admin/Exceptions.jsx";
 import Analytics from "./admin/Analytics.jsx";
+import Tickets from "./admin/Tickets.jsx";
 
 // ─── Sidebar navigation config ────────────────────────────────────────────────
 
@@ -47,6 +48,12 @@ const NAV = [
     label: "Q&A",
     items: [
       { id: "qna", icon: "fa-question-circle", label: "Q&A Analytics" },
+    ],
+  },
+  {
+    label: "Tickets",
+    items: [
+      { id: "tickets", icon: "fa-ticket-alt", label: "Tickets" },
     ],
   },
   {
@@ -155,6 +162,7 @@ export default function Admin() {
       case "automations":   return <Automations />;
       case "qna":           return <QnA />;
       case "exceptions":    return <Exceptions />;
+      case "tickets":       return <Tickets />;
       default:              return null;
     }
   };

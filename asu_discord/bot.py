@@ -10,6 +10,7 @@ from utils.settings import DISCORD_CONFIG
 from .cogs.analytics import AnalyticsCog
 from .cogs.event_tracker import EventTrackerCog
 from .cogs.qna import QnACog
+from .cogs.ticketing import TicketingCog
 from .cogs.verification import VerificationCog
 from .shared import register_bot
 
@@ -37,6 +38,7 @@ class ForkliftBot(commands.Bot):
         self._load_qna_cog()
         self._load_analytics_cog()
         self._load_event_tracker_cog()
+        self._load_ticketing_cog()
 
     def _load_verification_cog(self) -> None:
         """Attach the verification cog immediately after initialization."""
@@ -111,6 +113,21 @@ class ForkliftBot(commands.Bot):
 
         logger.info("Loaded EventTrackerCog")
 
+    def _load_ticketing_cog(self) -> None:
+        """Attach the ticketing cog."""
+        if DISCORD_CONFIG is None:
+            logger.warning("Skipping TicketingCog: DISCORD_CONFIG not set")
+            return
+        try:
+            self.add_cog(
+                TicketingCog(self, guild_id=int(DISCORD_CONFIG.guild_id))
+            )
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to load TicketingCog")
+            raise
+
+        logger.info("Loaded TicketingCog")
+
     async def setup_hook(self) -> None:
         """Run after the bot connects to Discord."""
         logger.info("ForkliftBot setup hook starting")
@@ -122,6 +139,15 @@ class ForkliftBot(commands.Bot):
             raise
 
         logger.info("Synced application commands")
+
+        ticketing_cog = self.get_cog("TicketingCog")
+        if isinstance(ticketing_cog, TicketingCog):
+            try:
+                for view in ticketing_cog.build_persistent_views():
+                    self.add_view(view)
+                logger.info("Registered persistent ticketing views")
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("Failed to register persistent ticketing views")
 
 
 def create_bot(

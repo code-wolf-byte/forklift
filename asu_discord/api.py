@@ -185,14 +185,10 @@ def remove_roles_from_profile(user_id: str, student_profile: StudentProfile) -> 
 
 
 _DISCORD_TEXT_CHANNEL_TYPES = {0, 5}  # GUILD_TEXT, GUILD_ANNOUNCEMENT
+_DISCORD_CATEGORY_CHANNEL_TYPE = 4    # GUILD_CATEGORY
 
 
-def get_guild_channels() -> list[dict]:
-    """Return text channels in the guild as a list of {id, name} dicts.
-
-    Uses the Discord REST API directly so it works whether or not the bot
-    process is running.
-    """
+def _fetch_guild_channels_raw() -> list[dict]:
     cfg = _config()
     url = f"{cfg.api_base}/guilds/{cfg.guild_id}/channels"
     headers = {"Authorization": f"Bot {cfg.bot_token}"}
@@ -206,7 +202,16 @@ def get_guild_channels() -> list[dict]:
         logger.error("Discord API returned %s fetching guild channels", response.status_code)
         return []
 
-    channels = response.json() if isinstance(response.json(), list) else []
+    return response.json() if isinstance(response.json(), list) else []
+
+
+def get_guild_channels() -> list[dict]:
+    """Return text channels in the guild as a list of {id, name} dicts.
+
+    Uses the Discord REST API directly so it works whether or not the bot
+    process is running.
+    """
+    channels = _fetch_guild_channels_raw()
     return sorted(
         [
             {"id": ch["id"], "name": ch["name"]}
@@ -214,6 +219,53 @@ def get_guild_channels() -> list[dict]:
             if ch.get("type") in _DISCORD_TEXT_CHANNEL_TYPES
         ],
         key=lambda c: c["name"],
+    )
+
+
+def get_guild_category_channels() -> list[dict]:
+    """Return category channels in the guild as a list of {id, name} dicts."""
+    channels = _fetch_guild_channels_raw()
+    return sorted(
+        [
+            {"id": ch["id"], "name": ch["name"]}
+            for ch in channels
+            if ch.get("type") == _DISCORD_CATEGORY_CHANNEL_TYPE
+        ],
+        key=lambda c: c["name"],
+    )
+
+
+def get_guild_roles() -> list[dict]:
+    """Return roles in the guild as a list of {id, name, color} dicts.
+
+    Uses the Discord REST API directly so it works whether or not the bot
+    process is running. Excludes the @everyone role (id == guild_id).
+    """
+    cfg = _config()
+    url = f"{cfg.api_base}/guilds/{cfg.guild_id}/roles"
+    headers = {"Authorization": f"Bot {cfg.bot_token}"}
+    try:
+        response = requests.get(url, headers=headers, timeout=DEFAULT_TIMEOUT)
+    except requests.RequestException as exc:
+        logger.error("Failed to fetch guild roles from Discord API: %s", exc)
+        return []
+
+    if response.status_code >= 400:
+        logger.error("Discord API returned %s fetching guild roles", response.status_code)
+        return []
+
+    roles = response.json() if isinstance(response.json(), list) else []
+    return sorted(
+        [
+            {
+                "id": role["id"],
+                "name": role["name"],
+                "color": f"#{role['color']:06x}" if role.get("color") else None,
+            }
+            for role in roles
+            if role.get("id") != str(cfg.guild_id) and role.get("name") != "@everyone"
+        ],
+        key=lambda r: r["name"].lower(),
     )
 
 
@@ -394,7 +446,9 @@ __all__ = [
     "check_member_is_admin",
     "exchange_code_for_token",
     "fetch_user_profile",
+    "get_guild_category_channels",
     "get_guild_channels",
+    "get_guild_roles",
     "get_live_member_counts",
     "get_member_info",
     "refresh_roles_from_profile",

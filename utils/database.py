@@ -371,6 +371,81 @@ class UserSalesforceProfile(Base):
     )
 
 
+class TicketSettings(Base):
+    """Per-guild configuration for the ticketing panel (admin-dashboard managed)."""
+
+    __tablename__ = "ticket_settings"
+
+    id = Column(Integer, primary_key=True)
+    guild_id = Column(String(64), unique=True, nullable=False)
+    panel_channel_id = Column(String(64), nullable=True)
+    panel_message_id = Column(String(64), nullable=True)
+    embed_title = Column(String(256), nullable=True)
+    embed_description = Column(Text, nullable=True)
+    embed_color = Column(String(16), nullable=True)          # hex string, e.g. "#8c1d40"
+    embed_image_url = Column(String(2048), nullable=True)
+    embed_thumbnail_url = Column(String(2048), nullable=True)
+    embed_footer = Column(String(2048), nullable=True)
+    select_placeholder = Column(String(150), nullable=True)
+    staff_role_ids = Column(Text, nullable=True)             # JSON array of role id strings
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    categories = relationship(
+        "TicketCategory", back_populates="settings", order_by="TicketCategory.position"
+    )
+
+
+class TicketCategory(Base):
+    """One selectable ticket category (select-menu option) for a guild's ticket panel."""
+
+    __tablename__ = "ticket_categories"
+
+    id = Column(Integer, primary_key=True)
+    settings_id = Column(
+        Integer, ForeignKey("ticket_settings.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    guild_id = Column(String(64), nullable=False, index=True)
+    label = Column(String(100), nullable=False)
+    description = Column(String(200), nullable=True)
+    emoji = Column(String(64), nullable=True)
+    parent_category_id = Column(String(64), nullable=True)   # Discord category channel snowflake
+    extra_role_ids = Column(Text, nullable=True)              # JSON array, additive to staff_role_ids
+    position = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    settings = relationship("TicketSettings", back_populates="categories")
+
+
+class Ticket(Base):
+    """One row per opened ticket (private text channel)."""
+
+    __tablename__ = "tickets"
+
+    id = Column(Integer, primary_key=True)
+    guild_id = Column(String(64), nullable=False, index=True)
+    channel_id = Column(String(64), unique=True, nullable=False, index=True)
+    category_id = Column(Integer, ForeignKey("ticket_categories.id"), nullable=True, index=True)
+    opener_discord_id = Column(String(64), nullable=False, index=True)
+    opener_username = Column(String(255), nullable=True)
+    subject = Column(String(200), nullable=True)
+    description = Column(Text, nullable=True)
+    status = Column(String(16), default="open", nullable=False, index=True)  # "open" | "closed"
+    closed_by = Column(String(64), nullable=True)
+    closed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    category = relationship("TicketCategory")
+
+
 # Default rows seeded on first startup.
 _CRON_JOB_DEFAULTS = [
     {
