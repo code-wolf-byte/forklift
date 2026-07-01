@@ -67,6 +67,7 @@ class AnalyticsCog(commands.Cog):
         # These run as background tasks — they're slow but fully idempotent.
         asyncio.ensure_future(self._backfill_forum_posts())
         asyncio.ensure_future(self._backfill_moderation_events())
+        asyncio.ensure_future(self._backfill_volunteer_contributions())
         asyncio.ensure_future(self._sync_thread_parents())
         self._maybe_start_backfill()  # message backfill (also a background task)
 
@@ -982,6 +983,84 @@ class AnalyticsCog(commands.Cog):
                 )
         except Exception:
             logger.exception("AnalyticsCog: failed to flush moderation events backfill")
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # VOLUNTEER CONTRIBUTIONS BACKFILL  (message_logs → volunteer_contributions)
+    # ═════════════════════════════════════════════════════════════════════════
+
+    async def _backfill_volunteer_contributions(self) -> None:
+        """Populate volunteer_contributions from existing message_logs history.
+
+        message_logs already has every message ever logged, across all channels,
+        so this doesn't need to re-fetch anything from Discord — it just needs
+        the current Volunteer role membership. Runs on every startup (idempotent,
+        dedup by message_id) so members added to the role, or messages logged
+        while the bot was down, are picked up automatically on redeploy without
+        a manual backfill step.
+        """
+        guild = self.bot.get_guild(self.guild_id)
+        if guild is None:
+            return
+
+        role = guild.get_role(VOLUNTEER_ROLE_ID)
+        if role is None:
+            logger.warning(
+                "AnalyticsCog: Volunteer role %d not found, skipping contribution backfill",
+                VOLUNTEER_ROLE_ID,
+            )
+            return
+
+        volunteer_ids = {str(m.id) for m in role.members}
+        member_names = {str(m.id): m.name for m in role.members}
+        if not volunteer_ids:
+            return
+
+        loop = asyncio.get_running_loop()
+        inserted = await loop.run_in_executor(
+            None, self._save_volunteer_backfill, volunteer_ids, member_names
+        )
+        logger.info(
+            "AnalyticsCog: volunteer contribution backfill complete — %d new rows (guild %s)",
+            inserted, self.guild_id,
+        )
+
+    def _save_volunteer_backfill(
+        self, volunteer_ids: set[str], member_names: dict[str, str]
+    ) -> int:
+        try:
+            with session_scope() as db:
+                existing_ids = {
+                    r[0]
+                    for r in db.query(VolunteerContribution.message_id)
+                    .filter(VolunteerContribution.message_id.isnot(None))
+                    .all()
+                }
+                rows = (
+                    db.query(MessageLog)
+                    .filter(MessageLog.discord_user_id.in_(volunteer_ids))
+                    .all()
+                )
+                new_objs = [
+                    VolunteerContribution(
+                        guild_id=r.guild_id,
+                        channel_id=r.channel_id,
+                        channel_name=r.channel_name,
+                        parent_channel_id=r.parent_channel_id,
+                        parent_channel_name=r.parent_channel_name,
+                        message_id=r.message_id,
+                        responder_discord_id=r.discord_user_id,
+                        responder_username=member_names.get(r.discord_user_id),
+                        responded_at=r.sent_at,
+                    )
+                    for r in rows
+                    if r.message_id not in existing_ids
+                ]
+                if new_objs:
+                    db.bulk_save_objects(new_objs)
+                return len(new_objs)
+        except Exception:
+            logger.exception("AnalyticsCog: failed to backfill volunteer contributions")
+            return 0
 
     # ═════════════════════════════════════════════════════════════════════════
     # MESSAGE BACKFILL  (moved from MessageLoggerCog, identical logic)
