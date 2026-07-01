@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getUrlParam, replaceUrlParams } from "@/utils/adminUrl";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const monthStartISO = () => {
@@ -40,9 +41,14 @@ function StatCard({ value, label, icon, color }) {
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [fromDate, setFromDate] = useState(monthStartISO());
-  const [toDate, setToDate] = useState(todayISO());
-  const [applied, setApplied] = useState({ from: monthStartISO(), to: todayISO() });
+  const [fromDate, setFromDate] = useState(() => getUrlParam("from_date", monthStartISO()));
+  const [toDate, setToDate] = useState(() => getUrlParam("to_date", todayISO()));
+  const [applied, setApplied] = useState(() => ({
+    from: getUrlParam("from_date", monthStartISO()),
+    to: getUrlParam("to_date", todayISO()),
+  }));
+  const [purgeStatus, setPurgeStatus] = useState(null);
+  const [purgeRunning, setPurgeRunning] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -52,7 +58,38 @@ export default function Dashboard() {
       .catch(() => setLoading(false));
   }, [applied]);
 
-  const handleApply = () => setApplied({ from: fromDate, to: toDate });
+  const handleApply = () => {
+    setApplied({ from: fromDate, to: toDate });
+    replaceUrlParams({ from_date: fromDate, to_date: toDate });
+  };
+
+  const pollPurgeStatus = () => {
+    fetch("/api/admin/purge-unregistered-roles/status")
+      .then((r) => r.json())
+      .then((d) => {
+        setPurgeRunning(d.running);
+        setPurgeStatus(d.last);
+        if (d.running) setTimeout(pollPurgeStatus, 2000);
+      })
+      .catch(() => setPurgeRunning(false));
+  };
+
+  const handlePurge = () => {
+    if (!window.confirm(
+      "This will remove the Verified role and all managed roles from every Discord member who has no record in the database.\n\nProceed?"
+    )) return;
+    setPurgeRunning(true);
+    setPurgeStatus(null);
+    fetch("/api/admin/purge-unregistered-roles", { method: "POST" })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.status === "already_running") {
+          setPurgeStatus(d.last);
+        }
+        pollPurgeStatus();
+      })
+      .catch(() => setPurgeRunning(false));
+  };
 
   if (loading && !stats) {
     return (
@@ -111,6 +148,44 @@ export default function Dashboard() {
         <StatCard value={stats?.verified_leaves} label="Verified Leaves" icon="fa-sign-out-alt" color="#f59e0b" />
         <StatCard value={stats?.verified_at_end} label="Verified Users at End" icon="fa-users" color="#8c1d40" />
         <StatCard value={retentionDisplay} label="Retention Rate" icon="fa-chart-line" color="#10b981" />
+      </div>
+
+      {/* Maintenance */}
+      <div className="mt-8">
+        <h5 className="text-base font-semibold mb-3">Maintenance</h5>
+        <Card>
+          <CardContent className="p-4 flex flex-col gap-3">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div>
+                <div className="font-medium text-sm">Purge Roles from Non-Registered Members</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  Removes Verified and all managed roles from Discord members who have no record in the database.
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={handlePurge}
+                disabled={purgeRunning}
+              >
+                {purgeRunning ? (
+                  <><i className="fas fa-spinner fa-spin mr-1.5" />Running…</>
+                ) : (
+                  <><i className="fas fa-user-slash mr-1.5" />Purge Roles</>
+                )}
+              </Button>
+            </div>
+            {purgeStatus && !purgeRunning && (
+              <div className={`text-xs rounded px-3 py-2 ${purgeStatus.error ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}>
+                {purgeStatus.error ? (
+                  <><i className="fas fa-exclamation-circle mr-1" />Error: {purgeStatus.error}</>
+                ) : (
+                  <><i className="fas fa-check-circle mr-1" />Done — {purgeStatus.stripped} member{purgeStatus.stripped !== 1 ? "s" : ""} stripped{purgeStatus.errors > 0 ? `, ${purgeStatus.errors} error(s)` : ""}.</>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </>
   );

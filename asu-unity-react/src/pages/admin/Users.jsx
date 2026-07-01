@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableHeader,
@@ -27,24 +28,62 @@ export default function Users() {
   const [data, setData] = useState(null);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+
+  // Debounce the search input → query
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setQuery(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/admin/users?page=${page}&per_page=25`)
+    const params = new URLSearchParams({ page, per_page: 25 });
+    if (query) params.set("q", query);
+    fetch(`/api/admin/users?${params.toString()}`)
       .then((r) => r.json())
       .then((d) => {
         setData(d);
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [page]);
+  }, [page, query]);
 
   return (
     <>
       <h2 className="text-2xl font-bold mb-1">Members</h2>
-      <p className="text-sm text-muted-foreground mb-6">
-        {data ? `${data.total.toLocaleString()} total members` : "Loading…"}
+      <p className="text-sm text-muted-foreground mb-4">
+        {data
+          ? query
+            ? `${data.total.toLocaleString()} member${data.total === 1 ? "" : "s"} matching “${query}”`
+            : `${data.total.toLocaleString()} total members`
+          : "Loading…"}
       </p>
+
+      <div className="relative mb-6 max-w-md">
+        <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm" />
+        <Input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by ASURITE, Discord username, or Discord ID…"
+          className="pl-9"
+        />
+        {search && (
+          <button
+            type="button"
+            onClick={() => setSearch("")}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            aria-label="Clear search"
+          >
+            <i className="fas fa-times text-sm" />
+          </button>
+        )}
+      </div>
 
       {loading ? (
         <div className="flex justify-center py-20">
@@ -65,6 +104,13 @@ export default function Users() {
                 </TableRow>
               </TableHeader>
               <TableBody>
+                {data?.users.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center text-muted-foreground py-10">
+                      No members found{query ? ` for “${query}”` : ""}.
+                    </TableCell>
+                  </TableRow>
+                )}
                 {data?.users.map((u) => (
                   <TableRow key={u.id}>
                     <TableCell className="pl-4 font-semibold">{u.asurite_id}</TableCell>

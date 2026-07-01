@@ -7,8 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-from flask import Blueprint, redirect, request, session, url_for
-from sqlalchemy.exc import IntegrityError
+from flask import Blueprint, jsonify, redirect, request, session, url_for
 
 _ADMIN_CONFIG_PATH = Path(__file__).parent.parent / "config" / "verification.yaml"
 with _ADMIN_CONFIG_PATH.open() as _f:
@@ -72,6 +71,36 @@ def discord_login():
 
     authorize_url = build_authorize_url(state_token)
     return redirect(authorize_url)
+
+
+@discord_bp.route("/auth/discord/prepare", methods=["POST"])
+def discord_prepare():
+    """Return the Discord OAuth2 URL as JSON for client-side navigation.
+
+    Client-side navigation (window.location.href) triggers mobile app links,
+    allowing the Discord app to open instead of the mobile browser.
+    """
+    if not CONFIG.CAS_ENABLED:
+        return jsonify({"error": "ASU single sign-on is disabled"}), 503
+    if DISCORD_CONFIG is None:
+        return jsonify({"error": "Discord integration is not configured"}), 503
+
+    verification_state = session.get("verification_state")
+    if not verification_state or not verification_state.get("cas_complete"):
+        return jsonify({"error": "CAS verification required", "redirect": url_for("cas.cas_login")}), 403
+
+    user_id = verification_state.get("user_id")
+    if user_id:
+        with session_scope() as db_session:
+            user = db_session.get(User, user_id)
+            if user is not None and user.banned:
+                return jsonify({"error": BANNED_VERIFICATION_MESSAGE}), 403
+
+    state_token = secrets.token_urlsafe(32)
+    session["discord_oauth_state"] = state_token
+
+    authorize_url = build_authorize_url(state_token)
+    return jsonify({"authorize_url": authorize_url})
 
 
 @discord_bp.route("/auth/discord/callback")
@@ -141,166 +170,91 @@ def discord_callback():
     old_discord_user_id: str | None = None
     try:
         with session_scope() as db_session:
-            user = db_session.get(User, user_db_id)
-            if user is None:
-                logger.error(
-                    "Database user for verification not found: id=%s", user_db_id
-                )
-                raise DiscordAPIError(
-                    "Unable to load verification record for Discord linking"
-                )
-            if user.banned:
-                session["verification_error"] = BANNED_VERIFICATION_MESSAGE
-                return _oauth_failure(BANNED_VERIFICATION_MESSAGE, 403)
-
-            if asurite and user.asurite_id != asurite:
+            # ASURITE (from CAS) is the authoritative, only-unique identity. Resolve the
+            # record by ASURITE; fall back to the session's user id if ASURITE is missing.
+            user = None
+            if asurite:
                 user = (
                     db_session.query(User)
                     .filter(User.asurite_id == asurite)
                     .one_or_none()
                 )
-                if user is None:
-                    logger.error(
-                        "Database user for ASURITE %s not found during verification",
-                        asurite,
-                    )
-                    raise DiscordAPIError(
-                        "Unable to load verification record for Discord linking"
-                    )
-                if user.banned:
-                    session["verification_error"] = BANNED_VERIFICATION_MESSAGE
-                    return _oauth_failure(BANNED_VERIFICATION_MESSAGE, 403)
-                user_db_id = user.id
-                verification_state["user_id"] = user_db_id
+            if user is None:
+                user = db_session.get(User, user_db_id)
+            if user is None:
+                logger.error(
+                    "Database user for verification not found: id=%s asurite=%s",
+                    user_db_id,
+                    asurite,
+                )
+                raise DiscordAPIError(
+                    "Unable to load verification record for Discord linking"
+                )
 
-            existing_user = (
+            user_db_id = user.id
+            verification_state["user_id"] = user_db_id
+
+            # Banned ASURITEs may not link any Discord account.
+            if user.banned:
+                session["verification_error"] = BANNED_VERIFICATION_MESSAGE
+                return _oauth_failure(BANNED_VERIFICATION_MESSAGE, 403)
+
+            # This Discord account may already be linked to a *different* ASURITE record
+            # (e.g. a compromised/old account). Since ASURITE is authoritative, detach
+            # the Discord account from those records so the current user can claim it.
+            other_links = (
                 db_session.query(User)
                 .filter(User.discord_user_id == discord_user_id, User.id != user.id)
-                .one_or_none()
+                .all()
             )
-            if existing_user:
-                asurite = verification_state.get("asurite")
-                if asurite and existing_user.asurite_id == asurite:
+            for other in other_links:
+                logger.warning(
+                    "Discord account %s was linked to ASURITE %s (id=%s); detaching in "
+                    "favor of ASURITE %s",
+                    discord_user_id,
+                    other.asurite_id,
+                    other.id,
+                    user.asurite_id,
+                )
+                other.discord_user_id = None
+                other.verified = False
+                other.verified_at = None
+
+            # If the ASURITE record currently points at a different Discord account,
+            # unverify that old account in the Discord server before re-linking.
+            if user.discord_user_id and user.discord_user_id != discord_user_id:
+                old_discord_user_id = user.discord_user_id
+                try:
+                    remove_verified_role(
+                        old_discord_user_id,
+                        reason=f"Re-linking verification for {user.asurite_id}",
+                    )
+                except DiscordAPIError as exc:
                     logger.warning(
-                        "Discord user %s already linked to ASURITE %s under id %s; "
-                        "refreshing that record instead of %s",
-                        discord_user_id,
-                        asurite,
-                        existing_user.id,
-                        user.id,
+                        "Failed to remove verified role for Discord user %s: %s",
+                        old_discord_user_id,
+                        exc,
                     )
-                    user = existing_user
-                    user_db_id = user.id
-                    verification_state["user_id"] = user_db_id
-                else:
-                    message = (
-                        "This Discord account is already linked to another ASURITE. "
-                        "If this is your account, please contact support."
-                    )
-                    session["verification_error"] = message
-                    return _oauth_failure(message, 409)
 
-            if user.discord_user_id == discord_user_id and (
-                not asurite or user.asurite_id == asurite
-            ):
-                user.updated_at = datetime.utcnow()
-            else:
-                if user.discord_user_id and user.discord_user_id != discord_user_id:
-                    old_discord_user_id = user.discord_user_id
-                    try:
-                        remove_verified_role(
-                            user.discord_user_id,
-                            reason=f"Re-linking verification for {user.asurite_id}",
-                        )
-                    except DiscordAPIError as exc:
-                        logger.warning(
-                            "Failed to remove verified role for Discord user %s: %s",
-                            user.discord_user_id,
-                            exc,
-                        )
-
-                user.discord_user_id = discord_user_id
-                user.discord_username = profile.username
-                user.discord_global_name = profile.global_name
-                user.discord_avatar = profile.avatar
-                user.verified = True
+            # Link (or refresh) the Discord account on the ASURITE record.
+            if user.discord_user_id != discord_user_id:
                 user.verified_at = datetime.utcnow()
                 if user.created_at != user.verified_at:
                     user.created_at = user.verified_at
+            user.discord_user_id = discord_user_id
+            user.discord_username = profile.username
+            user.discord_global_name = profile.global_name
+            user.discord_avatar = profile.avatar
+            user.verified = True
+            user.updated_at = datetime.utcnow()
 
             try:
-                assign_verified_role(
-                    discord_user_id, asurite=verification_state.get("asurite")
-                )
+                assign_verified_role(discord_user_id, asurite=asurite)
             except DiscordAPIError as exc:
                 logger.error(
                     "Discord integration failed for user %s: %s", discord_user_id, exc
                 )
                 return _oauth_failure(str(exc), 502)
-    except IntegrityError as exc:
-        if "users.discord_user_id" not in str(getattr(exc, "orig", exc)):
-            logger.exception("Unexpected database error linking Discord account")
-            return _oauth_failure("Unexpected Discord verification failure", 500)
-
-        logger.warning(
-            "Discord user %s triggered unique constraint; attempting to reuse existing record",
-            discord_user_id,
-        )
-        try:
-            with session_scope() as db_session:
-                existing_user = (
-                    db_session.query(User)
-                    .filter(User.discord_user_id == discord_user_id)
-                    .one_or_none()
-                )
-                if existing_user is None:
-                    logger.exception(
-                        "Discord user %s caused uniqueness error but no existing record was found",
-                        discord_user_id,
-                    )
-                    return _oauth_failure(
-                        "Unexpected Discord verification failure", 500
-                    )
-
-                asurite = verification_state.get("asurite")
-                if asurite and existing_user.asurite_id != asurite:
-                    message = (
-                        "This Discord account is already linked to another ASURITE. "
-                        "If this is your account, please contact support."
-                    )
-                    session["verification_error"] = message
-                    return _oauth_failure(message, 409)
-
-                if existing_user.discord_user_id == discord_user_id and (
-                    not asurite or existing_user.asurite_id == asurite
-                ):
-                    existing_user.updated_at = datetime.utcnow()
-                else:
-                    existing_user.discord_username = profile.username
-                    existing_user.discord_global_name = profile.global_name
-                    existing_user.discord_avatar = profile.avatar
-                    existing_user.verified = True
-                    existing_user.verified_at = datetime.utcnow()
-                    if existing_user.created_at != existing_user.verified_at:
-                        existing_user.created_at = existing_user.verified_at
-
-                user_db_id = existing_user.id
-                verification_state["user_id"] = user_db_id
-        except Exception:  # pragma: no cover - defensive
-            logger.exception("Failed to recover from Discord uniqueness error")
-            return _oauth_failure("Unexpected Discord verification failure", 500)
-
-        try:
-            assign_verified_role(
-                discord_user_id, asurite=verification_state.get("asurite")
-            )
-        except DiscordAPIError as assign_exc:
-            logger.error(
-                "Discord integration failed for user %s: %s",
-                discord_user_id,
-                assign_exc,
-            )
-            return _oauth_failure(str(assign_exc), 502)
     except DiscordAPIError as exc:
         logger.error("Discord integration failed for user %s: %s", discord_user_id, exc)
         return _oauth_failure(str(exc), 502)

@@ -36,7 +36,7 @@ ENV_PATH = PROJECT_ROOT / ".env"
 
 GUILD_ID = 1187144343400751234
 SINCE = datetime(2026, 3, 1, tzinfo=timezone.utc)
-UNTIL = datetime(2026, 4, 1, tzinfo=timezone.utc)  # exclusive — covers through end of Mar 2026
+UNTIL = datetime(2026, 6, 1, tzinfo=timezone.utc)  # exclusive — covers through end of May 2026
 
 # Custom IDs used by QnAFeedbackView in qna.py
 SATISFACTORY_CUSTOM_ID = "qna:satisfied"
@@ -58,6 +58,15 @@ CAMPUS_CHANNELS: dict[str, int] = {
 
 # Category whose forum channels are all counted for thread posts
 CAMPUS_FORUMS_CATEGORY_ID = 1435690325917175928
+
+# Roommate-finder forum channels
+ROOMMATE_CHANNELS: dict[str, int] = {
+    "Roommate 1": 1435704924812869812,
+    "Roommate 2": 1435706259289407589,
+    "Roommate 3": 1435706679168729088,
+    "Roommate 4": 1435707066852311070,
+    "Roommate 5": 1435707830563897478,
+}
 
 # Keywords that indicate a staff member is confirming the bot rather than providing a new answer.
 # Matched case-insensitively against the full message content.
@@ -277,6 +286,7 @@ async def run(*, forum_channel_id: int) -> None:
     tag_staff_answered: dict[str, int] = defaultdict(int)
 
     campus_counts: dict[str, int] = {}
+    roommate_counts: dict[str, int] = {}
     extra_forum_tag_counts: dict[str, int] = defaultdict(int)
     extra_forum_total = 0
     extra_forum_messages = 0
@@ -286,6 +296,7 @@ async def run(*, forum_channel_id: int) -> None:
     @client.event
     async def on_ready() -> None:
         nonlocal total_threads, total_messages, bot_credit_count, bot_satisfied_count, bot_staff_confirmed_count, staff_answered_count, needs_help_unanswered, pending_count, no_bot_msg_count, campus_counts, extra_forum_tag_counts, extra_forum_total, extra_forum_messages, cbm_monthly, cbm_tag_messages
+        nonlocal total_threads, total_messages, bot_credit_count, bot_satisfied_count, bot_staff_confirmed_count, staff_answered_count, needs_help_unanswered, pending_count, no_bot_msg_count, campus_counts, roommate_counts, extra_forum_tag_counts, extra_forum_total, extra_forum_messages
         logger.info("Connected to Discord as %s.", client.user)
 
         guild = client.get_guild(GUILD_ID)
@@ -487,24 +498,57 @@ async def run(*, forum_channel_id: int) -> None:
             "Counting threads in campus forum channels (category %d)...",
             CAMPUS_FORUMS_CATEGORY_ID,
         )
-        campus_forum_channels = [
+        category_channels = [
             ch for ch in guild.channels
-            if isinstance(ch, discord.ForumChannel)
-            and getattr(ch, "category_id", None) == CAMPUS_FORUMS_CATEGORY_ID
+            if getattr(ch, "category_id", None) == CAMPUS_FORUMS_CATEGORY_ID
+            and isinstance(ch, (discord.ForumChannel, discord.TextChannel))
         ]
-        logger.info("Found %d forum channels in category.", len(campus_forum_channels))
-        for forum in campus_forum_channels:
-            archived_ids = set(await _fetch_all_threads_in_range(client.http, forum.id))
-            seen: dict[int, discord.Thread] = {}
-            async for thread in forum.archived_threads(limit=None):
-                if thread.created_at and SINCE <= thread.created_at < UNTIL:
-                    seen[thread.id] = thread
-            for thread in forum.threads:
-                if thread.created_at and SINCE <= thread.created_at < UNTIL:
-                    seen[thread.id] = thread
-            count = len(archived_ids | set(seen.keys()))
-            campus_counts[forum.name] = count
-            logger.info("  %s: %d threads", forum.name, count)
+        logger.info("Found %d channels in category.", len(category_channels))
+        for ch in category_channels:
+            if isinstance(ch, discord.ForumChannel):
+                archived_ids = set(await _fetch_all_threads_in_range(client.http, ch.id))
+                seen: dict[int, discord.Thread] = {}
+                async for thread in ch.archived_threads(limit=None):
+                    if thread.created_at and SINCE <= thread.created_at < UNTIL:
+                        seen[thread.id] = thread
+                for thread in ch.threads:
+                    if thread.created_at and SINCE <= thread.created_at < UNTIL:
+                        seen[thread.id] = thread
+                count = len(archived_ids | set(seen.keys()))
+            else:
+                count = 0
+                async for _ in ch.history(limit=None, after=SINCE, before=UNTIL):
+                    count += 1
+            campus_counts[ch.name] = count
+            logger.info("  %s: %d posts", ch.name, count)
+
+        # Count posts in roommate-finder channels
+        logger.info("Counting posts in roommate-finder channels...")
+        for label, channel_id in ROOMMATE_CHANNELS.items():
+            try:
+                channel = await guild.fetch_channel(channel_id)
+            except (discord.NotFound, discord.HTTPException) as exc:
+                logger.warning("Roommate channel '%s' (%d): %s", label, channel_id, exc)
+                roommate_counts[f"{label} ({channel_id})"] = -1
+                continue
+
+            display_name = channel.name
+            if isinstance(channel, discord.ForumChannel):
+                archived_ids = set(await _fetch_all_threads_in_range(client.http, channel_id))
+                seen_rm: dict[int, discord.Thread] = {}
+                async for thread in channel.archived_threads(limit=None):
+                    if thread.created_at and SINCE <= thread.created_at < UNTIL:
+                        seen_rm[thread.id] = thread
+                for thread in channel.threads:
+                    if thread.created_at and SINCE <= thread.created_at < UNTIL:
+                        seen_rm[thread.id] = thread
+                count = len(archived_ids | set(seen_rm.keys()))
+            else:
+                count = 0
+                async for _ in channel.history(limit=None, after=SINCE, before=UNTIL):
+                    count += 1
+            roommate_counts[display_name] = count
+            logger.info("  %s: %d posts", display_name, count)
 
         await client.close()
 
@@ -520,7 +564,7 @@ async def run(*, forum_channel_id: int) -> None:
 
     print(f"\n{'=' * W}")
     print("  QnA Forum Statistics")
-    print("  March 2026")
+    print("  March – May 2026")
     print(f"{'=' * W}")
 
     print(f"\n  {'Total posts created:':<38} {total_threads:>5}")
@@ -579,6 +623,15 @@ async def run(*, forum_channel_id: int) -> None:
             print(f"  {campus_name} — (channel not found)")
         else:
             print(f"  {campus_name:<32} {count:>5}")
+
+    print(f"\n{'-' * W}")
+    print("  Posts by Roommate-Finder Channel")
+    print(f"{'-' * W}")
+    for name, count in roommate_counts.items():
+        if count == -1:
+            print(f"  {name} — (channel not found)")
+        else:
+            print(f"  {name:<32} {count:>5}")
 
     print()
 

@@ -1,6 +1,7 @@
 import "@/admin.css";
 import { useState, useEffect, useLayoutEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { getAdminPage, pushAdminPage } from "@/utils/adminUrl";
 import Dashboard from "./admin/Dashboard.jsx";
 import Automations from "./admin/Automations.jsx";
 import Events from "./admin/Events.jsx";
@@ -85,13 +86,29 @@ function NavItem({ id, icon, label, active, onClick }) {
 // ─── Admin shell ──────────────────────────────────────────────────────────────
 
 export default function Admin() {
-  const [activeView, setActiveView] = useState("dashboard");
+  const [activeView, setActiveView] = useState(getAdminPage);
   const [adminUser, setAdminUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sidebarTop, setSidebarTop] = useState(0);
   const [darkMode, setDarkMode] = useState(
     () => localStorage.getItem("admin_theme") === "dark"
   );
+
+  // Normalize bare /admin → /admin/dashboard and handle browser back/forward
+  useEffect(() => {
+    const path = window.location.pathname;
+    if (path === "/admin" || path === "/admin/") {
+      history.replaceState(null, "", `/admin/${getAdminPage()}`);
+    }
+    const onPop = () => setActiveView(getAdminPage());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  const navigate = (id) => {
+    setActiveView(id);
+    pushAdminPage(id);
+  };
 
   // Measure fixed ASU header so sidebar sticks just below it
   useEffect(() => {
@@ -188,7 +205,7 @@ export default function Admin() {
                 key={item.id}
                 {...item}
                 active={activeView === item.id}
-                onClick={setActiveView}
+                onClick={navigate}
               />
             ))}
           </div>

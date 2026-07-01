@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
@@ -14,10 +15,11 @@ from zoneinfo import ZoneInfo
 
 import yaml
 from flask import Blueprint, Response, abort, jsonify, redirect, request, send_from_directory, session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from utils.database import (
     CronJobConfig,
+    DiscordMember,
     EventParticipant,
     ForumPost,
     GoldGuideContribution,
@@ -103,7 +105,8 @@ def admin_me():
         user = (
             db_session.query(User)
             .filter(User.discord_user_id == discord_user_id)
-            .one_or_none()
+            .order_by(User.id.desc())
+            .first()
         )
         if user is None:
             return jsonify({"error": "User not found"}), 404
@@ -145,26 +148,22 @@ def admin_stats():
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     today_naive = today_start.replace(tzinfo=None)
 
-    # Period for retention/leaves stats — defaults to current month in AZ time
+    # Period for retention/leaves stats — defaults to current month in UTC
     from_date_str = request.args.get("from_date")
     to_date_str = request.args.get("to_date")
 
-    now_az = datetime.now(AZ_TZ)
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     if from_date_str:
         from_dt = _parse_az_date(from_date_str)
     else:
-        from_dt = (
-            now_az.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            .astimezone(timezone.utc)
-            .replace(tzinfo=None)
-        )
-        from_date_str = now_az.replace(day=1).date().isoformat()
+        from_dt = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        from_date_str = from_dt.date().isoformat()
 
     if to_date_str:
         to_dt = _parse_az_date(to_date_str, end_of_day=True)
     else:
-        to_dt = now_az.astimezone(timezone.utc).replace(tzinfo=None)
-        to_date_str = now_az.date().isoformat()
+        to_dt = now_utc
+        to_date_str = now_utc.date().isoformat()
 
     with session_scope() as db_session:
         total_users = db_session.query(User).count()
@@ -221,17 +220,39 @@ def admin_stats():
     )
 
 
+@admin_bp.route("/api/admin/live-member-counts")
+@require_admin
+def admin_live_member_counts():
+    from asu_discord.api import get_live_member_counts
+    counts = get_live_member_counts()
+    if counts is None:
+        return jsonify({"error": "Bot or guild unavailable"}), 503
+    return jsonify(counts)
+
+
 @admin_bp.route("/api/admin/users")
 @require_admin
 def admin_users():
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(100, max(1, request.args.get("per_page", 50, type=int)))
     offset = (page - 1) * per_page
+    search = (request.args.get("q") or "").strip()
 
     with session_scope() as db_session:
-        total = db_session.query(User).count()
+        base_query = db_session.query(User)
+        if search:
+            like = f"%{search}%"
+            base_query = base_query.filter(
+                or_(
+                    User.asurite_id.ilike(like),
+                    User.discord_username.ilike(like),
+                    User.discord_user_id.ilike(like),
+                )
+            )
+
+        total = base_query.count()
         users = (
-            db_session.query(User).order_by(User.id.desc()).offset(offset).limit(per_page).all()
+            base_query.order_by(User.id.desc()).offset(offset).limit(per_page).all()
         )
         user_list = [
             {
@@ -581,14 +602,14 @@ def admin_member_stats():
 # ─── Activity helpers ─────────────────────────────────────────────────────────
 
 def _parse_az_date(date_str: str | None, *, end_of_day: bool = False) -> datetime | None:
-    """Parse a YYYY-MM-DD string in AZ time and return a naive UTC datetime."""
+    """Parse a YYYY-MM-DD string as UTC midnight and return a naive UTC datetime."""
     if not date_str:
         return None
     try:
         dt = datetime.fromisoformat(date_str)
         if end_of_day:
             dt = dt.replace(hour=23, minute=59, second=59)
-        return dt.replace(tzinfo=AZ_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
     except ValueError:
         return None
 
@@ -690,6 +711,29 @@ def _chart_activity(date_col):
                  for u in _activity_query(db_session, date_col, from_dt, to_dt, roles).all()]
 
     return jsonify(_chart_data(dates, from_dt, to_dt))
+
+
+# ─── Verifications ────────────────────────────────────────────────────────────
+
+@admin_bp.route("/api/admin/verifications/chart")
+@require_admin
+def admin_verifications_chart():
+    from_dt = _parse_az_date(request.args.get("from_date"))
+    to_dt   = _parse_az_date(request.args.get("to_date"), end_of_day=True)
+    with session_scope() as db_session:
+        dates = [
+            u.verified_at
+            for u in _activity_query(db_session, User.verified_at, from_dt, to_dt)
+            .filter(User.verified == True)  # noqa: E712
+            .all()
+        ]
+    return jsonify(_chart_data(dates, from_dt, to_dt))
+
+
+@admin_bp.route("/api/admin/verifications")
+@require_admin
+def admin_verifications():
+    return _paginated_activity(User.verified_at, "verified_at")
 
 
 # ─── Server joins ─────────────────────────────────────────────────────────────
@@ -990,6 +1034,32 @@ def admin_message_backfill_start():
     return jsonify({"status": "started"})
 
 
+@admin_bp.route("/api/admin/message-logs/sync-thread-parents", methods=["POST"])
+@require_full_admin
+def admin_sync_thread_parents():
+    """Populate parent_channel_id on existing message_log rows that are threads."""
+    from asu_discord.shared import get_running_bot, get_running_loop
+    from asu_discord.cogs.analytics import AnalyticsCog
+
+    bot = get_running_bot()
+    if bot is None:
+        return jsonify({"error": "Discord bot is not running"}), 503
+
+    cog = bot.cogs.get("AnalyticsCog")
+    if cog is None or not isinstance(cog, AnalyticsCog):
+        return jsonify({"error": "AnalyticsCog not loaded"}), 503
+
+    loop = get_running_loop()
+    if loop is None:
+        return jsonify({"error": "Bot event loop unavailable"}), 503
+
+    if cog._thread_parent_sync_running:
+        return jsonify({"status": "already_running"})
+
+    asyncio.run_coroutine_threadsafe(cog._sync_thread_parents(), loop)
+    return jsonify({"status": "started"})
+
+
 @admin_bp.route("/api/admin/message-logs/backfill/status")
 @require_full_admin
 def admin_message_backfill_status():
@@ -1132,12 +1202,12 @@ def admin_gold_guide_stats():
     to_dt = None
     if from_date_str:
         try:
-            from_dt = datetime.strptime(from_date_str, "%Y-%m-%d").replace(tzinfo=AZ_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+            from_dt = datetime.strptime(from_date_str, "%Y-%m-%d")
         except ValueError:
             return jsonify({"error": "Invalid from_date, expected YYYY-MM-DD"}), 400
     if to_date_str:
         try:
-            to_dt = (datetime.strptime(to_date_str, "%Y-%m-%d") + timedelta(days=1)).replace(tzinfo=AZ_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+            to_dt = datetime.strptime(to_date_str, "%Y-%m-%d") + timedelta(days=1)
         except ValueError:
             return jsonify({"error": "Invalid to_date, expected YYYY-MM-DD"}), 400
 
@@ -1226,53 +1296,55 @@ def admin_analytics():
         )
 
         # ── Growth & Funnel / Onboarding ───────────────────────────────────────
-        joins_q = db_session.query(User).filter(User.joined_at.isnot(None))
+        joins_q = db_session.query(DiscordMember)
         if from_dt:
-            joins_q = joins_q.filter(User.joined_at >= from_dt)
+            joins_q = joins_q.filter(DiscordMember.joined_at >= from_dt)
         if to_dt:
-            joins_q = joins_q.filter(User.joined_at <= to_dt)
+            joins_q = joins_q.filter(DiscordMember.joined_at <= to_dt)
         total_joins = joins_q.count()
 
-        verified_q = db_session.query(User).filter(User.verified == True)  # noqa: E712
-        if from_dt:
-            verified_q = verified_q.filter(User.verified_at >= from_dt)
-        if to_dt:
-            verified_q = verified_q.filter(User.verified_at <= to_dt)
-        period_verified = verified_q.count()
-
-        unverified_q = db_session.query(User).filter(
-            User.verified == False, User.joined_at.isnot(None)  # noqa: E712
+        verified_discord_ids = db_session.query(User.discord_user_id).filter(
+            User.verified == True, User.discord_user_id.isnot(None)  # noqa: E712
         )
-        if from_dt:
-            unverified_q = unverified_q.filter(User.joined_at >= from_dt)
-        if to_dt:
-            unverified_q = unverified_q.filter(User.joined_at <= to_dt)
-        period_unverified = unverified_q.count()
+        period_verified = joins_q.filter(
+            DiscordMember.discord_user_id.in_(verified_discord_ids)
+        ).count()
+        period_unverified = total_joins - period_verified
 
         # ── Growth & Funnel / Retention ────────────────────────────────────────
-        total_verified_alltime = (
-            db_session.query(User).filter(User.verified == True).count()  # noqa: E712
-        )
+        verified_period_q = db_session.query(User).filter(User.verified == True)  # noqa: E712
+        if from_dt:
+            verified_period_q = verified_period_q.filter(User.verified_at >= from_dt)
+        if to_dt:
+            verified_period_q = verified_period_q.filter(User.verified_at <= to_dt)
+        total_verified = verified_period_q.count()
         in_server_count = (
             db_session.query(User)
             .filter(User.verified == True, User.left_at.is_(None))  # noqa: E712
             .count()
         )
-        total_unverified_alltime = (
-            db_session.query(User)
-            .filter(User.verified == False, User.discord_user_id.isnot(None))  # noqa: E712
-            .count()
-        )
 
+        from sqlalchemy import or_
         retention_rate = None
-        if from_dt:
+        if not from_dt:
+            all_time_verified = (
+                db_session.query(User).filter(User.verified == True).count()  # noqa: E712
+            )
+            if all_time_verified > 0:
+                retention_rate = round((in_server_count / all_time_verified) * 100, 1)
+        else:
             verified_at_start = (
                 db_session.query(User)
-                .filter(User.verified == True, User.verified_at < from_dt)  # noqa: E712
+                .filter(
+                    User.verified == True,  # noqa: E712
+                    User.verified_at < from_dt,
+                    or_(User.left_at.is_(None), User.left_at >= from_dt),
+                )
                 .count()
             )
             leaves_q = db_session.query(User).filter(
                 User.verified == True,  # noqa: E712
+                User.verified_at < from_dt,
                 User.left_at.isnot(None),
                 User.left_at >= from_dt,
             )
@@ -1281,13 +1353,15 @@ def admin_analytics():
             leaves_count = leaves_q.count()
             if verified_at_start > 0:
                 retention_rate = round(
-                    ((verified_at_start - leaves_count) / verified_at_start) * 100, 1
+                    (max(0, verified_at_start - leaves_count) / verified_at_start) * 100, 1
                 )
 
         # ── Channel Engagement ─────────────────────────────────────────────────
         ch_q = db_session.query(
             MessageLog.channel_id,
             MessageLog.channel_name,
+            MessageLog.parent_channel_id,
+            MessageLog.parent_channel_name,
             func.count(MessageLog.id).label("cnt"),
         )
         if from_dt:
@@ -1295,15 +1369,58 @@ def admin_analytics():
         if to_dt:
             ch_q = ch_q.filter(MessageLog.sent_at <= to_dt)
         ch_rows = (
-            ch_q.group_by(MessageLog.channel_id, MessageLog.channel_name)
+            ch_q.group_by(
+                MessageLog.channel_id,
+                MessageLog.channel_name,
+                MessageLog.parent_channel_id,
+                MessageLog.parent_channel_name,
+            )
             .order_by(func.count(MessageLog.id).desc())
-            .limit(25)
             .all()
         )
-        channels = [
-            {"rank": i + 1, "channel_id": cid, "channel_name": cname or cid, "messages": cnt}
-            for i, (cid, cname, cnt) in enumerate(ch_rows)
-        ]
+
+        # Group threads under their parent channel
+        ch_parent_map: dict[str, dict] = {}  # parent_channel_id -> aggregated data
+        ch_standalone: dict[str, dict] = {}  # channel_id -> data for channels without parent
+        for cid, cname, parent_cid, parent_cname, cnt in ch_rows:
+            if parent_cid:
+                if parent_cid not in ch_parent_map:
+                    ch_parent_map[parent_cid] = {
+                        "channel_id": parent_cid,
+                        "channel_name": parent_cname or parent_cid,
+                        "messages": 0,
+                        "threads": [],
+                    }
+                ch_parent_map[parent_cid]["messages"] += cnt
+                ch_parent_map[parent_cid]["threads"].append({
+                    "channel_id": cid,
+                    "channel_name": cname or cid,
+                    "messages": cnt,
+                })
+            else:
+                if cid not in ch_standalone:
+                    ch_standalone[cid] = {
+                        "channel_id": cid,
+                        "channel_name": cname or cid,
+                        "messages": cnt,
+                        "threads": [],
+                    }
+                else:
+                    ch_standalone[cid]["messages"] += cnt
+
+        # Merge parent_map into standalone (parent may also have direct messages)
+        for parent_cid, parent_data in ch_parent_map.items():
+            if parent_cid in ch_standalone:
+                ch_standalone[parent_cid]["messages"] += parent_data["messages"]
+                ch_standalone[parent_cid]["threads"].extend(parent_data["threads"])
+            else:
+                ch_standalone[parent_cid] = parent_data
+
+        for ch_data in ch_standalone.values():
+            ch_data["threads"].sort(key=lambda x: -x["messages"])
+
+        all_channels_sorted = sorted(ch_standalone.values(), key=lambda x: -x["messages"])[:25]
+        channels = [{"rank": i + 1, **ch} for i, ch in enumerate(all_channels_sorted)]
 
         # ── Demographics ───────────────────────────────────────────────────────
         demo_q = (
@@ -1321,36 +1438,46 @@ def admin_analytics():
         role_counts = {name: cnt for name, cnt in demo_q.group_by(UserRole.role_name).all()}
 
         # ── Voice (from voice_sessions) ────────────────────────────────────────
+        # Select sessions that overlap the period (started before end, ended after start),
+        # then clip each session's duration to the period boundary in Python so sessions
+        # that straddle the period edges are counted correctly rather than dropped.
         vs_q = db_session.query(VoiceSession).filter(VoiceSession.left_at.isnot(None))
         if from_dt:
-            vs_q = vs_q.filter(VoiceSession.joined_at >= from_dt)
+            vs_q = vs_q.filter(VoiceSession.left_at > from_dt)
         if to_dt:
-            vs_q = vs_q.filter(VoiceSession.joined_at <= to_dt)
-        total_voice_seconds = (
-            vs_q.with_entities(func.coalesce(func.sum(VoiceSession.duration_seconds), 0)).scalar()
-            or 0
-        )
-        voice_hours = round(total_voice_seconds / 3600, 1) if total_voice_seconds else None
-        unique_speakers = (
-            vs_q.with_entities(func.count(VoiceSession.discord_user_id.distinct())).scalar() or 0
-        ) or None
+            vs_q = vs_q.filter(VoiceSession.joined_at < to_dt)
+        voice_sessions = vs_q.all()
 
-        # Channel voice activity
-        vc_rows = (
-            vs_q.with_entities(
-                VoiceSession.channel_id,
-                VoiceSession.channel_name,
-                func.sum(VoiceSession.duration_seconds).label("dur"),
-                func.count(VoiceSession.id).label("sessions"),
-            )
-            .group_by(VoiceSession.channel_id, VoiceSession.channel_name)
-            .order_by(func.sum(VoiceSession.duration_seconds).desc())
-            .limit(25)
-            .all()
-        )
+        total_voice_seconds = 0
+        ch_seconds: dict[str, int] = {}
+        ch_sessions: dict[str, int] = {}
+        ch_names: dict[str, str] = {}
+        unique_speaker_ids: set[str] = set()
+        incomplete_voice_sessions = 0
+        for s in voice_sessions:
+            clip_start = max(s.joined_at, from_dt) if from_dt else s.joined_at
+            clip_end = min(s.left_at, to_dt) if to_dt else s.left_at
+            clipped = int(max(0, (clip_end - clip_start).total_seconds()))
+            total_voice_seconds += clipped
+            cid = str(s.channel_id)
+            ch_seconds[cid] = ch_seconds.get(cid, 0) + clipped
+            ch_sessions[cid] = ch_sessions.get(cid, 0) + 1
+            ch_names[cid] = s.channel_name or cid
+            unique_speaker_ids.add(s.discord_user_id)
+            if not s.is_complete:
+                incomplete_voice_sessions += 1
+
+        voice_hours = round(total_voice_seconds / 3600, 1) if total_voice_seconds else None
+        unique_speakers = len(unique_speaker_ids) or None
+
+        top_voice_channels = sorted(ch_seconds.items(), key=lambda x: -x[1])[:25]
         voice_by_channel = {
-            str(cid): {"channel_name": cname or cid, "voice_seconds": dur or 0, "sessions": ses}
-            for cid, cname, dur, ses in vc_rows
+            cid: {
+                "channel_name": ch_names[cid],
+                "voice_seconds": ch_seconds[cid],
+                "sessions": ch_sessions[cid],
+            }
+            for cid, _ in top_voice_channels
         }
 
         # ── Moderation (from moderation_events + User.banned) ──────────────────
@@ -1362,6 +1489,9 @@ def admin_analytics():
             me_q = me_q.filter(ModerationEvent.occurred_at <= to_dt)
         period_bans = me_q.filter(ModerationEvent.event_type == "ban").count()
         period_unbans = me_q.filter(ModerationEvent.event_type == "unban").count()
+        period_kicks = me_q.filter(ModerationEvent.event_type == "kick").count()
+        period_timeouts = me_q.filter(ModerationEvent.event_type == "timeout").count()
+        period_message_deletes = me_q.filter(ModerationEvent.event_type == "message_delete").count()
 
         # ── Forum Posts (from forum_posts) ─────────────────────────────────────
         fp_q = db_session.query(ForumPost)
@@ -1393,13 +1523,19 @@ def admin_analytics():
                 UserSalesforceProfile.country,
                 func.count(UserSalesforceProfile.id).label("cnt"),
             )
+            .join(User, User.asurite_id == UserSalesforceProfile.asurite_id)
             .filter(
                 UserSalesforceProfile.is_international == True,  # noqa: E712
                 UserSalesforceProfile.fetch_error.is_(None),
+                User.verified == True,  # noqa: E712
             )
             .group_by(UserSalesforceProfile.country)
             .order_by(func.count(UserSalesforceProfile.id).desc())
         )
+        if from_dt:
+            country_q = country_q.filter(User.verified_at >= from_dt)
+        if to_dt:
+            country_q = country_q.filter(User.verified_at <= to_dt)
         country_rows = country_q.all()
         international_country = (
             [{"country": c or "Unknown", "count": cnt} for c, cnt in country_rows]
@@ -1474,6 +1610,7 @@ def admin_analytics():
                 "unique_talkers": unique_talkers,
                 "voice_hours": voice_hours,
                 "unique_speakers": unique_speakers,
+                "incomplete_voice_sessions": incomplete_voice_sessions or None,
             },
             "growth_funnel": {
                 "onboarding": {
@@ -1484,11 +1621,11 @@ def admin_analytics():
                 },
                 "retention": {
                     "verified_retention_rate": retention_rate,
-                    "total_verified": total_verified_alltime,
+                    "total_verified": total_verified,
                     "currently_in_server": in_server_count,
                     "verified_vs_unverified": {
-                        "verified": total_verified_alltime,
-                        "unverified": total_unverified_alltime,
+                        "verified": period_verified,
+                        "unverified": period_unverified,
                     },
                 },
             },
@@ -1496,6 +1633,13 @@ def admin_analytics():
                 {
                     **ch,
                     "voice_seconds": voice_by_channel.get(ch["channel_id"], {}).get("voice_seconds"),
+                    "threads": [
+                        {
+                            **t,
+                            "voice_seconds": voice_by_channel.get(t["channel_id"], {}).get("voice_seconds"),
+                        }
+                        for t in ch.get("threads", [])
+                    ],
                 }
                 for ch in channels
             ],
@@ -1530,6 +1674,9 @@ def admin_analytics():
                 "banned_users": banned_count,
                 "period_bans": period_bans,
                 "period_unbans": period_unbans,
+                "period_kicks": period_kicks,
+                "period_timeouts": period_timeouts,
+                "period_message_deletes": period_message_deletes,
                 "support_tickets": None,
                 "inappropriate_speech_incidents": None,
                 "harassment_incidents": None,
@@ -1954,6 +2101,87 @@ def admin_tickets_list():
             "pages": max(1, (total + per_page - 1) // per_page),
         }
     )
+# ─── Purge Unregistered Roles ─────────────────────────────────────────────────
+
+_purge_unregistered_lock = threading.Lock()
+_purge_unregistered_running = False
+_purge_unregistered_last: dict = {
+    "started_at": None,
+    "finished_at": None,
+    "stripped": 0,
+    "errors": 0,
+    "error": None,
+}
+
+
+def _run_purge_unregistered() -> None:
+    """Background thread: strip managed roles from guild members not in the DB."""
+    global _purge_unregistered_running
+
+    try:
+        from asu_discord.shared import get_running_bot, get_running_loop
+
+        bot = get_running_bot()
+        loop = get_running_loop()
+        if bot is None or loop is None or loop.is_closed():
+            raise RuntimeError("Discord bot is not running")
+
+        cog = bot.get_cog("VerificationCog")
+        if cog is None:
+            raise RuntimeError("VerificationCog is not loaded")
+
+        with session_scope() as db:
+            registered_ids = {
+                row[0]
+                for row in db.query(User.discord_user_id)
+                .filter(User.discord_user_id.isnot(None))
+                .all()
+            }
+
+        future = asyncio.run_coroutine_threadsafe(
+            cog.strip_unregistered_members(registered_ids),
+            loop,
+        )
+        stripped, errors = future.result(timeout=300)
+        _purge_unregistered_last["stripped"] = stripped
+        _purge_unregistered_last["errors"] = errors
+        _purge_unregistered_last["finished_at"] = datetime.utcnow().isoformat()
+    except Exception as exc:
+        _purge_unregistered_last["error"] = str(exc)
+        _purge_unregistered_last["finished_at"] = datetime.utcnow().isoformat()
+        logger.exception("Purge unregistered roles failed")
+    finally:
+        _purge_unregistered_running = False
+
+
+@admin_bp.route("/api/admin/purge-unregistered-roles", methods=["POST"])
+@require_full_admin
+def admin_purge_unregistered_roles():
+    """Trigger background removal of verified and managed roles from non-registered guild members."""
+    global _purge_unregistered_running
+
+    with _purge_unregistered_lock:
+        if _purge_unregistered_running:
+            return jsonify({"status": "already_running", "last": _purge_unregistered_last})
+        _purge_unregistered_running = True
+        _purge_unregistered_last["started_at"] = datetime.utcnow().isoformat()
+        _purge_unregistered_last["finished_at"] = None
+        _purge_unregistered_last["error"] = None
+        _purge_unregistered_last["errors"] = 0
+        _purge_unregistered_last["stripped"] = 0
+
+    threading.Thread(target=_run_purge_unregistered, daemon=True).start()
+    return jsonify({"status": "started"})
+
+
+@admin_bp.route("/api/admin/purge-unregistered-roles/status", methods=["GET"])
+@require_full_admin
+def admin_purge_unregistered_status():
+    """Return current status of the purge-unregistered-roles operation."""
+    return jsonify({
+        "running": _purge_unregistered_running,
+        "last": _purge_unregistered_last,
+    })
 
 
 # ─── Role Exceptions ──────────────────────────────────────────────────────────
@@ -1999,7 +2227,8 @@ def admin_exceptions_for_user(discord_user_id: str):
         db_user = (
             db_session.query(User)
             .filter(User.discord_user_id == discord_user_id)
-            .one_or_none()
+            .order_by(User.id.desc())
+            .first()
         )
         db_roles = (
             db_session.query(UserRole)
@@ -2126,7 +2355,210 @@ def admin_exceptions_delete(exception_id: int):
     return jsonify({"status": "deleted", "id": exception_id})
 
 
+@admin_bp.route("/api/admin/exceptions/campus")
+@require_admin
+def admin_campus_exceptions():
+    """All campus role exceptions — consolidated view for reviewing /changecampus requests."""
+    campus_roles = MEMBER_ROLE_CATEGORIES["Campus"]
+    with session_scope() as db_session:
+        exceptions = (
+            db_session.query(UserRoleException)
+            .filter(UserRoleException.role_name.in_(campus_roles))
+            .order_by(UserRoleException.created_at.desc())
+            .all()
+        )
+        discord_ids = list({e.discord_user_id for e in exceptions})
+        users_map: dict[str, User] = {}
+        if discord_ids:
+            users_map = {
+                u.discord_user_id: u
+                for u in db_session.query(User)
+                .filter(User.discord_user_id.in_(discord_ids))
+                .all()
+            }
+
+    result = []
+    for exc in exceptions:
+        u = users_map.get(exc.discord_user_id)
+        result.append({
+            **_serialize_exception(exc),
+            "asurite_id": u.asurite_id if u else None,
+            "discord_username": u.discord_username if u else None,
+        })
+    return jsonify(result)
+
+
 # ── Server Events ─────────────────────────────────────────────────────────────
+
+@admin_bp.route("/api/admin/events/voice-channels")
+@require_admin
+def voice_channels():
+    with session_scope() as db:
+        rows = (
+            db.query(VoiceSession.channel_name)
+            .distinct()
+            .order_by(VoiceSession.channel_name)
+            .all()
+        )
+    return jsonify([r[0] for r in rows if r[0]])
+
+
+@admin_bp.route("/api/admin/events/voice-search", methods=["POST"])
+@require_admin
+def voice_search():
+    data = request.get_json(force=True)
+    start_str = data.get("start_time")
+    end_str = data.get("end_time")
+    channel = data.get("channel_name") or None
+
+    if not start_str or not end_str:
+        return jsonify({"error": "start_time and end_time are required"}), 400
+
+    start_utc = (
+        datetime.fromisoformat(start_str)
+        .replace(tzinfo=AZ_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+    end_utc = (
+        datetime.fromisoformat(end_str)
+        .replace(tzinfo=AZ_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+
+    with session_scope() as db:
+        q = db.query(VoiceSession).filter(
+            VoiceSession.joined_at < end_utc,
+            or_(VoiceSession.left_at.is_(None), VoiceSession.left_at >= start_utc),
+        )
+        if channel:
+            q = q.filter(VoiceSession.channel_name == channel)
+        sessions = q.order_by(VoiceSession.joined_at).all()
+
+        user_ids = list({s.discord_user_id for s in sessions})
+        users_map: dict[str, User] = {}
+        if user_ids:
+            users_map = {
+                u.discord_user_id: u
+                for u in db.query(User).filter(User.discord_user_id.in_(user_ids)).all()
+            }
+
+        # One row per unique user: earliest joined_at, latest left_at
+        seen: dict[str, dict] = {}
+        for s in sessions:
+            uid = s.discord_user_id
+            if uid not in seen:
+                seen[uid] = {
+                    "discord_user_id": uid,
+                    "discord_username": s.discord_username,
+                    "channel_name": s.channel_name,
+                    "joined_at": s.joined_at,
+                    "left_at": s.left_at,
+                }
+            else:
+                if s.left_at is None:
+                    seen[uid]["left_at"] = None
+                elif seen[uid]["left_at"] is not None and s.left_at > seen[uid]["left_at"]:
+                    seen[uid]["left_at"] = s.left_at
+
+        def _to_az(dt):
+            if dt is None:
+                return None
+            return dt.replace(tzinfo=timezone.utc).astimezone(AZ_TZ).isoformat()
+
+        result = []
+        for uid, info in seen.items():
+            u = users_map.get(uid)
+            result.append({
+                "discord_user_id": uid,
+                "discord_username": info["discord_username"],
+                "email": u.email if u else None,
+                "asurite_id": u.asurite_id if u else None,
+                "channel_name": info["channel_name"],
+                "joined_at": _to_az(info["joined_at"]),
+                "left_at": _to_az(info["left_at"]),
+            })
+
+    return jsonify(result)
+
+
+@admin_bp.route("/api/admin/events/voice-save", methods=["POST"])
+@require_admin
+def voice_save():
+    data = request.get_json(force=True)
+    name = (data.get("name") or "").strip()
+    start_str = data.get("start_time")
+    end_str = data.get("end_time")
+    channel = data.get("channel_name") or None
+
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+    if not start_str or not end_str:
+        return jsonify({"error": "start_time and end_time are required"}), 400
+
+    start_utc = (
+        datetime.fromisoformat(start_str)
+        .replace(tzinfo=AZ_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+    end_utc = (
+        datetime.fromisoformat(end_str)
+        .replace(tzinfo=AZ_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+
+    with session_scope() as db:
+        sample = db.query(VoiceSession).first()
+        guild_id = sample.guild_id if sample else "0"
+
+        channel_id = None
+        if channel:
+            row = db.query(VoiceSession.channel_id).filter(VoiceSession.channel_name == channel).first()
+            if row:
+                channel_id = row[0]
+
+        q = db.query(VoiceSession).filter(
+            VoiceSession.joined_at < end_utc,
+            or_(VoiceSession.left_at.is_(None), VoiceSession.left_at >= start_utc),
+        )
+        if channel:
+            q = q.filter(VoiceSession.channel_name == channel)
+        sessions = q.order_by(VoiceSession.joined_at).all()
+
+        first_session: dict[str, VoiceSession] = {}
+        for s in sessions:
+            if s.discord_user_id not in first_session:
+                first_session[s.discord_user_id] = s
+
+        synthetic_id = f"manual_voice_{int(datetime.utcnow().timestamp() * 1000)}"
+        event = ServerEvent(
+            discord_event_id=synthetic_id,
+            guild_id=guild_id,
+            name=name,
+            start_time=start_utc,
+            end_time=end_utc,
+            status="completed",
+            entity_type="voice",
+            channel_id=channel_id,
+        )
+        db.add(event)
+        db.flush()
+
+        for s in first_session.values():
+            db.add(EventParticipant(
+                event_id=event.id,
+                discord_user_id=s.discord_user_id,
+                action="joined",
+                timestamp=s.joined_at,
+            ))
+
+        event_id = event.id
+
+    return jsonify({"id": event_id})
+
 
 @admin_bp.route("/api/admin/events")
 @require_admin

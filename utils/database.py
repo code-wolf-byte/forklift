@@ -41,7 +41,9 @@ class User(Base):
     affiliations = Column(String(255), nullable=True)
     saml_session_index = Column(String(128), nullable=True)
     saml_attributes = Column(Text, nullable=True)
-    discord_user_id = Column(String(64), unique=True, index=True, nullable=True)
+    # ASURITE is the only unique identity. A Discord account may be re-linked to a
+    # new ASURITE record, so discord_user_id is intentionally NOT unique.
+    discord_user_id = Column(String(64), index=True, nullable=True)
     discord_username = Column(String(255), nullable=True)
     discord_global_name = Column(String(255), nullable=True)
     discord_avatar = Column(String(255), nullable=True)
@@ -81,6 +83,22 @@ class User(Base):
     @property
     def is_employee(self) -> bool:
         return self._has_affiliation("employee@asu.edu")
+
+
+class DiscordMember(Base):
+    """Tracks every Discord guild join/leave event, keyed by Discord user ID.
+
+    Populated independently of the User table so joins are recorded even before
+    a member completes SAML verification.
+    """
+
+    __tablename__ = "discord_members"
+
+    id = Column(Integer, primary_key=True, index=True)
+    discord_user_id = Column(String(64), unique=True, index=True, nullable=False)
+    discord_username = Column(String(255), nullable=True)
+    joined_at = Column(DateTime, nullable=False)   # naive UTC
+    left_at = Column(DateTime, nullable=True)      # naive UTC; NULL = currently in server
 
 
 class UserRole(Base):
@@ -204,6 +222,8 @@ class MessageLog(Base):
     message_id = Column(String(64), unique=True, nullable=False, index=True)
     channel_id = Column(String(64), nullable=False, index=True)
     channel_name = Column(String(255), nullable=True)
+    parent_channel_id = Column(String(64), nullable=True, index=True)
+    parent_channel_name = Column(String(255), nullable=True)
     guild_id = Column(String(64), nullable=False, index=True)
     discord_user_id = Column(String(64), nullable=False, index=True)
     content = Column(Text, nullable=True)
@@ -287,7 +307,12 @@ class VoiceSession(Base):
 
 
 class ModerationEvent(Base):
-    """One row per moderation action recorded by AnalyticsCog (ban, unban)."""
+    """One row per moderation action recorded by AnalyticsCog.
+
+    event_type: "ban" | "unban" | "kick" | "timeout" | "timeout_remove" | "message_delete"
+    channel_id / message_id: set for "message_delete" events only.
+    extra_data: JSON string; "timeout_until" for timeouts, "content" for message_delete.
+    """
 
     __tablename__ = "moderation_events"
 
@@ -295,11 +320,14 @@ class ModerationEvent(Base):
     discord_user_id = Column(String(64), nullable=False, index=True)
     discord_username = Column(String(255), nullable=True)
     guild_id = Column(String(64), nullable=False, index=True)
-    event_type = Column(String(32), nullable=False, index=True)  # "ban" | "unban"
+    event_type = Column(String(32), nullable=False, index=True)
     reason = Column(Text, nullable=True)
     moderator_discord_id = Column(String(64), nullable=True)
     moderator_username = Column(String(255), nullable=True)
     occurred_at = Column(DateTime, nullable=False, index=True)   # naive UTC
+    channel_id = Column(String(64), nullable=True)               # message_delete only
+    message_id = Column(String(64), nullable=True)               # message_delete only
+    extra_data = Column(Text, nullable=True)                     # JSON
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
@@ -460,10 +488,68 @@ _LEGACY_STATE_FILES: dict[str, Path] = {
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_user_columns()
+    _ensure_user_discord_id_not_unique()
     _ensure_cron_job_config_columns()
     _ensure_message_log_columns()
     _ensure_qna_columns()
+    _ensure_moderation_event_columns()
     _seed_cron_job_config()
+    _backfill_discord_members_from_users()
+
+
+def _backfill_discord_members_from_users() -> None:
+    """Seed DiscordMember from existing User rows that have a discord_user_id and joined_at.
+
+    Runs at startup so historical join/leave data is available before the bot
+    connects. The on_ready Discord-API backfill then fills in any current members
+    that are missing or have a newer joined_at.
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    with session_scope() as session:
+        existing_ids = {
+            row[0]
+            for row in session.query(DiscordMember.discord_user_id).all()
+        }
+        users = (
+            session.query(User)
+            .filter(
+                User.discord_user_id.isnot(None),
+                User.joined_at.isnot(None),
+            )
+            .all()
+        )
+        new_rows = [
+            DiscordMember(
+                discord_user_id=u.discord_user_id,
+                discord_username=u.discord_username,
+                joined_at=u.joined_at,
+                left_at=u.left_at,
+            )
+            for u in users
+            if u.discord_user_id not in existing_ids
+        ]
+        if new_rows:
+            session.bulk_save_objects(new_rows)
+    _log.info("DiscordMember backfill from users table: inserted %d row(s)", len(new_rows))
+
+
+def _ensure_moderation_event_columns() -> None:
+    """Add columns to moderation_events introduced after the initial schema."""
+    inspector = inspect(engine)
+    if not inspector.has_table(ModerationEvent.__tablename__):
+        return
+
+    columns = {col["name"] for col in inspector.get_columns(ModerationEvent.__tablename__)}
+
+    with engine.begin() as conn:
+        if "channel_id" not in columns:
+            conn.execute(text("ALTER TABLE moderation_events ADD COLUMN channel_id VARCHAR(64)"))
+        if "message_id" not in columns:
+            conn.execute(text("ALTER TABLE moderation_events ADD COLUMN message_id VARCHAR(64)"))
+        if "extra_data" not in columns:
+            conn.execute(text("ALTER TABLE moderation_events ADD COLUMN extra_data TEXT"))
 
 
 def _ensure_qna_columns() -> None:
@@ -495,6 +581,14 @@ def _ensure_message_log_columns() -> None:
     if "content" not in columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE message_logs ADD COLUMN content TEXT"))
+
+    if "parent_channel_id" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE message_logs ADD COLUMN parent_channel_id VARCHAR(64)"))
+
+    if "parent_channel_name" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE message_logs ADD COLUMN parent_channel_name VARCHAR(255)"))
 
 
 def _ensure_cron_job_config_columns() -> None:
@@ -546,6 +640,47 @@ def _ensure_user_columns() -> None:
     with engine.begin() as conn:
         for ddl in ddl_statements:
             conn.execute(text(ddl))
+
+
+def _ensure_user_discord_id_not_unique() -> None:
+    """Drop any legacy UNIQUE index on users.discord_user_id.
+
+    ASURITE is now the only unique identity; a Discord account may be re-linked to a
+    different ASURITE. Existing databases were created with a unique index on
+    discord_user_id, so replace it with a plain (non-unique) index.
+    """
+    inspector = inspect(engine)
+    if not inspector.has_table(User.__tablename__):
+        return
+
+    unique_indexes = [
+        idx
+        for idx in inspector.get_indexes(User.__tablename__)
+        if idx.get("unique") and idx.get("column_names") == ["discord_user_id"]
+    ]
+    if not unique_indexes:
+        return
+
+    with engine.begin() as conn:
+        for idx in unique_indexes:
+            name = idx["name"]
+            conn.execute(text(f'DROP INDEX {_quote_ident(name)}'))
+        # Recreate a non-unique index so lookups by discord_user_id stay fast.
+        existing_names = {
+            i["name"] for i in inspect(engine).get_indexes(User.__tablename__)
+        }
+        if "ix_users_discord_user_id" not in existing_names:
+            conn.execute(
+                text(
+                    "CREATE INDEX ix_users_discord_user_id "
+                    "ON users (discord_user_id)"
+                )
+            )
+
+
+def _quote_ident(name: str) -> str:
+    """Quote an identifier for the active dialect."""
+    return engine.dialect.identifier_preparer.quote(name)
 
 
 def _seed_cron_job_config() -> None:

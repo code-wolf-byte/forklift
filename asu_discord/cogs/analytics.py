@@ -64,7 +64,68 @@ class AnalyticsCog(commands.Cog):
         # These run as background tasks — they're slow but fully idempotent.
         asyncio.ensure_future(self._backfill_forum_posts())
         asyncio.ensure_future(self._backfill_moderation_events())
+        asyncio.ensure_future(self._sync_thread_parents())
         self._maybe_start_backfill()  # message backfill (also a background task)
+
+    _thread_parent_sync_running: bool = False
+
+    async def _sync_thread_parents(self) -> None:
+        """Populate parent_channel_id on message_log rows that belong to threads."""
+        if self._thread_parent_sync_running:
+            return
+        self._thread_parent_sync_running = True
+        try:
+            guild = self.bot.get_guild(self.guild_id)
+            if guild is None:
+                return
+
+            thread_parents: dict[str, tuple[str, str | None]] = {}
+
+            for ch in guild.channels:
+                if isinstance(ch, (discord.TextChannel, discord.ForumChannel)):
+                    for thread in ch.threads:
+                        thread_parents[str(thread.id)] = (str(ch.id), ch.name)
+                    try:
+                        async for thread in ch.archived_threads(limit=None):
+                            if str(thread.id) not in thread_parents:
+                                thread_parents[str(thread.id)] = (str(ch.id), ch.name)
+                        await asyncio.sleep(_PAGE_SLEEP_S)
+                    except discord.Forbidden:
+                        pass
+                    except Exception:
+                        logger.exception(
+                            "AnalyticsCog: failed to list archived threads in #%s for parent sync",
+                            ch.name,
+                        )
+
+            if not thread_parents:
+                return
+
+            def _do_update() -> int:
+                updated = 0
+                with session_scope() as db:
+                    for thread_id, (parent_id, parent_name) in thread_parents.items():
+                        n = (
+                            db.query(MessageLog)
+                            .filter(
+                                MessageLog.channel_id == thread_id,
+                                MessageLog.parent_channel_id.is_(None),
+                            )
+                            .update(
+                                {
+                                    MessageLog.parent_channel_id: parent_id,
+                                    MessageLog.parent_channel_name: parent_name,
+                                },
+                                synchronize_session=False,
+                            )
+                        )
+                        updated += n
+                return updated
+
+            updated = await asyncio.get_running_loop().run_in_executor(None, _do_update)
+            logger.info("AnalyticsCog: synced parent_channel_id for %d message rows", updated)
+        finally:
+            self._thread_parent_sync_running = False
 
     # ═════════════════════════════════════════════════════════════════════════
     # MESSAGE LOGGING  (previously MessageLoggerCog)
@@ -77,11 +138,18 @@ class AnalyticsCog(commands.Cog):
         if message.guild.id != self.guild_id:
             return
         if not isinstance(
-            message.channel, (discord.TextChannel, discord.Thread, discord.ForumChannel)
+            message.channel, (discord.TextChannel, discord.Thread, discord.ForumChannel, discord.VoiceChannel)
         ):
             return
 
         loop = asyncio.get_running_loop()
+
+        # Resolve parent channel for threads
+        parent_channel_id: str | None = None
+        parent_channel_name: str | None = None
+        if isinstance(message.channel, discord.Thread):
+            parent_channel_id = str(message.channel.parent_id) if message.channel.parent_id else None
+            parent_channel_name = message.channel.parent.name if message.channel.parent else None
 
         # Persist to message_logs
         await loop.run_in_executor(
@@ -94,6 +162,8 @@ class AnalyticsCog(commands.Cog):
             str(message.author.id),
             message.created_at.replace(tzinfo=None),
             message.content or None,
+            parent_channel_id,
+            parent_channel_name,
         )
 
         # Gold Guide contribution in a QnA thread
@@ -115,6 +185,8 @@ class AnalyticsCog(commands.Cog):
         discord_user_id: str,
         sent_at: datetime,
         content: str | None,
+        parent_channel_id: str | None = None,
+        parent_channel_name: str | None = None,
     ) -> None:
         try:
             with session_scope() as db:
@@ -129,6 +201,8 @@ class AnalyticsCog(commands.Cog):
                         message_id=message_id,
                         channel_id=channel_id,
                         channel_name=channel_name,
+                        parent_channel_id=parent_channel_id,
+                        parent_channel_name=parent_channel_name,
                         guild_id=guild_id,
                         discord_user_id=discord_user_id,
                         sent_at=sent_at,
@@ -176,30 +250,36 @@ class AnalyticsCog(commands.Cog):
     # ═════════════════════════════════════════════════════════════════════════
 
     async def _reconcile_voice_sessions(self) -> None:
-        """Close sessions left open because the bot restarted mid-session.
+        """Reconcile voice sessions after a bot restart.
 
-        For each VoiceSession with ``left_at=NULL``:
-        - If the user is still in voice → leave the session open (correct).
-        - If the user is gone        → close with ``is_complete=False`` so we
-          still capture the partial duration from ``joined_at`` to now.
+        Two passes:
+        1. Close sessions left open for users who are no longer in voice
+           (bot went down while they were in a channel).
+        2. Open new sessions for users currently in voice with no open session
+           (they joined while the bot was offline). ``joined_at`` is set to now
+           since we cannot recover the actual join time, so duration is tracked
+           from reconnect onward rather than being lost entirely.
         """
         guild = self.bot.get_guild(self.guild_id)
         if guild is None:
             logger.warning("AnalyticsCog: guild %s not in cache, skipping reconciliation", self.guild_id)
             return
 
-        in_voice: set[str] = {
-            str(m.id)
+        # Map discord_user_id → (channel_id, channel_name, username) for every
+        # non-bot member currently in a voice channel.
+        in_voice: dict[str, tuple[str, str, str]] = {
+            str(m.id): (str(vc.id), vc.name, m.name)
             for vc in guild.voice_channels
             for m in vc.members
+            if not m.bot
         }
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
 
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._close_orphaned_sessions, in_voice, now_utc)
+        await loop.run_in_executor(None, self._reconcile_sessions, in_voice, now_utc)
         logger.info("AnalyticsCog: voice reconciliation complete (guild %s)", self.guild_id)
 
-    def _close_orphaned_sessions(self, in_voice: set[str], now_utc: datetime) -> None:
+    def _reconcile_sessions(self, in_voice: dict[str, tuple[str, str, str]], now_utc: datetime) -> None:
         try:
             with session_scope() as db:
                 open_sessions = (
@@ -210,8 +290,11 @@ class AnalyticsCog(commands.Cog):
                     )
                     .all()
                 )
+
+                tracked_user_ids: set[str] = set()
                 orphaned = 0
                 for s in open_sessions:
+                    tracked_user_ids.add(s.discord_user_id)
                     if s.discord_user_id in in_voice:
                         continue  # user is still in voice — session is valid
                     s.left_at = now_utc
@@ -220,10 +303,30 @@ class AnalyticsCog(commands.Cog):
                         s.duration_seconds = int(max(0, elapsed))
                     s.is_complete = False  # truncated by bot restart
                     orphaned += 1
+
+                # Open sessions for users in voice who have no tracked session —
+                # they joined while the bot was offline.
+                untracked = 0
+                for user_id, (channel_id, channel_name, username) in in_voice.items():
+                    if user_id in tracked_user_ids:
+                        continue
+                    db.add(VoiceSession(
+                        discord_user_id=user_id,
+                        discord_username=username,
+                        guild_id=str(self.guild_id),
+                        channel_id=channel_id,
+                        channel_name=channel_name,
+                        joined_at=now_utc,  # actual join time unknown; captured from reconnect onward
+                        is_complete=False,  # join was not observed
+                    ))
+                    untracked += 1
+
                 if orphaned:
                     logger.info("Closed %d orphaned voice session(s)", orphaned)
+                if untracked:
+                    logger.info("Opened %d untracked voice session(s) (joined while bot was offline)", untracked)
         except Exception:
-            logger.exception("Failed to reconcile orphaned voice sessions")
+            logger.exception("Failed to reconcile voice sessions")
 
     @commands.Cog.listener()
     async def on_voice_state_update(
@@ -423,6 +526,9 @@ class AnalyticsCog(commands.Cog):
         moderator_discord_id: str | None,
         moderator_username: str | None,
         occurred_at: datetime,
+        channel_id: str | None = None,
+        message_id: str | None = None,
+        extra_data: str | None = None,
     ) -> None:
         try:
             with session_scope() as db:
@@ -436,12 +542,164 @@ class AnalyticsCog(commands.Cog):
                         moderator_discord_id=moderator_discord_id,
                         moderator_username=moderator_username,
                         occurred_at=occurred_at,
+                        channel_id=channel_id,
+                        message_id=message_id,
+                        extra_data=extra_data,
                     )
                 )
         except Exception:
             logger.exception(
                 "Failed to save moderation event %s for user %s", event_type, discord_user_id
             )
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member) -> None:
+        if member.guild.id != self.guild_id:
+            return
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        mod_id: str | None = None
+        mod_name: str | None = None
+        reason: str | None = None
+        found = False
+        try:
+            await asyncio.sleep(1)
+            async for entry in member.guild.audit_logs(
+                limit=10, action=discord.AuditLogAction.kick
+            ):
+                if entry.target and entry.target.id == member.id:
+                    found = True
+                    reason = entry.reason
+                    if entry.user:
+                        mod_id = str(entry.user.id)
+                        mod_name = entry.user.name
+                    break
+        except Exception:
+            logger.warning("Could not read audit log for member remove of user %s", member.id)
+            return
+
+        if not found:
+            return  # voluntary leave or ban (ban is handled by on_member_ban)
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            self._save_moderation_event,
+            str(member.id),
+            str(member),
+            str(member.guild.id),
+            "kick",
+            reason,
+            mod_id,
+            mod_name,
+            now_utc,
+        )
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
+        if after.guild.id != self.guild_id:
+            return
+
+        before_timeout = before.timed_out_until
+        after_timeout = after.timed_out_until
+        if before_timeout == after_timeout:
+            return
+
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        if after_timeout is not None and (before_timeout is None or after_timeout > before_timeout):
+            event_type = "timeout"
+            extra_data = json.dumps({"timeout_until": after_timeout.isoformat()})
+        elif after_timeout is None and before_timeout is not None:
+            event_type = "timeout_remove"
+            extra_data = None
+        else:
+            return
+
+        mod_id: str | None = None
+        mod_name: str | None = None
+        reason: str | None = None
+        try:
+            await asyncio.sleep(1)
+            async for entry in after.guild.audit_logs(
+                limit=10, action=discord.AuditLogAction.member_update
+            ):
+                if entry.target and entry.target.id == after.id:
+                    reason = entry.reason
+                    if entry.user:
+                        mod_id = str(entry.user.id)
+                        mod_name = entry.user.name
+                    break
+        except Exception:
+            logger.warning("Could not read audit log for timeout of user %s", after.id)
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            self._save_moderation_event,
+            str(after.id),
+            str(after),
+            str(after.guild.id),
+            event_type,
+            reason,
+            mod_id,
+            mod_name,
+            now_utc,
+            None,
+            None,
+            extra_data,
+        )
+
+    @commands.Cog.listener()
+    async def on_message_delete(self, message: discord.Message) -> None:
+        if not message.guild or message.guild.id != self.guild_id:
+            return
+        if message.author.bot:
+            return
+
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        mod_id: str | None = None
+        mod_name: str | None = None
+        found = False
+        try:
+            await asyncio.sleep(1)
+            async for entry in message.guild.audit_logs(
+                limit=10, action=discord.AuditLogAction.message_delete
+            ):
+                if entry.target and entry.target.id == message.author.id:
+                    found = True
+                    if entry.user:
+                        mod_id = str(entry.user.id)
+                        mod_name = entry.user.name
+                    break
+        except Exception:
+            logger.warning(
+                "Could not read audit log for message delete in channel %s", message.channel.id
+            )
+            return
+
+        if not found:
+            return  # author deleted their own message
+
+        extra_data = json.dumps({"content": message.content}) if message.content else None
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            self._save_moderation_event,
+            str(message.author.id),
+            str(message.author),
+            str(message.guild.id),
+            "message_delete",
+            None,
+            mod_id,
+            mod_name,
+            now_utc,
+            str(message.channel.id),
+            str(message.id),
+            extra_data,
+        )
 
     # ═════════════════════════════════════════════════════════════════════════
     # NON-QnA FORUM POST TRACKING  (new)
@@ -610,27 +868,28 @@ class AnalyticsCog(commands.Cog):
             return
 
         with session_scope() as db:
-            existing = (
-                db.query(ModerationEvent)
+            seeded_types = {
+                row[0]
+                for row in db.query(ModerationEvent.event_type)
                 .filter(ModerationEvent.guild_id == str(self.guild_id))
-                .count()
-            )
-        if existing > 0:
-            logger.info(
-                "AnalyticsCog: moderation_events already populated (%d rows) — skipping backfill",
-                existing,
-            )
-            return
+                .distinct()
+                .all()
+            }
 
         logger.info(
-            "AnalyticsCog: backfilling moderation events from audit log (guild %s)", self.guild_id
+            "AnalyticsCog: backfilling moderation events from audit log (guild %s, already seeded: %s)",
+            self.guild_id, seeded_types,
         )
 
         events: list[dict] = []
         for action, event_type in (
             (discord.AuditLogAction.ban, "ban"),
             (discord.AuditLogAction.unban, "unban"),
+            (discord.AuditLogAction.kick, "kick"),
         ):
+            if event_type in seeded_types:
+                logger.info("AnalyticsCog: skipping %s backfill — already seeded", event_type)
+                continue
             try:
                 async for entry in guild.audit_logs(limit=None, action=action):
                     if entry.target is None:
@@ -713,10 +972,23 @@ class AnalyticsCog(commands.Cog):
 
     async def _collect_backfill_targets(
         self, guild: discord.Guild
-    ) -> list[discord.TextChannel | discord.Thread]:
-        targets: list[discord.TextChannel | discord.Thread] = []
+    ) -> list[discord.TextChannel | discord.Thread | discord.VoiceChannel]:
+        targets: list[discord.TextChannel | discord.Thread | discord.VoiceChannel] = []
         for ch in guild.channels:
             if isinstance(ch, discord.TextChannel):
+                targets.append(ch)
+                targets.extend(ch.threads)
+                try:
+                    async for thread in ch.archived_threads(limit=None):
+                        targets.append(thread)
+                    await asyncio.sleep(_PAGE_SLEEP_S)
+                except discord.Forbidden:
+                    logger.warning(
+                        "No permission to list archived threads in #%s — skipping", ch.name
+                    )
+                except Exception:
+                    logger.exception("Failed to list archived threads in #%s", ch.name)
+            elif isinstance(ch, discord.VoiceChannel):
                 targets.append(ch)
             elif isinstance(ch, discord.ForumChannel):
                 targets.extend(ch.threads)
@@ -761,6 +1033,11 @@ class AnalyticsCog(commands.Cog):
 
         for ch in channels:
             channel_id = str(ch.id)
+            bf_parent_id: str | None = None
+            bf_parent_name: str | None = None
+            if isinstance(ch, discord.Thread):
+                bf_parent_id = str(ch.parent_id) if ch.parent_id else None
+                bf_parent_name = ch.parent.name if ch.parent else None
 
             with session_scope() as db:
                 row = (
@@ -802,6 +1079,8 @@ class AnalyticsCog(commands.Cog):
                             str(m.author.id),
                             m.created_at.replace(tzinfo=None),
                             m.content or None,
+                            bf_parent_id,
+                            bf_parent_name,
                         )
                         for m in non_bot
                     ]
@@ -862,7 +1141,10 @@ class AnalyticsCog(commands.Cog):
                 without_content = {r.message_id: r for r in existing_rows if r.content is None}
 
                 new_rows = []
-                for mid, cid, cname, gid, uid, ts, content in batch:
+                for row_data in batch:
+                    mid, cid, cname, gid, uid, ts, content = row_data[:7]
+                    parent_cid = row_data[7] if len(row_data) > 7 else None
+                    parent_cname = row_data[8] if len(row_data) > 8 else None
                     if mid in with_content:
                         continue
                     if mid in without_content:
@@ -874,6 +1156,8 @@ class AnalyticsCog(commands.Cog):
                             message_id=mid,
                             channel_id=cid,
                             channel_name=cname,
+                            parent_channel_id=parent_cid,
+                            parent_channel_name=parent_cname,
                             guild_id=gid,
                             discord_user_id=uid,
                             sent_at=ts,
