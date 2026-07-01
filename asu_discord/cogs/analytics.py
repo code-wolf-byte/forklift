@@ -1024,9 +1024,16 @@ class AnalyticsCog(commands.Cog):
             inserted, self.guild_id,
         )
 
+    _VOLUNTEER_BACKFILL_CHUNK_SIZE = 500
+
     def _save_volunteer_backfill(
         self, volunteer_ids: set[str], member_names: dict[str, str]
     ) -> int:
+        # Commit in small chunks rather than one giant transaction — a single
+        # multi-second write lock (this backfill can touch hundreds of thousands
+        # of rows on first run) starves other concurrent writers (QnA backfill,
+        # message backfill, etc.) past sqlite's busy-timeout. Frequent small
+        # commits release the write lock often enough for others to interleave.
         try:
             with session_scope() as db:
                 existing_ids = {
@@ -1035,32 +1042,47 @@ class AnalyticsCog(commands.Cog):
                     .filter(VolunteerContribution.message_id.isnot(None))
                     .all()
                 }
-                rows = (
-                    db.query(MessageLog)
+                message_ids = [
+                    r[0]
+                    for r in db.query(MessageLog.id)
                     .filter(MessageLog.discord_user_id.in_(volunteer_ids))
                     .all()
-                )
-                new_objs = [
-                    VolunteerContribution(
-                        guild_id=r.guild_id,
-                        channel_id=r.channel_id,
-                        channel_name=r.channel_name,
-                        parent_channel_id=r.parent_channel_id,
-                        parent_channel_name=r.parent_channel_name,
-                        message_id=r.message_id,
-                        responder_discord_id=r.discord_user_id,
-                        responder_username=member_names.get(r.discord_user_id),
-                        responded_at=r.sent_at,
-                    )
-                    for r in rows
-                    if r.message_id not in existing_ids
                 ]
-                if new_objs:
-                    db.bulk_save_objects(new_objs)
-                return len(new_objs)
         except Exception:
-            logger.exception("AnalyticsCog: failed to backfill volunteer contributions")
+            logger.exception("AnalyticsCog: failed to read volunteer backfill candidates")
             return 0
+
+        total_inserted = 0
+        chunk_size = self._VOLUNTEER_BACKFILL_CHUNK_SIZE
+        for start in range(0, len(message_ids), chunk_size):
+            chunk_ids = message_ids[start : start + chunk_size]
+            try:
+                with session_scope() as db:
+                    rows = db.query(MessageLog).filter(MessageLog.id.in_(chunk_ids)).all()
+                    new_objs = [
+                        VolunteerContribution(
+                            guild_id=r.guild_id,
+                            channel_id=r.channel_id,
+                            channel_name=r.channel_name,
+                            parent_channel_id=r.parent_channel_id,
+                            parent_channel_name=r.parent_channel_name,
+                            message_id=r.message_id,
+                            responder_discord_id=r.discord_user_id,
+                            responder_username=member_names.get(r.discord_user_id),
+                            responded_at=r.sent_at,
+                        )
+                        for r in rows
+                        if r.message_id not in existing_ids
+                    ]
+                    if new_objs:
+                        db.bulk_save_objects(new_objs)
+                        total_inserted += len(new_objs)
+            except Exception:
+                logger.exception(
+                    "AnalyticsCog: failed to backfill volunteer contributions chunk starting at %d",
+                    start,
+                )
+        return total_inserted
 
     # ═════════════════════════════════════════════════════════════════════════
     # MESSAGE BACKFILL  (moved from MessageLoggerCog, identical logic)

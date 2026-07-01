@@ -155,8 +155,18 @@ export default function Analytics() {
   const [liveStats, setLiveStats] = useState(null);
   const [sfStatus, setSfStatus] = useState(null);
   const [sfRefreshing, setSfRefreshing] = useState(false);
-  const [channelsCollapsed, setChannelsCollapsed] = useState(true);
-  const [demographicsCollapsed, setDemographicsCollapsed] = useState(true);
+  const [collapsedSections, setCollapsedSections] = useState({
+    core: true,
+    growth: true,
+    channels: true,
+    readership: true,
+    demographics: true,
+    moderation: true,
+    programs: true,
+    forums: true,
+    acquisition: true,
+    suggested: true,
+  });
   const [expandedChannels, setExpandedChannels] = useState(new Set());
   const [goldGuideListCollapsed, setGoldGuideListCollapsed] = useState(true);
   const [volunteerListCollapsed, setVolunteerListCollapsed] = useState(true);
@@ -222,6 +232,10 @@ export default function Analytics() {
       else next.add(channelId);
       return next;
     });
+  };
+
+  const toggleSection = (key) => {
+    setCollapsedSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   const openDeleteModal = () => {
@@ -440,7 +454,11 @@ export default function Analytics() {
         icon="fa-bolt"
         subtitle="High-level engagement signals for the selected period"
         tooltip="Top-line metrics showing how active the server is. All counts are filtered by the selected date range."
+        collapsible
+        collapsed={collapsedSections.core}
+        onToggle={() => toggleSection("core")}
       />
+      {!collapsedSections.core && (
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <StatCard
           label="Messages Sent"
@@ -470,6 +488,7 @@ export default function Analytics() {
           tooltip="Distinct members who joined at least one voice channel during the period. Only counts members with at least one completed session — members currently in voice with no left_at are excluded."
         />
       </div>
+      )}
 
       {/* ════════════════════════════════════════════════════════════════════════
           Growth & Funnel
@@ -479,7 +498,11 @@ export default function Analytics() {
         icon="fa-filter"
         subtitle="Onboarding conversion and member retention"
         tooltip="Tracks how new members move through the join → verify pipeline and how well the server retains verified members over time."
+        collapsible
+        collapsed={collapsedSections.growth}
+        onToggle={() => toggleSection("growth")}
       />
+      {!collapsedSections.growth && (
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-6">
         {/* Onboarding */}
         <div>
@@ -563,6 +586,7 @@ export default function Analytics() {
           )}
         </div>
       </div>
+      )}
 
       {/* ════════════════════════════════════════════════════════════════════════
           Channel Engagement
@@ -573,10 +597,10 @@ export default function Analytics() {
         subtitle="Top 25 channels by message volume for the period"
         tooltip="Ranks channels by message count. Voice Activity shows accumulated voice time in the same channel during the period — only applicable to voice channels."
         collapsible
-        collapsed={channelsCollapsed}
-        onToggle={() => setChannelsCollapsed((c) => !c)}
+        collapsed={collapsedSections.channels}
+        onToggle={() => toggleSection("channels")}
       />
-      {channelsCollapsed ? null : channels.length > 0 ? (
+      {collapsedSections.channels ? null : channels.length > 0 ? (
         <Card className="mb-6">
           <CardContent className="p-0">
             <table className="w-full text-sm">
@@ -681,7 +705,11 @@ export default function Analytics() {
         icon="fa-eye"
         subtitle="Passive engagement — requires Discord Insights access"
         tooltip="Readership tracks members who read channels without posting. Discord does not expose this data via bot API — it requires access to the server's Discord Insights dashboard."
+        collapsible
+        collapsed={collapsedSections.readership}
+        onToggle={() => toggleSection("readership")}
       />
+      {!collapsedSections.readership && (
       <Card className="mb-6">
         <CardContent className="py-5 px-5">
           <p className="text-sm text-muted-foreground mb-3">
@@ -701,6 +729,7 @@ export default function Analytics() {
           </a>
         </CardContent>
       </Card>
+      )}
 
       {/* ════════════════════════════════════════════════════════════════════════
           Demographics
@@ -711,10 +740,10 @@ export default function Analytics() {
         subtitle="Role breakdown for verified members"
         tooltip="Shows how verified members are distributed across academic level, residency, campus, college, and country of origin. Roles are assigned during Salesforce sync at verification. Date filter applies to verified_at."
         collapsible
-        collapsed={demographicsCollapsed}
-        onToggle={() => setDemographicsCollapsed((c) => !c)}
+        collapsed={collapsedSections.demographics}
+        onToggle={() => toggleSection("demographics")}
       />
-      {demographicsCollapsed ? null : <><div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-4">
+      {collapsedSections.demographics ? null : <><div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-4">
         {/* Student Role */}
         <Card>
           <CardContent className="p-4">
@@ -832,7 +861,11 @@ export default function Analytics() {
         icon="fa-shield-alt"
         subtitle="Bans, unbans, kicks, timeouts, and message deletions"
         tooltip="Tracks moderation actions taken in the server. All events are recorded in the moderation_events table by the bot in real time and backfilled from the Discord audit log on startup."
+        collapsible
+        collapsed={collapsedSections.moderation}
+        onToggle={() => toggleSection("moderation")}
       />
+      {!collapsedSections.moderation && (
       <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
         <StatCard
           label="Banned (from verifying)"
@@ -878,6 +911,7 @@ export default function Analytics() {
           onClick={openDeleteModal}
         />
       </div>
+      )}
 
       <Dialog open={deleteModalOpen} onOpenChange={setDeleteModalOpen}>
         <DialogContent className="max-w-4xl max-h-[80vh] flex flex-col">
@@ -937,8 +971,12 @@ export default function Analytics() {
         icon="fa-star"
         subtitle="Gold Guides and Volunteers"
         tooltip="Tracks activity from organized member programs. Gold Guides are trained peer advisors who answer questions in the Q&A forum. Volunteer tracking is not yet implemented."
+        collapsible
+        collapsed={collapsedSections.programs}
+        onToggle={() => toggleSection("programs")}
       />
-
+      {!collapsedSections.programs && (
+      <>
       <SubLabel tooltip="Gold Guides are members with the Gold Guide role who respond to questions in Q&A forum threads. Contributions are tracked per-message in gold_guide_contributions.">
         Gold Guides
       </SubLabel>
@@ -1101,6 +1139,8 @@ export default function Analytics() {
           </CardContent>
         </Card>
       )}
+      </>
+      )}
 
       {/* ════════════════════════════════════════════════════════════════════════
           Forums
@@ -1110,8 +1150,12 @@ export default function Analytics() {
         icon="fa-comments"
         subtitle="Ask ASU Staff · Connect by Major · Roommate Finder"
         tooltip="Tracks activity across Discord forum channels. Ask ASU Staff is the AI-assisted Q&A channel. Connect by Major and Roommate Finder are peer connection forums. All forum threads are tracked in forum_posts."
+        collapsible
+        collapsed={collapsedSections.forums}
+        onToggle={() => toggleSection("forums")}
       />
-
+      {!collapsedSections.forums && (
+      <>
       <SubLabel tooltip="Ask ASU Staff is a forum where students ask questions. The bot attempts to answer via AI; unresolved questions are flagged for staff. Tracked in qna_posts.">
         Ask ASU Staff
       </SubLabel>
@@ -1199,7 +1243,7 @@ export default function Analytics() {
               value={forums.connect_by_major?.messages_sent}
               icon="fa-comment"
               color="#3b82f6"
-              tooltip="Total replies within Connect by Major threads. Not currently tracked — would require message-level forum tracking."
+              tooltip="Total messages sent within Connect by Major threads during the period, summed across every thread under that forum."
             />
           </div>
           {forums.connect_by_major?.activity_by_major?.length > 0 && (
@@ -1209,7 +1253,7 @@ export default function Analytics() {
                   <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
                     Forums by College
                   </span>
-                  <Tooltip text="Number of Connect by Major posts during the period, bucketed by the author's college role. Authors with no matching college role are grouped as 'Unknown'." />
+                  <Tooltip text="Number of Connect by Major posts during the period, bucketed by the author's college role. Posts from authors with no matching college role (e.g. not verified) are excluded." />
                 </div>
                 <table className="w-full text-sm">
                   <tbody>
@@ -1266,6 +1310,8 @@ export default function Analytics() {
           />
         </div>
       </div>
+      </>
+      )}
 
       {/* ════════════════════════════════════════════════════════════════════════
           Acquisition
@@ -1275,7 +1321,11 @@ export default function Analytics() {
         icon="fa-search"
         subtitle="Traffic source — requires Google Analytics integration"
         tooltip="Shows how people find and arrive at the verification page. All metrics require Google Analytics (or similar) to be integrated with the web app. Currently not connected."
+        collapsible
+        collapsed={collapsedSections.acquisition}
+        onToggle={() => toggleSection("acquisition")}
       />
+      {!collapsedSections.acquisition && (
       <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
         <StatCard
           label="Source / Medium"
@@ -1319,6 +1369,7 @@ export default function Analytics() {
           tooltip="Average time users spend on the verification page per session. Longer duration may indicate friction in the flow. Requires Google Analytics."
         />
       </div>
+      )}
 
       {/* ════════════════════════════════════════════════════════════════════════
           Suggested Additions
@@ -1328,7 +1379,11 @@ export default function Analytics() {
         icon="fa-lightbulb"
         subtitle="Metrics recommended for future tracking"
         tooltip="These metrics are not currently tracked but would provide valuable insight if implemented. Each would require additional data collection, instrumentation, or external integrations."
+        collapsible
+        collapsed={collapsedSections.suggested}
+        onToggle={() => toggleSection("suggested")}
       />
+      {!collapsedSections.suggested && (
       <Card className="mb-6">
         <CardContent className="p-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-8 gap-y-1.5">
@@ -1364,6 +1419,7 @@ export default function Analytics() {
           </div>
         </CardContent>
       </Card>
+      )}
     </>
   );
 }

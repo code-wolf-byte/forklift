@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     create_engine,
+    event,
     inspect,
     text,
 )
@@ -22,7 +23,26 @@ from sqlalchemy.orm import Session, declarative_base, relationship, scoped_sessi
 
 from utils.settings import CONFIG
 
-engine = create_engine(CONFIG.DATABASE_URL, future=True)
+_is_sqlite = CONFIG.DATABASE_URL.startswith("sqlite")
+# sqlite3's default connect `timeout` is 5s — too short once multiple background
+# backfill tasks (forum posts, moderation events, QnA, volunteers, message backfill)
+# write concurrently on startup. A longer timeout makes writers wait/retry instead
+# of immediately raising "database is locked"; WAL mode lets readers proceed
+# without blocking on a concurrent writer at all.
+engine = create_engine(
+    CONFIG.DATABASE_URL,
+    future=True,
+    connect_args={"timeout": 30} if _is_sqlite else {},
+)
+
+if _is_sqlite:
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection, _connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.close()
+
 SessionLocal = scoped_session(
     sessionmaker(bind=engine, autocommit=False, autoflush=False, expire_on_commit=False)
 )

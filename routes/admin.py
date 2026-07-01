@@ -1239,6 +1239,7 @@ def admin_gold_guide_stats():
 # ─── Analytics ───────────────────────────────────────────────────────────────
 
 _COLLEGE_ROLES = [
+    "Barrett The Honors College",
     "New College of Interdisciplinary Arts and Sciences",
     "Herberger Institute for Design and the Arts",
     "Edson College of Nursing and Health Innovation",
@@ -1528,19 +1529,25 @@ def admin_analytics():
             college_counts[college] = college_counts.get(college, 0) + 1
         activity_by_major = (
             sorted(
-                [{"college": c, "count": n} for c, n in college_counts.items()],
+                [
+                    {"college": c, "count": n}
+                    for c, n in college_counts.items()
+                    if c != "Unknown"
+                ],
                 key=lambda x: -x["count"],
             )
             or None
         )
 
-        # Connect by Major / top 5 threads — reuse ch_rows (pre-truncation) so we
-        # aren't limited by the top-25-overall-channels cutoff applied to `channels`.
+        # Connect by Major / messages sent + top 5 threads — reuse ch_rows
+        # (pre-truncation) so we aren't limited by the top-25-overall-channels
+        # cutoff applied to `channels`.
         major_threads = [
             {"channel_id": cid, "channel_name": cname or cid, "messages": cnt}
             for cid, cname, parent_cid, parent_cname, cnt in ch_rows
             if parent_cname and "major" in parent_cname.lower()
         ]
+        major_messages_sent = sum(t["messages"] for t in major_threads) or None
         top_major_threads = sorted(major_threads, key=lambda x: -x["messages"])[:5] or None
 
         # ── International / Country of Origin ─────────────────────────────────
@@ -1809,7 +1816,7 @@ def admin_analytics():
                 },
                 "connect_by_major": {
                     "posts_created": connect_posts or None,
-                    "messages_sent": None,
+                    "messages_sent": major_messages_sent,
                     "activity_by_major": activity_by_major,
                     "top_threads": top_major_threads,
                 },
