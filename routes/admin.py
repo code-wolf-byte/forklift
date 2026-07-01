@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import logging
 import os
 import threading
@@ -25,6 +26,9 @@ from utils.database import (
     ModerationEvent,
     QnaPost,
     ServerEvent,
+    Ticket,
+    TicketCategory,
+    TicketSettings,
     User,
     UserRole,
     UserRoleException,
@@ -419,12 +423,28 @@ def admin_reset_automation(job_name: str):
 @admin_bp.route("/api/admin/discord-channels")
 @require_admin
 def admin_discord_channels():
+    channel_type = request.args.get("type")
     try:
-        from asu_discord.api import get_guild_channels
-        channels = get_guild_channels()
+        if channel_type == "category":
+            from asu_discord.api import get_guild_category_channels
+            channels = get_guild_category_channels()
+        else:
+            from asu_discord.api import get_guild_channels
+            channels = get_guild_channels()
     except Exception:
         channels = []
     return jsonify(channels)
+
+
+@admin_bp.route("/api/admin/discord-roles")
+@require_admin
+def admin_discord_roles():
+    try:
+        from asu_discord.api import get_guild_roles
+        roles = get_guild_roles()
+    except Exception:
+        roles = []
+    return jsonify(roles)
 
 
 # ─── Roles ────────────────────────────────────────────────────────────────────
@@ -1701,6 +1721,237 @@ def admin_salesforce_status():
             "last_fetched": last_fetched,
             "refresh_running": _sf_refresh_running,
             "last_refresh": _sf_refresh_last,
+        }
+    )
+
+
+# ─── Ticketing ────────────────────────────────────────────────────────────────
+
+_DEFAULT_TICKET_SETTINGS = {
+    "panel_channel_id": None,
+    "panel_message_id": None,
+    "embed_title": "Open a Ticket",
+    "embed_description": "Select a category below to open a ticket.",
+    "embed_color": "#8c1d40",
+    "embed_image_url": None,
+    "embed_thumbnail_url": None,
+    "embed_footer": None,
+    "select_placeholder": "Select a ticket category…",
+    "staff_role_ids": [],
+    "categories": [],
+}
+
+
+def _serialize_ticket_settings(settings: TicketSettings, categories: list[TicketCategory]) -> dict:
+    return {
+        "guild_id": settings.guild_id,
+        "panel_channel_id": settings.panel_channel_id,
+        "panel_message_id": settings.panel_message_id,
+        "embed_title": settings.embed_title,
+        "embed_description": settings.embed_description,
+        "embed_color": settings.embed_color,
+        "embed_image_url": settings.embed_image_url,
+        "embed_thumbnail_url": settings.embed_thumbnail_url,
+        "embed_footer": settings.embed_footer,
+        "select_placeholder": settings.select_placeholder,
+        "staff_role_ids": json.loads(settings.staff_role_ids or "[]"),
+        "categories": [
+            {
+                "id": c.id,
+                "label": c.label,
+                "description": c.description,
+                "emoji": c.emoji,
+                "parent_category_id": c.parent_category_id,
+                "extra_role_ids": json.loads(c.extra_role_ids or "[]"),
+            }
+            for c in categories
+        ],
+    }
+
+
+def _current_guild_id() -> str | None:
+    from utils.settings import DISCORD_CONFIG
+    return str(DISCORD_CONFIG.guild_id) if DISCORD_CONFIG else None
+
+
+@admin_bp.route("/api/admin/tickets/settings", methods=["GET"])
+@require_full_admin
+def admin_tickets_settings():
+    guild_id = _current_guild_id()
+    if guild_id is None:
+        return jsonify({"error": "Discord is not configured"}), 503
+
+    with session_scope() as db_session:
+        settings = (
+            db_session.query(TicketSettings)
+            .filter(TicketSettings.guild_id == guild_id)
+            .one_or_none()
+        )
+        if settings is None:
+            return jsonify({"guild_id": guild_id, **_DEFAULT_TICKET_SETTINGS})
+
+        categories = (
+            db_session.query(TicketCategory)
+            .filter(TicketCategory.settings_id == settings.id)
+            .order_by(TicketCategory.position.asc())
+            .all()
+        )
+        return jsonify(_serialize_ticket_settings(settings, categories))
+
+
+@admin_bp.route("/api/admin/tickets/settings", methods=["PUT"])
+@require_full_admin
+def admin_update_tickets_settings():
+    guild_id = _current_guild_id()
+    if guild_id is None:
+        return jsonify({"error": "Discord is not configured"}), 503
+
+    data = request.get_json(silent=True) or {}
+
+    with session_scope() as db_session:
+        settings = (
+            db_session.query(TicketSettings)
+            .filter(TicketSettings.guild_id == guild_id)
+            .one_or_none()
+        )
+        if settings is None:
+            settings = TicketSettings(guild_id=guild_id)
+            db_session.add(settings)
+            db_session.flush()
+
+        for field in (
+            "panel_channel_id",
+            "embed_title",
+            "embed_description",
+            "embed_color",
+            "embed_image_url",
+            "embed_thumbnail_url",
+            "embed_footer",
+            "select_placeholder",
+        ):
+            if field in data:
+                setattr(settings, field, data[field] or None)
+
+        if "staff_role_ids" in data:
+            settings.staff_role_ids = json.dumps([str(r) for r in (data["staff_role_ids"] or [])])
+
+        if "categories" in data:
+            existing_by_id = {
+                c.id: c
+                for c in db_session.query(TicketCategory)
+                .filter(TicketCategory.settings_id == settings.id)
+                .all()
+            }
+            keep_ids = set()
+            for i, cat in enumerate(data["categories"] or []):
+                cat_id = cat.get("id")
+                if cat_id and cat_id in existing_by_id:
+                    row = existing_by_id[cat_id]
+                    keep_ids.add(cat_id)
+                else:
+                    row = TicketCategory(settings_id=settings.id, guild_id=guild_id)
+                    db_session.add(row)
+
+                row.label = (cat.get("label") or "").strip()[:100] or f"Category {i + 1}"
+                row.description = cat.get("description") or None
+                row.emoji = cat.get("emoji") or None
+                row.extra_role_ids = json.dumps([str(r) for r in (cat.get("extra_role_ids") or [])])
+                row.position = i
+
+            for cat_id, row in existing_by_id.items():
+                if cat_id not in keep_ids:
+                    db_session.delete(row)
+
+        db_session.flush()
+        categories = (
+            db_session.query(TicketCategory)
+            .filter(TicketCategory.settings_id == settings.id)
+            .order_by(TicketCategory.position.asc())
+            .all()
+        )
+        result = _serialize_ticket_settings(settings, categories)
+
+    return jsonify(result)
+
+
+@admin_bp.route("/api/admin/tickets/settings/publish", methods=["POST"])
+@require_full_admin
+def admin_publish_ticket_panel():
+    """Post or update the ticket panel message on the running bot from current settings."""
+    import asyncio
+
+    from asu_discord.cogs.ticketing import TicketingCog
+    from asu_discord.shared import get_running_bot, get_running_loop
+
+    bot = get_running_bot()
+    loop = get_running_loop()
+    if bot is None or loop is None or loop.is_closed():
+        return jsonify({"error": "Discord bot is not running"}), 503
+
+    cog = bot.get_cog("TicketingCog")
+    if not isinstance(cog, TicketingCog):
+        return jsonify({"error": "TicketingCog not loaded"}), 503
+
+    future = asyncio.run_coroutine_threadsafe(cog.publish_panel(), loop)
+    try:
+        result = future.result(timeout=15)
+    except asyncio.TimeoutError:
+        future.cancel()
+        return jsonify({"error": "Timed out publishing ticket panel"}), 504
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({"status": "published", **result})
+
+
+@admin_bp.route("/api/admin/tickets")
+@require_admin
+def admin_tickets_list():
+    page = max(1, request.args.get("page", 1, type=int))
+    per_page = min(100, max(1, request.args.get("per_page", 25, type=int)))
+    offset = (page - 1) * per_page
+    status = request.args.get("status")
+
+    with session_scope() as db_session:
+        q = db_session.query(Ticket)
+        if status:
+            q = q.filter(Ticket.status == status)
+        total = q.count()
+        rows = q.order_by(Ticket.created_at.desc()).offset(offset).limit(per_page).all()
+
+        category_ids = {r.category_id for r in rows if r.category_id}
+        categories_map = {}
+        if category_ids:
+            categories_map = {
+                c.id: c.label
+                for c in db_session.query(TicketCategory)
+                .filter(TicketCategory.id.in_(category_ids))
+                .all()
+            }
+
+        result = [
+            {
+                "id": t.id,
+                "channel_id": t.channel_id,
+                "category": categories_map.get(t.category_id),
+                "opener_discord_id": t.opener_discord_id,
+                "opener_username": t.opener_username,
+                "subject": t.subject,
+                "status": t.status,
+                "closed_by": t.closed_by,
+                "closed_at": t.closed_at.isoformat() if t.closed_at else None,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+            }
+            for t in rows
+        ]
+
+    return jsonify(
+        {
+            "tickets": result,
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "pages": max(1, (total + per_page - 1) // per_page),
         }
     )
 
