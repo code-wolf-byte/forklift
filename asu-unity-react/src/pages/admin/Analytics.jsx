@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { getUrlParam, replaceUrlParams } from "@/utils/adminUrl";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -28,10 +29,13 @@ function Tooltip({ text }) {
   );
 }
 
-function StatCard({ label, value, icon, color = "#8c1d40", note, tooltip }) {
+function StatCard({ label, value, icon, color = "#8c1d40", note, tooltip, onClick }) {
   const isNull = value === null || value === undefined;
   return (
-    <Card className="relative overflow-hidden">
+    <Card
+      className={`relative overflow-hidden ${onClick ? "cursor-pointer hover:shadow-md transition-shadow" : ""}`}
+      onClick={onClick}
+    >
       <div className="absolute top-0 left-0 w-1 h-full rounded-l-lg" style={{ background: color }} />
       <CardContent className="p-3 pl-5">
         <div className="flex items-center gap-2 mb-1">
@@ -154,6 +158,11 @@ export default function Analytics() {
   const [channelsCollapsed, setChannelsCollapsed] = useState(true);
   const [demographicsCollapsed, setDemographicsCollapsed] = useState(true);
   const [expandedChannels, setExpandedChannels] = useState(new Set());
+  const [goldGuideListCollapsed, setGoldGuideListCollapsed] = useState(true);
+  const [volunteerListCollapsed, setVolunteerListCollapsed] = useState(true);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteRows, setDeleteRows] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -213,6 +222,21 @@ export default function Analytics() {
       else next.add(channelId);
       return next;
     });
+  };
+
+  const openDeleteModal = () => {
+    setDeleteModalOpen(true);
+    setDeleteLoading(true);
+    const params = new URLSearchParams();
+    if (applied.from) params.set("from_date", applied.from);
+    if (applied.to) params.set("to_date", applied.to);
+    fetch(`/api/admin/analytics/moderation/message-deletes?${params}`)
+      .then((r) => r.json())
+      .then((d) => {
+        setDeleteRows(d.rows || []);
+        setDeleteLoading(false);
+      })
+      .catch(() => setDeleteLoading(false));
   };
 
   const handleApply = () => {
@@ -850,9 +874,60 @@ export default function Analytics() {
           value={moderation.period_message_deletes ?? 0}
           icon="fa-trash-alt"
           color="#6b7280"
-          tooltip="Messages deleted by a moderator during the selected period. Detected via the Discord audit log when a message is removed by someone other than the author."
+          tooltip="Messages deleted by a moderator during the selected period. Detected via the Discord audit log when a message is removed by someone other than the author. Click to view details."
+          onClick={openDeleteModal}
         />
       </div>
+
+      <Dialog open={deleteModalOpen} onOpenChange={setDeleteModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Deleted Messages — {periodLabel}</DialogTitle>
+          </DialogHeader>
+          <div className="overflow-y-auto flex-1">
+            {deleteLoading ? (
+              <div className="flex justify-center py-10">
+                <div className="spinner-border spinner-border-sm" role="status" style={{ color: "#8c1d40" }}>
+                  <span className="visually-hidden">Loading…</span>
+                </div>
+              </div>
+            ) : deleteRows && deleteRows.length > 0 ? (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-xs text-muted-foreground uppercase tracking-wide border-b sticky top-0 bg-card">
+                    <th className="text-left px-3 py-2 font-semibold">Author</th>
+                    <th className="text-left px-3 py-2 font-semibold">Channel</th>
+                    <th className="text-left px-3 py-2 font-semibold">Moderator</th>
+                    <th className="text-left px-3 py-2 font-semibold">Deleted At</th>
+                    <th className="text-left px-3 py-2 font-semibold">Content</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deleteRows.map((row) => (
+                    <tr key={row.message_id} className="border-b last:border-0 align-top">
+                      <td className="px-3 py-2 whitespace-nowrap">{row.discord_username || "—"}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {row.channel_name || <NotTracked />}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">{row.moderator_username || "—"}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {new Date(row.occurred_at).toLocaleString()}
+                      </td>
+                      <td className="px-3 py-2 max-w-xs break-words">
+                        {row.content || <span className="text-muted-foreground italic">no content</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                No deleted messages for this period.
+              </p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* ════════════════════════════════════════════════════════════════════════
           Programs
@@ -876,7 +951,7 @@ export default function Analytics() {
           tooltip="Distinct Gold Guide members who sent at least one message in a Q&A thread during the period. A guide counts as 'active' if they contributed at least once."
         />
         <StatCard
-          label="Q&A Sessions"
+          label="Questions answered in Ask ASU Staff"
           value={gg.qna_sessions}
           icon="fa-comments"
           color="#8c1d40"
@@ -894,65 +969,138 @@ export default function Analytics() {
         <Card className="mb-5">
           <CardContent className="p-0">
             <div className="px-4 py-2.5 border-b flex items-center gap-1">
-              <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                Guide Contribution Distribution
-              </span>
+              <button
+                type="button"
+                onClick={() => setGoldGuideListCollapsed((c) => !c)}
+                className="flex items-center gap-1 cursor-pointer bg-transparent border-0 p-0 text-inherit"
+              >
+                <i
+                  className={`fas fa-chevron-down fa-sm text-muted-foreground transition-transform ${
+                    goldGuideListCollapsed ? "-rotate-90" : ""
+                  }`}
+                />
+                <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                  Guide Contribution Distribution
+                </span>
+              </button>
               <Tooltip text="Top 15 Gold Guides ranked by total messages sent in Q&A threads during the period. Shows which guides are most active." />
+              <Button
+                size="sm"
+                variant="outline"
+                asChild
+                className="ml-auto h-7 px-2 text-xs"
+              >
+                <a
+                  href={`/api/admin/analytics/gold-guides/export/csv?${new URLSearchParams({
+                    ...(applied.from ? { from_date: applied.from } : {}),
+                    ...(applied.to ? { to_date: applied.to } : {}),
+                  })}`}
+                  download={`gold_guide_contributions_${applied.from || "start"}_to_${applied.to || "end"}.csv`}
+                >
+                  <i className="fas fa-download mr-1" />
+                  Download CSV
+                </a>
+              </Button>
             </div>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs text-muted-foreground uppercase tracking-wide border-b">
-                  <th className="text-left px-4 py-2 font-semibold">Guide</th>
-                  <th className="text-right px-4 py-2 font-semibold w-28">Messages</th>
-                </tr>
-              </thead>
-              <tbody>
-                {gg.contribution_distribution.map((g) => (
-                  <tr key={g.discord_id} className="border-b last:border-0 hover:bg-muted/30">
-                    <td className="px-4 py-2 font-medium">{g.username}</td>
-                    <td className="px-4 py-2 text-right tabular-nums font-semibold">
-                      {g.messages.toLocaleString()}
-                    </td>
+            {!goldGuideListCollapsed && (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-xs text-muted-foreground uppercase tracking-wide border-b">
+                    <th className="text-left px-4 py-2 font-semibold">Guide</th>
+                    <th className="text-right px-4 py-2 font-semibold w-28">Messages</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {gg.contribution_distribution.map((g) => (
+                    <tr key={g.discord_id} className="border-b last:border-0 hover:bg-muted/30">
+                      <td className="px-4 py-2 font-medium">{g.username}</td>
+                      <td className="px-4 py-2 text-right tabular-nums font-semibold">
+                        {g.messages.toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </CardContent>
         </Card>
       )}
 
-      <SubLabel tooltip="Volunteer program tracking is planned but not yet implemented. These metrics will reflect a separate volunteer role cohort once configured.">
+      <SubLabel tooltip="Volunteers are members with the Volunteer role who send messages anywhere in the server (not restricted to a specific forum, unlike Gold Guides). Contributions are tracked per-message in volunteer_contributions.">
         Volunteers
       </SubLabel>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
         <StatCard
           label="Active Volunteers"
           value={vol.active_volunteers}
           icon="fa-hands-helping"
           color="#10b981"
-          tooltip="Distinct volunteers who sent at least one message during the period. Not currently tracked."
+          tooltip="Distinct Volunteer-role members who sent at least one message anywhere in the server during the period."
         />
         <StatCard
           label="Messages Sent"
           value={vol.messages_sent}
           icon="fa-comment"
-          tooltip="Total messages sent by members with the Volunteer role. Not currently tracked."
+          tooltip="Total messages sent by members with the Volunteer role during the period, across all channels. Tracked per-message in volunteer_contributions."
         />
         <StatCard
           label="Avg Messages / Volunteer"
           value={vol.avg_messages_per_volunteer}
           icon="fa-chart-bar"
           color="#3b82f6"
-          tooltip="Average messages per active volunteer. Not currently tracked."
+          tooltip="Average messages per active volunteer during the period (messages sent ÷ active volunteers)."
         />
         <StatCard
           label="Voice Hours"
-          value={vol.voice_hours}
+          value={vol.voice_hours != null ? `${vol.voice_hours}h` : null}
           icon="fa-microphone"
           color="#f59e0b"
-          tooltip="Total voice time logged by volunteers. Not currently tracked."
+          tooltip="Total voice time logged by members currently holding the Volunteer role, clipped to the selected period. Reflects current role membership, not historical — a member who left the role won't be counted even if they volunteered during the period."
         />
       </div>
+      {vol.contribution_distribution?.length > 0 && (
+        <Card className="mb-6">
+          <CardContent className="p-0">
+            <div className="px-4 py-2.5 border-b flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setVolunteerListCollapsed((c) => !c)}
+                className="flex items-center gap-1 cursor-pointer bg-transparent border-0 p-0 text-inherit"
+              >
+                <i
+                  className={`fas fa-chevron-down fa-sm text-muted-foreground transition-transform ${
+                    volunteerListCollapsed ? "-rotate-90" : ""
+                  }`}
+                />
+                <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                  Volunteer Contribution Distribution
+                </span>
+              </button>
+              <Tooltip text="Top 15 Volunteers ranked by total messages sent anywhere in the server during the period." />
+            </div>
+            {!volunteerListCollapsed && (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-xs text-muted-foreground uppercase tracking-wide border-b">
+                    <th className="text-left px-4 py-2 font-semibold">Volunteer</th>
+                    <th className="text-right px-4 py-2 font-semibold w-28">Messages</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {vol.contribution_distribution.map((v) => (
+                    <tr key={v.discord_id} className="border-b last:border-0 hover:bg-muted/30">
+                      <td className="px-4 py-2 font-medium">{v.username}</td>
+                      <td className="px-4 py-2 text-right tabular-nums font-semibold">
+                        {v.messages.toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* ════════════════════════════════════════════════════════════════════════
           Forums
@@ -967,7 +1115,7 @@ export default function Analytics() {
       <SubLabel tooltip="Ask ASU Staff is a forum where students ask questions. The bot attempts to answer via AI; unresolved questions are flagged for staff. Tracked in qna_posts.">
         Ask ASU Staff
       </SubLabel>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3 mb-3">
         <StatCard
           label="Questions Answered"
           value={askAsu.total_questions_answered}
@@ -976,10 +1124,17 @@ export default function Analytics() {
           tooltip="Questions resolved by either the AI bot (status: satisfied) or a staff member (status: needs_help). Sum of bot_answered + staff_answered."
         />
         <StatCard
+          label="Posts Created"
+          value={askAsu.posts_created}
+          icon="fa-edit"
+          tooltip="Total Q&A threads opened during the period, regardless of resolution status. Each thread corresponds to one student question."
+        />
+        <StatCard
           label="Total Messages"
           value={askAsu.total_messages}
           icon="fa-comments"
-          tooltip="Total Q&A threads opened during the period, regardless of resolution status. Each thread corresponds to one student question."
+          color="#8c1d40"
+          tooltip="Total messages sent within Ask ASU Staff threads during the period (student questions, bot replies, and staff replies combined), regardless of when the thread itself was created."
         />
         <StatCard
           label="Bot Answered"
@@ -1047,9 +1202,56 @@ export default function Analytics() {
               tooltip="Total replies within Connect by Major threads. Not currently tracked — would require message-level forum tracking."
             />
           </div>
-          <p className="text-xs text-muted-foreground mt-2">
-            Activity by Major: <NotTracked />
-          </p>
+          {forums.connect_by_major?.activity_by_major?.length > 0 && (
+            <Card className="mt-3">
+              <CardContent className="p-0">
+                <div className="px-3 py-2 border-b flex items-center gap-1">
+                  <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                    Forums by College
+                  </span>
+                  <Tooltip text="Number of Connect by Major posts during the period, bucketed by the author's college role. Authors with no matching college role are grouped as 'Unknown'." />
+                </div>
+                <table className="w-full text-sm">
+                  <tbody>
+                    {forums.connect_by_major.activity_by_major.map((row) => (
+                      <tr key={row.college} className="border-b last:border-0 hover:bg-muted/30">
+                        <td className="px-3 py-1.5">{row.college}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums font-semibold w-16">
+                          {row.count.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          )}
+          {forums.connect_by_major?.top_threads?.length > 0 && (
+            <Card className="mt-3">
+              <CardContent className="p-0">
+                <div className="px-3 py-2 border-b flex items-center gap-1">
+                  <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                    Top 5 Threads
+                  </span>
+                  <Tooltip text="The 5 Connect by Major threads with the most messages during the selected period." />
+                </div>
+                <table className="w-full text-sm">
+                  <tbody>
+                    {forums.connect_by_major.top_threads.map((t) => (
+                      <tr key={t.channel_id} className="border-b last:border-0 hover:bg-muted/30">
+                        <td className="px-3 py-1.5 truncate max-w-[10rem]" title={t.channel_name}>
+                          {t.channel_name}
+                        </td>
+                        <td className="px-3 py-1.5 text-right tabular-nums font-semibold w-16">
+                          {t.messages.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          )}
         </div>
         <div>
           <SubLabel tooltip="Forum channel where students looking for roommates post listings. Posts are tracked in forum_posts by parent channel name.">

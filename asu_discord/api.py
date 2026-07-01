@@ -374,6 +374,27 @@ def get_live_member_counts() -> dict | None:
     return {"total": total, "verified": verified, "unverified": unverified}
 
 
+def get_role_member_ids(role_id: int) -> set[str] | None:
+    """Return the discord_user_ids currently holding the given role.
+
+    Returns None if the bot or guild is unavailable, or an empty set if the
+    role itself doesn't exist. Reflects current role membership only — not a
+    historical snapshot.
+    """
+    bot = get_running_bot()
+    if bot is None:
+        return None
+    cfg = _config()
+    guild = bot.get_guild(int(cfg.guild_id))
+    if guild is None:
+        return None
+
+    role = guild.get_role(role_id)
+    if role is None:
+        return set()
+    return {str(m.id) for m in role.members}
+
+
 def _safe_json(response: requests.Response) -> Dict[str, Any]:
     try:
         data = response.json()
@@ -397,6 +418,7 @@ __all__ = [
     "get_guild_channels",
     "get_live_member_counts",
     "get_member_info",
+    "get_role_member_ids",
     "refresh_roles_from_profile",
     "remove_role_from_member",
     "remove_roles_from_profile",

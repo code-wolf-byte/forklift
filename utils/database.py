@@ -179,6 +179,24 @@ class GoldGuideContribution(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class VolunteerContribution(Base):
+    """One row per message sent anywhere in the server by a Volunteer-role member."""
+
+    __tablename__ = "volunteer_contributions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(String(64), nullable=True)
+    channel_id = Column(String(64), nullable=False, index=True)
+    channel_name = Column(String(255), nullable=True)
+    parent_channel_id = Column(String(64), nullable=True, index=True)
+    parent_channel_name = Column(String(255), nullable=True)
+    message_id = Column(String(64), unique=True, nullable=True, index=True)  # dedup key
+    responder_discord_id = Column(String(64), nullable=False, index=True)
+    responder_username = Column(String(255), nullable=True)
+    responded_at = Column(DateTime, nullable=False)               # naive UTC
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class QnaModule(Base):
     __tablename__ = "qna_modules"
 

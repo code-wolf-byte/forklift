@@ -9,6 +9,7 @@ Tracks
 ------
 - Messages sent         → ``message_logs``         (moved from MessageLoggerCog)
 - Gold Guide replies    → ``gold_guide_contributions``  (moved from QnACog.on_message)
+- Volunteer messages    → ``volunteer_contributions``   (new, any channel)
 - Voice sessions        → ``voice_sessions``        (new, restart-resilient)
 - Bans / unbans         → ``moderation_events``     (new)
 - Non-QnA forum posts   → ``forum_posts``           (new)
@@ -32,12 +33,14 @@ from utils.database import (
     MessageLog,
     ModerationEvent,
     VoiceSession,
+    VolunteerContribution,
     session_scope,
 )
 
 logger = logging.getLogger(__name__)
 
 GOLD_GUIDE_ROLE_ID = 1187156709597270157
+VOLUNTEER_ROLE_ID = 1301984870087528540
 
 # ── Message backfill settings (carried over from MessageLoggerCog) ────────────
 BACKFILL_LOOKBACK_DAYS = 365
@@ -176,6 +179,15 @@ class AnalyticsCog(commands.Cog):
             if qna_forum_id is not None and message.channel.parent_id == qna_forum_id:
                 await loop.run_in_executor(None, self._save_gg_contribution, message)
 
+        # Volunteer contribution — anywhere in the server, not thread-restricted
+        if (
+            isinstance(message.author, discord.Member)
+            and any(r.id == VOLUNTEER_ROLE_ID for r in message.author.roles)
+        ):
+            await loop.run_in_executor(
+                None, self._save_volunteer_contribution, message, parent_channel_id, parent_channel_name
+            )
+
     def _save_message(
         self,
         message_id: str,
@@ -243,6 +255,42 @@ class AnalyticsCog(commands.Cog):
         except Exception:
             logger.exception(
                 "Failed to save Gold Guide contribution for message %s", message.id
+            )
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # VOLUNTEER CONTRIBUTIONS  (new)
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def _save_volunteer_contribution(
+        self,
+        message: discord.Message,
+        parent_channel_id: str | None,
+        parent_channel_name: str | None,
+    ) -> None:
+        try:
+            with session_scope() as db:
+                if (
+                    db.query(VolunteerContribution.id)
+                    .filter(VolunteerContribution.message_id == str(message.id))
+                    .first()
+                ):
+                    return
+                db.add(
+                    VolunteerContribution(
+                        guild_id=str(message.guild.id) if message.guild else None,
+                        channel_id=str(message.channel.id),
+                        channel_name=getattr(message.channel, "name", None),
+                        parent_channel_id=parent_channel_id,
+                        parent_channel_name=parent_channel_name,
+                        message_id=str(message.id),
+                        responder_discord_id=str(message.author.id),
+                        responder_username=message.author.name,
+                        responded_at=message.created_at.replace(tzinfo=None),
+                    )
+                )
+        except Exception:
+            logger.exception(
+                "Failed to save Volunteer contribution for message %s", message.id
             )
 
     # ═════════════════════════════════════════════════════════════════════════

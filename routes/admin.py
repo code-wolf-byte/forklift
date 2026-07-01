@@ -32,6 +32,7 @@ from utils.database import (
     UserRoleException,
     UserSalesforceProfile,
     VoiceSession,
+    VolunteerContribution,
     session_scope,
 )
 
@@ -1254,6 +1255,8 @@ _COLLEGE_ROLES = [
     "University College",
 ]
 
+VOLUNTEER_ROLE_ID = 1301984870087528540
+
 
 @admin_bp.route("/api/admin/analytics")
 @require_admin
@@ -1497,6 +1500,49 @@ def admin_analytics():
             .all()
         )
 
+        # Connect by Major / forums per college — map each post's author to their
+        # college role (via UserRole), bucket unmatched authors as "Unknown".
+        major_posts = fp_q.filter(ForumPost.parent_channel_name.ilike("%major%")).all()
+        major_discord_ids = {p.discord_user_id for p in major_posts if p.discord_user_id}
+        college_by_discord_id: dict[str, str] = {}
+        if major_discord_ids:
+            role_rows = (
+                db_session.query(User.discord_user_id, UserRole.role_name)
+                .join(UserRole, UserRole.user_id == User.id)
+                .filter(
+                    User.discord_user_id.in_(major_discord_ids),
+                    UserRole.role_name.in_(_COLLEGE_ROLES),
+                )
+                .all()
+            )
+            for did, role_name in role_rows:
+                college_by_discord_id.setdefault(did, role_name)
+
+        college_counts: dict[str, int] = {}
+        for p in major_posts:
+            college = (
+                college_by_discord_id.get(p.discord_user_id, "Unknown")
+                if p.discord_user_id
+                else "Unknown"
+            )
+            college_counts[college] = college_counts.get(college, 0) + 1
+        activity_by_major = (
+            sorted(
+                [{"college": c, "count": n} for c, n in college_counts.items()],
+                key=lambda x: -x["count"],
+            )
+            or None
+        )
+
+        # Connect by Major / top 5 threads — reuse ch_rows (pre-truncation) so we
+        # aren't limited by the top-25-overall-channels cutoff applied to `channels`.
+        major_threads = [
+            {"channel_id": cid, "channel_name": cname or cid, "messages": cnt}
+            for cid, cname, parent_cid, parent_cname, cnt in ch_rows
+            if parent_cname and "major" in parent_cname.lower()
+        ]
+        top_major_threads = sorted(major_threads, key=lambda x: -x["messages"])[:5] or None
+
         # ── International / Country of Origin ─────────────────────────────────
         country_q = (
             db_session.query(
@@ -1578,6 +1624,81 @@ def admin_analytics():
             [{"tag": t, "count": c} for t, c in tag_counts.items()],
             key=lambda x: -x["count"],
         )
+
+        # Actual message count within Ask ASU Staff threads during the period
+        # (thread_id is unfiltered — a thread may predate the period but still
+        # receive messages within it).
+        qna_thread_ids = [tid for (tid,) in db_session.query(QnaPost.thread_id).all()]
+        askasu_msg_q = db_session.query(MessageLog).filter(
+            MessageLog.channel_id.in_(qna_thread_ids)
+        )
+        if from_dt:
+            askasu_msg_q = askasu_msg_q.filter(MessageLog.sent_at >= from_dt)
+        if to_dt:
+            askasu_msg_q = askasu_msg_q.filter(MessageLog.sent_at <= to_dt)
+        askasu_messages_sent = askasu_msg_q.count() if qna_thread_ids else 0
+
+        # ── Programs / Volunteers ───────────────────────────────────────────────
+        vol_q = db_session.query(VolunteerContribution)
+        if from_dt:
+            vol_q = vol_q.filter(VolunteerContribution.responded_at >= from_dt)
+        if to_dt:
+            vol_q = vol_q.filter(VolunteerContribution.responded_at <= to_dt)
+        vol_total = vol_q.count()
+        active_volunteers = (
+            vol_q.with_entities(
+                func.count(VolunteerContribution.responder_discord_id.distinct())
+            ).scalar()
+            or 0
+        )
+        vol_dist_rows = (
+            vol_q.with_entities(
+                VolunteerContribution.responder_discord_id,
+                VolunteerContribution.responder_username,
+                func.count(VolunteerContribution.id).label("cnt"),
+            )
+            .group_by(
+                VolunteerContribution.responder_discord_id,
+                VolunteerContribution.responder_username,
+            )
+            .order_by(func.count(VolunteerContribution.id).desc())
+            .limit(15)
+            .all()
+        )
+        volunteer_distribution = [
+            {"discord_id": did, "username": uname or did, "messages": cnt}
+            for did, uname, cnt in vol_dist_rows
+        ]
+        avg_messages_per_volunteer = (
+            round(vol_total / active_volunteers, 1) if active_volunteers else None
+        )
+
+        # Voice hours reflect CURRENT Volunteer role holders only (live lookup via
+        # the bot's guild cache) — same accepted tradeoff as moderation.banned_users
+        # above, which also reflects current state rather than historical membership.
+        try:
+            from asu_discord.api import get_role_member_ids
+
+            volunteer_ids = get_role_member_ids(VOLUNTEER_ROLE_ID)
+        except Exception:
+            volunteer_ids = None
+
+        vol_voice_hours = None
+        if volunteer_ids:
+            vvs_q = db_session.query(VoiceSession).filter(
+                VoiceSession.left_at.isnot(None),
+                VoiceSession.discord_user_id.in_(volunteer_ids),
+            )
+            if from_dt:
+                vvs_q = vvs_q.filter(VoiceSession.left_at > from_dt)
+            if to_dt:
+                vvs_q = vvs_q.filter(VoiceSession.joined_at < to_dt)
+            vol_voice_seconds = 0
+            for s in vvs_q.all():
+                clip_start = max(s.joined_at, from_dt) if from_dt else s.joined_at
+                clip_end = min(s.left_at, to_dt) if to_dt else s.left_at
+                vol_voice_seconds += int(max(0, (clip_end - clip_start).total_seconds()))
+            vol_voice_hours = round(vol_voice_seconds / 3600, 1) if vol_voice_seconds else None
 
     return jsonify(
         {
@@ -1670,17 +1791,18 @@ def admin_analytics():
                     "contribution_distribution": guide_distribution,
                 },
                 "volunteers": {
-                    "active_volunteers": None,
-                    "messages_sent": None,
-                    "avg_messages_per_volunteer": None,
-                    "voice_hours": None,
-                    "contribution_distribution": None,
+                    "active_volunteers": active_volunteers or None,
+                    "messages_sent": vol_total or None,
+                    "avg_messages_per_volunteer": avg_messages_per_volunteer,
+                    "voice_hours": vol_voice_hours,
+                    "contribution_distribution": volunteer_distribution or None,
                 },
             },
             "forums": {
                 "ask_asu_staff": {
                     "total_questions_answered": bot_answered + staff_answered,
-                    "total_messages": total_posts,
+                    "posts_created": total_posts,
+                    "total_messages": askasu_messages_sent,
                     "bot_answered": bot_answered,
                     "staff_answered": staff_answered,
                     "by_tag": by_tag,
@@ -1688,7 +1810,8 @@ def admin_analytics():
                 "connect_by_major": {
                     "posts_created": connect_posts or None,
                     "messages_sent": None,
-                    "activity_by_major": None,
+                    "activity_by_major": activity_by_major,
+                    "top_threads": top_major_threads,
                 },
                 "roommate_finder": {
                     "posts_by_campus": roommate_posts or None,
@@ -1707,6 +1830,93 @@ def admin_analytics():
                 "session_duration": None,
             },
         }
+    )
+
+
+@admin_bp.route("/api/admin/analytics/moderation/message-deletes")
+@require_full_admin
+def admin_analytics_message_deletes():
+    """Full detail for message_delete moderation events in the period, for the popup."""
+    import json as _json
+
+    from_dt = _parse_az_date(request.args.get("from_date"))
+    to_dt = _parse_az_date(request.args.get("to_date"), end_of_day=True)
+
+    with session_scope() as db_session:
+        q = (
+            db_session.query(ModerationEvent, MessageLog.channel_name)
+            .outerjoin(MessageLog, ModerationEvent.message_id == MessageLog.message_id)
+            .filter(ModerationEvent.event_type == "message_delete")
+        )
+        if from_dt:
+            q = q.filter(ModerationEvent.occurred_at >= from_dt)
+        if to_dt:
+            q = q.filter(ModerationEvent.occurred_at <= to_dt)
+        rows = q.order_by(ModerationEvent.occurred_at.desc()).limit(500).all()
+
+        results = []
+        for event, channel_name in rows:
+            content = None
+            if event.extra_data:
+                try:
+                    content = _json.loads(event.extra_data).get("content")
+                except Exception:
+                    content = None
+            results.append({
+                "message_id": event.message_id,
+                "channel_id": event.channel_id,
+                "channel_name": channel_name,
+                "content": content,
+                "discord_username": event.discord_username,
+                "moderator_username": event.moderator_username,
+                "occurred_at": event.occurred_at.replace(tzinfo=timezone.utc)
+                .astimezone(AZ_TZ)
+                .isoformat(),
+            })
+
+    return jsonify({"rows": results, "total": len(results)})
+
+
+@admin_bp.route("/api/admin/analytics/gold-guides/export/csv")
+@require_admin
+def admin_analytics_gold_guides_export_csv():
+    """Stream all Gold Guide contributions (unlimited, not just top 15) as a CSV download."""
+    from_dt = _parse_az_date(request.args.get("from_date"))
+    to_dt = _parse_az_date(request.args.get("to_date"), end_of_day=True)
+
+    with session_scope() as db_session:
+        q = db_session.query(GoldGuideContribution)
+        if from_dt:
+            q = q.filter(GoldGuideContribution.responded_at >= from_dt)
+        if to_dt:
+            q = q.filter(GoldGuideContribution.responded_at <= to_dt)
+        rows = (
+            q.with_entities(
+                GoldGuideContribution.responder_discord_id,
+                GoldGuideContribution.responder_username,
+                func.count(GoldGuideContribution.id).label("cnt"),
+            )
+            .group_by(
+                GoldGuideContribution.responder_discord_id,
+                GoldGuideContribution.responder_username,
+            )
+            .order_by(func.count(GoldGuideContribution.id).desc())
+            .all()
+        )
+
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["discord_username", "discord_user_id", "messages_in_period"])
+        for did, uname, cnt in rows:
+            writer.writerow([uname or did, did, cnt])
+
+    from_label = from_dt.strftime("%Y-%m-%d") if from_dt else "start"
+    to_label = to_dt.strftime("%Y-%m-%d") if to_dt else "end"
+    filename = f"gold_guide_contributions_{from_label}_to_{to_label}.csv"
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
