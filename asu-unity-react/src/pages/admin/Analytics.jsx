@@ -1158,13 +1158,13 @@ export default function Analytics() {
       <SubLabel tooltip="Ask ASU Staff is a forum where students ask questions. The bot attempts to answer via AI; unresolved questions are flagged for staff. Tracked in qna_posts.">
         Ask ASU Staff
       </SubLabel>
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3 mb-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-3">
         <StatCard
           label="Questions Answered"
           value={askAsu.total_questions_answered}
           icon="fa-check-circle"
           color="#10b981"
-          tooltip="Questions resolved by either the AI bot (status: satisfied) or a staff member (status: needs_help). Sum of bot_answered + staff_answered."
+          tooltip="Questions resolved by the AI bot (status: satisfied), escalated to a staff member (status: needs_help), or verified by ASU staff (status: staff_confirmed). Sum of bot_answered + staff_answered + staff_confirmed."
         />
         <StatCard
           label="Posts Created"
@@ -1192,6 +1192,13 @@ export default function Analytics() {
           icon="fa-user-tie"
           color="#f59e0b"
           tooltip="Threads escalated to staff because the bot could not resolve them (status: needs_help). Lower is better if bot resolution rate is high."
+        />
+        <StatCard
+          label="Staff Confirmed"
+          value={askAsu.staff_confirmed}
+          icon="fa-user-shield"
+          color="#8b5cf6"
+          tooltip="Threads where an ASU staff member (admin) verified the bot's answer to be correct via the 'Staff Confirmed' button (status: staff_confirmed)."
         />
       </div>
       {askAsu.by_tag?.length > 0 && (

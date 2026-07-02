@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_COMMAND_STATE = {"qna-enable": True, "qna-disable": True}
 SATISFACTORY_CUSTOM_ID = "qna:satisfied"
 ASSISTANCE_CUSTOM_ID = "qna:assist"
+STAFF_CONFIRMED_CUSTOM_ID = "qna:staff_confirmed"
 GOLD_GUIDE_ROLE_ID = 1187156709597270157
 GOLD_GUIDE_TAG_SUBSTRING = "gold guide"
 TEST_GUILD_IDS: list[int] = []
@@ -565,6 +566,46 @@ class QnACog(commands.Cog):
 
         await self._finalize_feedback(interaction, status=status, view=view)
 
+    async def handle_staff_confirm(
+        self,
+        interaction: discord.Interaction,
+        *,
+        view: Optional[QnAFeedbackView] = None,
+    ) -> None:
+        """Mark an answer as verified by ASU staff.
+
+        Only server administrators (ASU staff) may use this. It records the
+        ``staff_confirmed`` status so the answer is counted as a staff-verified
+        correct answer in the admin analytics module.
+        """
+        if not self._is_enabled(interaction.guild_id):
+            await interaction.response.send_message(
+                "The Q&A assistant is currently disabled.", ephemeral=True
+            )
+            return
+
+        member = interaction.user
+        is_admin = bool(
+            isinstance(member, discord.Member)
+            and member.guild_permissions.administrator
+        )
+        if not is_admin:
+            await interaction.response.send_message(
+                "Only ASU staff (server administrators) can confirm answers.",
+                ephemeral=True,
+            )
+            return
+
+        # Post the public remark in the thread.
+        await interaction.response.send_message(
+            "\N{WHITE HEAVY CHECK MARK} ASU staff confirmed this answer to be correct.",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+        await self._finalize_feedback(
+            interaction, status="staff_confirmed", view=view
+        )
+
     async def _finalize_feedback(
         self,
         interaction: discord.Interaction,
@@ -735,6 +776,19 @@ class QnAFeedbackView(discord.ui.View):
             view=self,
             ping_helper=True,
         )
+
+    @discord.ui.button(
+        label="Staff Confirmed",
+        style=discord.ButtonStyle.primary,
+        emoji="\N{HEAVY CHECK MARK}",
+        custom_id=STAFF_CONFIRMED_CUSTOM_ID,
+    )
+    async def handle_staff_confirmed(  # type: ignore[override]
+        self,
+        _: discord.ui.Button,
+        interaction: discord.Interaction,
+    ) -> None:
+        await self.cog.handle_staff_confirm(interaction, view=self)
 
 
 async def setup(bot: commands.Bot) -> None:

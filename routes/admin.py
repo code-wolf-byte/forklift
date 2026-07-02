@@ -1617,6 +1617,7 @@ def admin_analytics():
         total_posts = len(all_posts)
         bot_answered = sum(1 for p in all_posts if p.status == "satisfied")
         staff_answered = sum(1 for p in all_posts if p.status == "needs_help")
+        staff_confirmed = sum(1 for p in all_posts if p.status == "staff_confirmed")
 
         tag_counts: dict[str, int] = {}
         for post in all_posts:
@@ -1807,11 +1808,12 @@ def admin_analytics():
             },
             "forums": {
                 "ask_asu_staff": {
-                    "total_questions_answered": bot_answered + staff_answered,
+                    "total_questions_answered": bot_answered + staff_answered + staff_confirmed,
                     "posts_created": total_posts,
                     "total_messages": askasu_messages_sent,
                     "bot_answered": bot_answered,
                     "staff_answered": staff_answered,
+                    "staff_confirmed": staff_confirmed,
                     "by_tag": by_tag,
                 },
                 "connect_by_major": {
