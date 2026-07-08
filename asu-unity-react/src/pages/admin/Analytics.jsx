@@ -13,6 +13,42 @@ const monthStartISO = () => {
   return d.toISOString().slice(0, 10);
 };
 
+// ── Looker Studio campaign deep links ──────────────────────────────────────
+// Looker Studio filter values are serialized as:
+//   "<type><fieldPosition><operator><value>"
+// then encodeURIComponent'd TWICE (confirmed by reverse-engineering a real
+// report URL: "linktree/social_owned" -> single-encode "%2F" -> double-encode
+// "%252F", which matches exactly what Looker Studio produces).
+//
+// Note: the report's Source/Medium filter (df640) is intentionally NOT
+// included here — it was pinned to "linktree/social_owned" in the reference
+// URL, which would zero out every email (ECOMM) campaign if applied globally.
+const LOOKER_STUDIO_REPORT_ID = "2018cce5-1438-48b6-8f39-568376eed976";
+const LOOKER_STUDIO_PAGE_ID = "p_7ydex1a7uc";
+const LOOKER_STUDIO_CAMPAIGN_FIELD = "df853";
+const LOOKER_SEP = "";
+
+function buildLookerStudioFilterValue(rawValue) {
+  const raw = `include${LOOKER_SEP}0${LOOKER_SEP}IN${LOOKER_SEP}${rawValue}`;
+  return encodeURIComponent(encodeURIComponent(raw));
+}
+
+function buildLookerStudioCampaignUrl(campaignValue) {
+  const encodedFilter = buildLookerStudioFilterValue(campaignValue);
+  const params = `%7B%22${LOOKER_STUDIO_CAMPAIGN_FIELD}%22:%22${encodedFilter}%22%7D`;
+  return `https://datastudio.google.com/u/1/reporting/${LOOKER_STUDIO_REPORT_ID}/page/${LOOKER_STUDIO_PAGE_ID}?params=${params}`;
+}
+
+const LOOKER_STUDIO_CAMPAIGNS = [
+  { label: "D2D25", value: "d2d25" },
+  { label: "ECOMM 79160 — Invite Journey", value: "ECOMM 79160 - invite journey" },
+  { label: "ECOMM 81639 — Incomplete Verification", value: "ECOMM 81639 - incomplete verification" },
+  { label: "ECOMM 81638 — Leaves", value: "ECOMM 81638 - leaves" },
+  { label: "ECOMM 80640 — Reminder Invite (sent 1/29)", value: "ECOMM 80640 - reminder invite sent on 1/29" },
+  { label: "ECOMM 79158 — D2D Open Announcement", value: "ECOMM 79158 - D2D open announcement" },
+  { label: "ECOMM 80867 — D2D Newsletter", value: "ECOMM 80867 - D2D newsletter" },
+];
+
 function NotTracked() {
   return <span className="text-xs text-muted-foreground italic">not tracked</span>;
 }
@@ -1332,49 +1368,39 @@ export default function Analytics() {
         onToggle={() => toggleSection("acquisition")}
       />
       {!collapsedSections.acquisition && (
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
-        <StatCard
-          label="Source / Medium"
-          value={null}
-          icon="fa-link"
-          tooltip="The traffic source and medium (e.g., email / campaign, organic / google). Requires Google Analytics UTM tracking."
-        />
-        <StatCard
-          label="Users"
-          value={null}
-          icon="fa-users"
-          color="#3b82f6"
-          tooltip="Unique visitors to the verification page from this source. Requires Google Analytics."
-        />
-        <StatCard
-          label="Sessions"
-          value={null}
-          icon="fa-layer-group"
-          color="#10b981"
-          tooltip="Total sessions initiated from this source. One user can have multiple sessions. Requires Google Analytics."
-        />
-        <StatCard
-          label="Pageviews"
-          value={null}
-          icon="fa-eye"
-          color="#f59e0b"
-          tooltip="Total page views from this source, including repeat views within a session. Requires Google Analytics."
-        />
-        <StatCard
-          label="Bounce Rate"
-          value={null}
-          icon="fa-percentage"
-          color="#ef4444"
-          tooltip="% of sessions where the user left without interacting (single-page visit). Lower bounce rate = more engaged visitors. Requires Google Analytics."
-        />
-        <StatCard
-          label="Session Duration"
-          value={null}
-          icon="fa-clock"
-          color="#8b5cf6"
-          tooltip="Average time users spend on the verification page per session. Longer duration may indicate friction in the flow. Requires Google Analytics."
-        />
-      </div>
+      <>
+      <SubLabel tooltip="Deep links into the org-wide Looker Studio acquisition report, pre-filtered to a single campaign. The report's own date range is not URL-controllable (a Looker Studio platform limitation), so it reflects whatever range was last set inside the report — adjust it there after clicking through.">
+        Campaign Reports (Looker Studio)
+      </SubLabel>
+      <p className="text-[11px] text-amber-600 dark:text-amber-400 mb-2">
+        <i className="fas fa-exclamation-triangle mr-1" />
+        Date controls not accessible through the admin dashboard. Adjust them manually in Looker Studio.
+      </p>
+      <Card className="mb-6">
+        <CardContent className="p-0">
+          <table className="w-full text-sm">
+            <tbody>
+              {LOOKER_STUDIO_CAMPAIGNS.map((c) => (
+                <tr key={c.value} className="border-b last:border-0 hover:bg-muted/30">
+                  <td className="px-4 py-2.5">{c.label}</td>
+                  <td className="px-4 py-2.5 text-right">
+                    <a
+                      href={buildLookerStudioCampaignUrl(c.value)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-500 hover:text-blue-400 hover:underline"
+                    >
+                      Open Report
+                      <i className="fas fa-external-link-alt text-xs" />
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+      </>
       )}
     </>
   );
