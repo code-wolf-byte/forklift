@@ -5,7 +5,7 @@ SQLAlchemy>=2.0
 py-cord>=2.6
 requests>=2.31
 boto3
-paramiko>=3.4
+paramiko>=3.4,<4
 gspread>=6.0
 google-auth>=2.0
 pydantic>=2.0

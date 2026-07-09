@@ -65,7 +65,7 @@ class EventTrackerCog(commands.Cog):
 
         new_ev = ServerEvent(
             discord_event_id=str(event.id),
-            guild_id=str(event.guild_id),
+            guild_id=str(event.guild.id),
             name=event.name,
             description=event.description,
             start_time=start_time,
@@ -104,7 +104,7 @@ class EventTrackerCog(commands.Cog):
             return
 
         try:
-            events = await guild.fetch_scheduled_events(with_counts=False)
+            events = await guild.fetch_scheduled_events(with_user_count=False)
         except Exception:
             logger.exception("EventTrackerCog: failed to fetch scheduled events on startup")
             return
@@ -127,7 +127,7 @@ class EventTrackerCog(commands.Cog):
         """Insert 'joined' rows for users already subscribed to a live event on startup."""
         try:
             user_ids: list[str] = []
-            async for user in event.fetch_users():
+            async for user in event.subscribers(limit=None):
                 user_ids.append(str(user.id))
         except Exception:
             logger.warning(

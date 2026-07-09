@@ -649,8 +649,8 @@ class AnalyticsCog(commands.Cog):
         if after.guild.id != self.guild_id:
             return
 
-        before_timeout = before.timed_out_until
-        after_timeout = after.timed_out_until
+        before_timeout = before.communication_disabled_until
+        after_timeout = after.communication_disabled_until
         if before_timeout == after_timeout:
             return
 
