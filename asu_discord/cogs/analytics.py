@@ -40,7 +40,7 @@ from utils.database import (
 logger = logging.getLogger(__name__)
 
 GOLD_GUIDE_ROLE_ID = 1187156709597270157
-VOLUNTEER_ROLE_ID = 1301984870087528540
+VOLUNTEER_ROLE_ID = 1396918560340705291
 
 # ── Message backfill settings (carried over from MessageLoggerCog) ────────────
 BACKFILL_LOOKBACK_DAYS = 365
@@ -1029,6 +1029,28 @@ class AnalyticsCog(commands.Cog):
     def _save_volunteer_backfill(
         self, volunteer_ids: set[str], member_names: dict[str, str]
     ) -> int:
+        # Prune contributions from anyone no longer holding the Volunteer role
+        # (e.g. after the role id changed) so analytics reflect current membership.
+        # Guard the empty set: notin_(()) deletes the whole table. The caller
+        # already returns early on an empty role, this is belt-and-suspenders.
+        if volunteer_ids:
+            try:
+                with session_scope() as db:
+                    removed = (
+                        db.query(VolunteerContribution)
+                        .filter(
+                            VolunteerContribution.responder_discord_id.notin_(volunteer_ids)
+                        )
+                        .delete(synchronize_session=False)
+                    )
+                if removed:
+                    logger.info(
+                        "AnalyticsCog: pruned %d volunteer contributions from non-current-role members",
+                        removed,
+                    )
+            except Exception:
+                logger.exception("AnalyticsCog: failed to prune stale volunteer contributions")
+
         # Commit in small chunks rather than one giant transaction — a single
         # multi-second write lock (this backfill can touch hundreds of thousands
         # of rows on first run) starves other concurrent writers (QnA backfill,

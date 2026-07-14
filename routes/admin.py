@@ -1256,7 +1256,7 @@ _COLLEGE_ROLES = [
     "University College",
 ]
 
-VOLUNTEER_ROLE_ID = 1301984870087528540
+VOLUNTEER_ROLE_ID = 1396918560340705291
 
 
 @admin_bp.route("/api/admin/analytics")
