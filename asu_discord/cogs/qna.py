@@ -64,7 +64,7 @@ class QnACog(commands.Cog):
         self.aws_access_key_id = CONFIG.AWS_ACCESS_KEY_ID
         self.aws_secret_access_key = CONFIG.AWS_SECRET_ACCESS_KEY
         self._enabled_cache: dict[int, bool] = {}
-        self._active_views: set[QnAFeedbackView] = set()
+        self._persistent_view_added = False
         self._backfill_task: Optional[asyncio.Task] = None
         self._backfill_progress: dict = {
             "status": "idle",
@@ -100,6 +100,12 @@ class QnACog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
+        # Register the feedback buttons as a persistent view so clicks on
+        # messages posted before a restart still dispatch (matched by custom_id).
+        if not self._persistent_view_added:
+            self.bot.add_view(QnAFeedbackView(self))
+            self._persistent_view_added = True
+
         if not self.forum_channel_id:
             logger.info(
                 "QnACog loaded but incomplete configuration prevents automation "
@@ -534,8 +540,8 @@ class QnACog(commands.Cog):
         interaction: discord.Interaction,
         *,
         status: str,
-        view: Optional[QnAFeedbackView] = None,
         ping_helper: bool = False,
+        keep_staff_button: bool = False,
     ) -> None:
         if not self._is_enabled(interaction.guild_id):
             await interaction.response.send_message(
@@ -564,13 +570,13 @@ class QnACog(commands.Cog):
                 "Thank you for your feedback!", ephemeral=True
             )
 
-        await self._finalize_feedback(interaction, status=status, view=view)
+        await self._finalize_feedback(
+            interaction, status=status, keep_staff_button=keep_staff_button
+        )
 
     async def handle_staff_confirm(
         self,
         interaction: discord.Interaction,
-        *,
-        view: Optional[QnAFeedbackView] = None,
     ) -> None:
         """Mark an answer as verified by ASU staff.
 
@@ -596,22 +602,30 @@ class QnACog(commands.Cog):
             )
             return
 
-        # Post the public remark in the thread.
+        # Ping the original asker and confirm the bot's answer publicly.
+        with session_scope() as db_session:
+            record = (
+                db_session.query(QnaPost)
+                .filter_by(thread_id=str(interaction.channel_id))
+                .one_or_none()
+            )
+            owner_id = record.owner_id if record else None
+
+        mention = f"<@{owner_id}> " if owner_id else ""
         await interaction.response.send_message(
-            "\N{WHITE HEAVY CHECK MARK} ASU staff confirmed this answer to be correct.",
-            allowed_mentions=discord.AllowedMentions.none(),
+            f"{mention}\N{WHITE HEAVY CHECK MARK} ASU staff have confirmed that "
+            "Forkman's answer above is correct.",
+            allowed_mentions=discord.AllowedMentions(users=True),
         )
 
-        await self._finalize_feedback(
-            interaction, status="staff_confirmed", view=view
-        )
+        await self._finalize_feedback(interaction, status="staff_confirmed")
 
     async def _finalize_feedback(
         self,
         interaction: discord.Interaction,
         *,
         status: str,
-        view: Optional[QnAFeedbackView],
+        keep_staff_button: bool = False,
     ) -> None:
         thread_id = str(interaction.channel_id)
         user_id = interaction.user.id if interaction.user else None
@@ -626,16 +640,22 @@ class QnACog(commands.Cog):
                     record.last_feedback_user_id = str(user_id)
                 record.last_feedback_at = discord.utils.utcnow()
 
+        # Re-render the message's components. A fresh view is used purely for
+        # rendering — button clicks are dispatched by custom_id to the persistent
+        # view registered in on_ready, so we never mutate the handling view.
+        # keep_staff_button leaves only Staff Confirmed; otherwise all buttons go.
         try:
-            await interaction.message.edit(embed=None, view=None)
+            if keep_staff_button:
+                staff_view = QnAFeedbackView(self)
+                staff_view.show_staff_only()
+                await interaction.message.edit(view=staff_view)
+            else:
+                await interaction.message.edit(embed=None, view=None)
         except discord.HTTPException:
             logger.warning(
-                "Failed to clear feedback components for message %s",
+                "Failed to update feedback components for message %s",
                 interaction.message.id,
             )
-        if view:
-            view.stop()
-            self._active_views.discard(view)
 
     async def _fetch_starter_message(
         self, thread: discord.Thread
@@ -742,6 +762,12 @@ class QnAFeedbackView(discord.ui.View):
         super().__init__(timeout=None)
         self.cog = cog
 
+    def show_staff_only(self) -> None:
+        """Drop the user-facing feedback buttons, leaving only Staff Confirmed."""
+        for item in list(self.children):
+            if getattr(item, "custom_id", None) != STAFF_CONFIRMED_CUSTOM_ID:
+                self.remove_item(item)
+
     @discord.ui.button(
         label="It was great!",
         style=discord.ButtonStyle.success,
@@ -756,7 +782,6 @@ class QnAFeedbackView(discord.ui.View):
         await self.cog.handle_feedback(
             interaction,
             status="satisfied",
-            view=self,
         )
 
     @discord.ui.button(
@@ -773,8 +798,8 @@ class QnAFeedbackView(discord.ui.View):
         await self.cog.handle_feedback(
             interaction,
             status="needs_help",
-            view=self,
             ping_helper=True,
+            keep_staff_button=True,
         )
 
     @discord.ui.button(
@@ -788,7 +813,7 @@ class QnAFeedbackView(discord.ui.View):
         _: discord.ui.Button,
         interaction: discord.Interaction,
     ) -> None:
-        await self.cog.handle_staff_confirm(interaction, view=self)
+        await self.cog.handle_staff_confirm(interaction)
 
 
 async def setup(bot: commands.Bot) -> None:
