@@ -30,6 +30,7 @@ from utils.database import (
     ServerEvent,
     Ticket,
     TicketCategory,
+    TicketMessage,
     TicketSettings,
     User,
     UserRole,
@@ -1896,12 +1897,20 @@ def admin_salesforce_status():
 _DEFAULT_TICKET_SETTINGS = {
     "panel_channel_id": None,
     "panel_message_id": None,
+    "transcript_channel_id": None,
     "embed_title": "Open a Ticket",
     "embed_description": "Select a category below to open a ticket.",
     "embed_color": "#8c1d40",
     "embed_image_url": None,
     "embed_thumbnail_url": None,
     "embed_footer": None,
+    "embed_footer_icon_url": None,
+    "embed_url": None,
+    "embed_author_name": None,
+    "embed_author_url": None,
+    "embed_author_icon_url": None,
+    "embed_timestamp": False,
+    "embed_fields": [],
     "select_placeholder": "Select a ticket category…",
     "staff_role_ids": [],
     "categories": [],
@@ -1913,12 +1922,20 @@ def _serialize_ticket_settings(settings: TicketSettings, categories: list[Ticket
         "guild_id": settings.guild_id,
         "panel_channel_id": settings.panel_channel_id,
         "panel_message_id": settings.panel_message_id,
+        "transcript_channel_id": settings.transcript_channel_id,
         "embed_title": settings.embed_title,
         "embed_description": settings.embed_description,
         "embed_color": settings.embed_color,
         "embed_image_url": settings.embed_image_url,
         "embed_thumbnail_url": settings.embed_thumbnail_url,
         "embed_footer": settings.embed_footer,
+        "embed_footer_icon_url": settings.embed_footer_icon_url,
+        "embed_url": settings.embed_url,
+        "embed_author_name": settings.embed_author_name,
+        "embed_author_url": settings.embed_author_url,
+        "embed_author_icon_url": settings.embed_author_icon_url,
+        "embed_timestamp": bool(settings.embed_timestamp),
+        "embed_fields": json.loads(settings.embed_fields or "[]"),
         "select_placeholder": settings.select_placeholder,
         "staff_role_ids": json.loads(settings.staff_role_ids or "[]"),
         "categories": [
@@ -1987,16 +2004,34 @@ def admin_update_tickets_settings():
 
         for field in (
             "panel_channel_id",
+            "transcript_channel_id",
             "embed_title",
             "embed_description",
             "embed_color",
             "embed_image_url",
             "embed_thumbnail_url",
             "embed_footer",
+            "embed_footer_icon_url",
+            "embed_url",
+            "embed_author_name",
+            "embed_author_url",
+            "embed_author_icon_url",
             "select_placeholder",
         ):
             if field in data:
                 setattr(settings, field, data[field] or None)
+
+        if "embed_timestamp" in data:
+            settings.embed_timestamp = bool(data["embed_timestamp"])
+
+        if "embed_fields" in data:
+            fields = []
+            for f in data["embed_fields"] or []:
+                name = (f.get("name") or "").strip()[:256]
+                value = (f.get("value") or "").strip()[:1024]
+                if name and value:
+                    fields.append({"name": name, "value": value, "inline": bool(f.get("inline"))})
+            settings.embed_fields = json.dumps(fields)
 
         if "staff_role_ids" in data:
             settings.staff_role_ids = json.dumps([str(r) for r in (data["staff_role_ids"] or [])])
@@ -2107,6 +2142,7 @@ def admin_tickets_list():
                 "closed_by": t.closed_by,
                 "closed_at": t.closed_at.isoformat() if t.closed_at else None,
                 "created_at": t.created_at.isoformat() if t.created_at else None,
+                "transcript_slug": t.transcript_slug if t.transcript_captured_at else None,
             }
             for t in rows
         ]
@@ -2120,6 +2156,62 @@ def admin_tickets_list():
             "pages": max(1, (total + per_page - 1) // per_page),
         }
     )
+
+
+@admin_bp.route("/api/admin/tickets/transcript/<slug>")
+@require_admin
+def admin_ticket_transcript(slug):
+    with session_scope() as db_session:
+        ticket = (
+            db_session.query(Ticket).filter(Ticket.transcript_slug == slug).one_or_none()
+        )
+        if ticket is None or not ticket.transcript_captured_at:
+            return jsonify({"error": "Transcript not found"}), 404
+
+        category = (
+            db_session.query(TicketCategory).filter(TicketCategory.id == ticket.category_id).one_or_none()
+            if ticket.category_id
+            else None
+        )
+
+        messages = (
+            db_session.query(TicketMessage)
+            .filter(TicketMessage.ticket_id == ticket.id)
+            .order_by(TicketMessage.created_at.asc(), TicketMessage.id.asc())
+            .all()
+        )
+
+        return jsonify(
+            {
+                "id": ticket.id,
+                "subject": ticket.subject,
+                "description": ticket.description,
+                "category": category.label if category else None,
+                "opener_discord_id": ticket.opener_discord_id,
+                "opener_username": ticket.opener_username,
+                "status": ticket.status,
+                "closed_by": ticket.closed_by,
+                "closed_at": ticket.closed_at.isoformat() if ticket.closed_at else None,
+                "created_at": ticket.created_at.isoformat() if ticket.created_at else None,
+                "transcript_captured_at": ticket.transcript_captured_at.isoformat(),
+                "messages": [
+                    {
+                        "id": m.message_id,
+                        "author_id": m.author_id,
+                        "author_username": m.author_username,
+                        "author_display_name": m.author_display_name,
+                        "author_avatar_url": m.author_avatar_url,
+                        "content": m.content,
+                        "created_at": m.created_at.isoformat(),
+                        "attachments": json.loads(m.attachments or "[]"),
+                        "embeds": m.embeds,
+                    }
+                    for m in messages
+                ],
+            }
+        )
+
+
 # ─── Purge Unregistered Roles ─────────────────────────────────────────────────
 
 _purge_unregistered_lock = threading.Lock()

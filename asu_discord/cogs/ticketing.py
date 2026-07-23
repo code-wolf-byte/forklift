@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+import secrets
 from datetime import datetime
 from typing import Optional
 
@@ -10,8 +12,8 @@ import discord
 from discord.ext import commands
 from discord.commands import Option, slash_command
 
-from utils.database import Ticket, TicketCategory, TicketSettings, session_scope
-from utils.settings import DISCORD_CONFIG
+from utils.database import Ticket, TicketCategory, TicketMessage, TicketSettings, session_scope
+from utils.settings import CONFIG, DISCORD_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,27 @@ def _slugify(value: str) -> str:
     return slug or "ticket"
 
 
+def _generate_transcript_slug() -> str:
+    return secrets.token_urlsafe(12)
+
+
+def _message_row_kwargs(message: discord.Message) -> dict:
+    """Build TicketMessage column values from a live discord.Message."""
+    return {
+        "message_id": str(message.id),
+        "author_id": str(message.author.id),
+        "author_username": str(message.author),
+        "author_display_name": message.author.display_name,
+        "author_avatar_url": message.author.display_avatar.url,
+        "content": message.content,
+        "attachments": json.dumps(
+            [{"filename": a.filename, "url": a.url, "content_type": a.content_type} for a in message.attachments]
+        ),
+        "embeds": len(message.embeds),
+        "created_at": message.created_at.replace(tzinfo=None),
+    }
+
+
 def _load_settings_dict(guild_id: str) -> Optional[dict]:
     """Load ticket settings + categories for a guild as plain dicts (safe past session close)."""
     with session_scope() as db:
@@ -79,12 +102,20 @@ def _load_settings_dict(guild_id: str) -> Optional[dict]:
             "guild_id": settings.guild_id,
             "panel_channel_id": settings.panel_channel_id,
             "panel_message_id": settings.panel_message_id,
+            "transcript_channel_id": settings.transcript_channel_id,
             "embed_title": settings.embed_title or "Open a Ticket",
             "embed_description": settings.embed_description or "Select a category below to open a ticket.",
             "embed_color": settings.embed_color or "#8c1d40",
             "embed_image_url": settings.embed_image_url,
             "embed_thumbnail_url": settings.embed_thumbnail_url,
             "embed_footer": settings.embed_footer,
+            "embed_footer_icon_url": settings.embed_footer_icon_url,
+            "embed_url": settings.embed_url,
+            "embed_author_name": settings.embed_author_name,
+            "embed_author_url": settings.embed_author_url,
+            "embed_author_icon_url": settings.embed_author_icon_url,
+            "embed_timestamp": bool(settings.embed_timestamp),
+            "embed_fields": json.loads(settings.embed_fields or "[]"),
             "select_placeholder": settings.select_placeholder or "Select a ticket category…",
             "staff_role_ids": json.loads(settings.staff_role_ids or "[]"),
             "categories": [
@@ -112,13 +143,29 @@ def _build_panel_embed(settings: dict) -> discord.Embed:
         title=settings.get("embed_title") or "Open a Ticket",
         description=settings.get("embed_description") or "Select a category below to open a ticket.",
         color=color,
+        url=settings.get("embed_url") or None,
+        timestamp=datetime.utcnow() if settings.get("embed_timestamp") else None,
     )
     if settings.get("embed_image_url"):
         embed.set_image(url=settings["embed_image_url"])
     if settings.get("embed_thumbnail_url"):
         embed.set_thumbnail(url=settings["embed_thumbnail_url"])
     if settings.get("embed_footer"):
-        embed.set_footer(text=settings["embed_footer"])
+        embed.set_footer(
+            text=settings["embed_footer"],
+            icon_url=settings.get("embed_footer_icon_url") or None,
+        )
+    if settings.get("embed_author_name"):
+        embed.set_author(
+            name=settings["embed_author_name"],
+            url=settings.get("embed_author_url") or None,
+            icon_url=settings.get("embed_author_icon_url") or None,
+        )
+    for field in settings.get("embed_fields") or []:
+        name = (field.get("name") or "").strip()
+        value = (field.get("value") or "").strip()
+        if name and value:
+            embed.add_field(name=name[:256], value=value[:1024], inline=bool(field.get("inline")))
     return embed
 
 
@@ -241,6 +288,34 @@ class TicketingCog(commands.Cog):
             guild = await self.bot.fetch_guild(self.guild_id)
         return guild
 
+    # ── Live transcript capture ─────────────────────────────────────────────────
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        """Persist every message sent in a ticket channel as it happens, so the transcript
+        never needs to be re-fetched from Discord later."""
+        if not message.guild or message.guild.id != self.guild_id:
+            return
+        if not isinstance(message.channel, discord.TextChannel):
+            return
+        if not message.channel.name.startswith("ticket-"):
+            return
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._save_ticket_message, str(message.channel.id), message)
+
+    def _save_ticket_message(self, channel_id: str, message: discord.Message) -> None:
+        try:
+            with session_scope() as db:
+                ticket = db.query(Ticket).filter(Ticket.channel_id == channel_id).one_or_none()
+                if ticket is None:
+                    return
+                if db.query(TicketMessage.id).filter(TicketMessage.message_id == str(message.id)).first():
+                    return
+                db.add(TicketMessage(ticket_id=ticket.id, **_message_row_kwargs(message)))
+        except Exception:
+            logger.exception("Failed to save ticket message %s", message.id)
+
     # ── Permission helpers ──────────────────────────────────────────────────────
 
     def _staff_roles(self, guild: discord.Guild, settings: dict, category: dict) -> list[discord.Role]:
@@ -308,7 +383,10 @@ class TicketingCog(commands.Cog):
                 "channel_id": ticket.channel_id,
                 "category_id": ticket.category_id,
                 "opener_discord_id": ticket.opener_discord_id,
+                "opener_username": ticket.opener_username,
+                "subject": ticket.subject,
                 "status": ticket.status,
+                "transcript_slug": ticket.transcript_slug,
             }
 
     def _get_category(self, category_id: int) -> Optional[dict]:
@@ -411,6 +489,7 @@ class TicketingCog(commands.Cog):
                 subject=subject,
                 description=description,
                 status="open",
+                transcript_slug=_generate_transcript_slug(),
             )
             db.add(ticket)
 
@@ -513,7 +592,44 @@ class TicketingCog(commands.Cog):
             return
 
         await interaction.response.send_message("Deleting ticket channel…", ephemeral=True)
+        await self._finalize_transcript(channel, ticket)
         await channel.delete(reason=f"Ticket deleted by {interaction.user}")
+
+    async def _finalize_transcript(self, channel: discord.TextChannel, ticket: dict) -> None:
+        """Mark the ticket's (already live-captured) transcript as finalized and, if configured, post a link to it."""
+        slug = ticket.get("transcript_slug") or _generate_transcript_slug()
+
+        with session_scope() as db:
+            row = db.query(Ticket).filter(Ticket.id == ticket["id"]).one_or_none()
+            if row is not None:
+                row.transcript_captured_at = datetime.utcnow()
+                if not row.transcript_slug:
+                    row.transcript_slug = slug
+
+        settings = _load_settings_dict(ticket["guild_id"]) or {}
+        transcript_channel_id = settings.get("transcript_channel_id")
+        if not transcript_channel_id:
+            return
+
+        transcript_channel = channel.guild.get_channel(int(transcript_channel_id))
+        if transcript_channel is None:
+            return
+
+        url = f"{CONFIG.PUBLIC_BASE_URL}/admin/tickets/transcript/{slug}"
+        embed = discord.Embed(
+            title=ticket.get("subject") or "Ticket transcript",
+            description=(
+                f"Opened by {ticket.get('opener_username') or ticket['opener_discord_id']}\n\n"
+                f"[View full transcript]({url})"
+            ),
+            color=discord.Color.from_rgb(140, 29, 64),
+            timestamp=datetime.utcnow(),
+        )
+        embed.set_footer(text=f"#{channel.name}")
+        try:
+            await transcript_channel.send(embed=embed)
+        except discord.HTTPException:
+            logger.exception("Failed to post ticket transcript link for channel %s", channel.id)
 
     # ── Dashboard-triggered actions ─────────────────────────────────────────────
 

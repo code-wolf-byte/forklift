@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Select,
@@ -20,8 +21,11 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table";
+import { getAdminPageRest } from "@/utils/adminUrl";
+import TicketTranscript from "./TicketTranscript.jsx";
 
 let nextTempId = -1;
+let nextFieldTempId = -1;
 
 function RoleChip({ name, color, onRemove }) {
   return (
@@ -75,24 +79,115 @@ function RolePicker({ roles, selectedIds, onChange }) {
 }
 
 function EmbedPreview({ settings }) {
+  const inlineFields = (settings.embed_fields || []).filter((f) => f.name && f.value);
+
   return (
     <div
       className="rounded-md bg-muted/40 p-3 pl-4 max-w-md"
       style={{ borderLeft: `4px solid ${settings.embed_color || "#8c1d40"}` }}
     >
-      <div className="font-semibold text-sm mb-1">{settings.embed_title || "Open a Ticket"}</div>
+      {settings.embed_author_name && (
+        <div className="flex items-center gap-1.5 text-xs font-medium mb-1.5">
+          {settings.embed_author_icon_url && (
+            <img src={settings.embed_author_icon_url} alt="" className="w-5 h-5 rounded-full object-cover" />
+          )}
+          {settings.embed_author_url ? (
+            <a href={settings.embed_author_url} className="hover:underline" target="_blank" rel="noreferrer">
+              {settings.embed_author_name}
+            </a>
+          ) : (
+            <span>{settings.embed_author_name}</span>
+          )}
+        </div>
+      )}
+      <div className="font-semibold text-sm mb-1">
+        {settings.embed_url ? (
+          <a href={settings.embed_url} className="hover:underline text-[#00a8fc]" target="_blank" rel="noreferrer">
+            {settings.embed_title || "Open a Ticket"}
+          </a>
+        ) : (
+          settings.embed_title || "Open a Ticket"
+        )}
+      </div>
       <div className="text-sm text-muted-foreground whitespace-pre-wrap mb-2">
         {settings.embed_description || "Select a category below to open a ticket."}
       </div>
+      {inlineFields.length > 0 && (
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 mb-2">
+          {inlineFields.map((f, i) => (
+            <div key={i} className={f.inline ? "" : "col-span-2"}>
+              <div className="text-xs font-semibold">{f.name}</div>
+              <div className="text-xs text-muted-foreground whitespace-pre-wrap">{f.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
       {settings.embed_image_url && (
         <img src={settings.embed_image_url} alt="" className="rounded max-w-full max-h-40 object-cover mb-2" />
       )}
-      <div className="rounded border border-border bg-background px-2.5 py-1.5 text-xs text-muted-foreground">
+      {settings.embed_thumbnail_url && (
+        <img
+          src={settings.embed_thumbnail_url}
+          alt=""
+          className="rounded w-16 h-16 object-cover float-right ml-2 mb-2"
+        />
+      )}
+      <div className="rounded border border-border bg-background px-2.5 py-1.5 text-xs text-muted-foreground clear-both">
         {settings.select_placeholder || "Select a ticket category…"} <i className="fas fa-chevron-down float-right" />
       </div>
-      {settings.embed_footer && (
-        <div className="text-[11px] text-muted-foreground mt-2">{settings.embed_footer}</div>
+      {(settings.embed_footer || settings.embed_timestamp) && (
+        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-2">
+          {settings.embed_footer_icon_url && (
+            <img src={settings.embed_footer_icon_url} alt="" className="w-4 h-4 rounded-full object-cover" />
+          )}
+          <span>
+            {settings.embed_footer}
+            {settings.embed_footer && settings.embed_timestamp ? " • " : ""}
+            {settings.embed_timestamp ? "Today at 12:00 PM" : ""}
+          </span>
+        </div>
       )}
+    </div>
+  );
+}
+
+function EmbedFieldRow({ field, onChange, onRemove, onMove, isFirst, isLast }) {
+  return (
+    <div className="border border-border rounded-md p-3 mb-2">
+      <div className="flex gap-2 items-start flex-wrap mb-2">
+        <div className="flex-1 min-w-[160px]">
+          <Label className="text-xs font-semibold mb-1 block">Field name</Label>
+          <Input
+            className="h-8 text-sm"
+            value={field.name}
+            onChange={(e) => onChange({ ...field, name: e.target.value })}
+            placeholder="e.g. Response time"
+          />
+        </div>
+        <div className="flex items-end gap-1 pb-0.5">
+          <Button size="icon" variant="outline" className="h-8 w-8" disabled={isFirst} onClick={() => onMove(-1)}>
+            <i className="fas fa-arrow-up text-xs" />
+          </Button>
+          <Button size="icon" variant="outline" className="h-8 w-8" disabled={isLast} onClick={() => onMove(1)}>
+            <i className="fas fa-arrow-down text-xs" />
+          </Button>
+          <Button size="icon" variant="destructive" className="h-8 w-8" onClick={onRemove}>
+            <i className="fas fa-trash text-xs" />
+          </Button>
+        </div>
+      </div>
+      <div className="mb-2">
+        <Label className="text-xs font-semibold mb-1 block">Field value</Label>
+        <textarea
+          className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[60px]"
+          value={field.value}
+          onChange={(e) => onChange({ ...field, value: e.target.value })}
+        />
+      </div>
+      <label className="flex items-center gap-2 text-xs font-medium cursor-pointer w-fit">
+        <Switch checked={!!field.inline} onCheckedChange={(v) => onChange({ ...field, inline: v })} />
+        Inline (show side-by-side with other inline fields)
+      </label>
     </div>
   );
 }
@@ -162,7 +257,7 @@ function StatusBadge({ status }) {
   );
 }
 
-export default function Tickets() {
+function TicketSettingsPage() {
   const [settings, setSettings] = useState(null);
   const [roles, setRoles] = useState([]);
   const [channels, setChannels] = useState([]);
@@ -179,6 +274,7 @@ export default function Tickets() {
         setSettings({
           ...data,
           categories: (data.categories || []).map((c) => ({ ...c })),
+          embed_fields: (data.embed_fields || []).map((f) => ({ ...f, id: nextFieldTempId-- })),
         })
       )
       .catch(() => {});
@@ -232,6 +328,31 @@ export default function Tickets() {
       return { ...prev, categories: next };
     });
 
+  const updateEmbedField = (id, updated) =>
+    setSettings((prev) => ({
+      ...prev,
+      embed_fields: prev.embed_fields.map((f) => (f.id === id ? updated : f)),
+    }));
+
+  const addEmbedField = () =>
+    setSettings((prev) => ({
+      ...prev,
+      embed_fields: [...(prev.embed_fields || []), { id: nextFieldTempId--, name: "", value: "", inline: true }],
+    }));
+
+  const removeEmbedField = (id) =>
+    setSettings((prev) => ({ ...prev, embed_fields: prev.embed_fields.filter((f) => f.id !== id) }));
+
+  const moveEmbedField = (id, dir) =>
+    setSettings((prev) => {
+      const idx = prev.embed_fields.findIndex((f) => f.id === id);
+      const swapWith = idx + dir;
+      if (swapWith < 0 || swapWith >= prev.embed_fields.length) return prev;
+      const next = [...prev.embed_fields];
+      [next[idx], next[swapWith]] = [next[swapWith], next[idx]];
+      return { ...prev, embed_fields: next };
+    });
+
   const handleSave = () => {
     setSaving(true);
     setError(null);
@@ -247,12 +368,20 @@ export default function Tickets() {
           emoji: c.emoji,
           extra_role_ids: c.extra_role_ids || [],
         })),
+        embed_fields: (settings.embed_fields || []).map((f) => ({
+          name: f.name,
+          value: f.value,
+          inline: !!f.inline,
+        })),
       }),
     })
       .then((r) => r.json())
       .then((updated) => {
         if (updated.error) throw new Error(updated.error);
-        setSettings(updated);
+        setSettings({
+          ...updated,
+          embed_fields: (updated.embed_fields || []).map((f) => ({ ...f, id: nextFieldTempId-- })),
+        });
       })
       .catch((e) => setError(e.message || "Save failed"))
       .finally(() => setSaving(false));
@@ -327,6 +456,28 @@ export default function Tickets() {
                 These roles get access to every ticket, regardless of category.
               </p>
             </div>
+
+            <div>
+              <Label className="text-xs font-semibold mb-1.5 block">Transcript log channel</Label>
+              <Select
+                value={settings.transcript_channel_id || ""}
+                onValueChange={(val) => updateField("transcript_channel_id", val)}
+              >
+                <SelectTrigger className="h-8 text-sm">
+                  <SelectValue placeholder="— Select a channel —" />
+                </SelectTrigger>
+                <SelectContent>
+                  {channels.map((ch) => (
+                    <SelectItem key={ch.id} value={ch.id}>
+                      #{ch.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                When a ticket channel is deleted, a link to its full transcript is posted here.
+              </p>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -357,12 +508,48 @@ export default function Tickets() {
           </div>
 
           <div className="mb-4">
+            <Label className="text-xs font-semibold mb-1.5 block">
+              Title URL <span className="font-normal text-muted-foreground">(makes the embed title a clickable link)</span>
+            </Label>
+            <Input
+              className="h-8 text-sm"
+              value={settings.embed_url || ""}
+              onChange={(e) => updateField("embed_url", e.target.value)}
+              placeholder="https://…"
+            />
+          </div>
+
+          <div className="mb-4">
             <Label className="text-xs font-semibold mb-1.5 block">Embed description</Label>
             <textarea
               className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[80px]"
               value={settings.embed_description || ""}
               onChange={(e) => updateField("embed_description", e.target.value)}
             />
+          </div>
+
+          <div className="mb-4">
+            <Label className="text-xs font-semibold mb-1.5 block">Author</Label>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+              <Input
+                className="h-8 text-sm"
+                value={settings.embed_author_name || ""}
+                onChange={(e) => updateField("embed_author_name", e.target.value)}
+                placeholder="Author name"
+              />
+              <Input
+                className="h-8 text-sm"
+                value={settings.embed_author_url || ""}
+                onChange={(e) => updateField("embed_author_url", e.target.value)}
+                placeholder="Author link URL"
+              />
+              <Input
+                className="h-8 text-sm"
+                value={settings.embed_author_icon_url || ""}
+                onChange={(e) => updateField("embed_author_icon_url", e.target.value)}
+                placeholder="Author icon URL"
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -372,16 +559,63 @@ export default function Tickets() {
                 className="h-8 text-sm"
                 value={settings.embed_image_url || ""}
                 onChange={(e) => updateField("embed_image_url", e.target.value)}
+                placeholder="Large image shown below the description"
               />
             </div>
             <div>
-              <Label className="text-xs font-semibold mb-1.5 block">Embed footer</Label>
+              <Label className="text-xs font-semibold mb-1.5 block">Embed thumbnail URL</Label>
+              <Input
+                className="h-8 text-sm"
+                value={settings.embed_thumbnail_url || ""}
+                onChange={(e) => updateField("embed_thumbnail_url", e.target.value)}
+                placeholder="Small image, top right"
+              />
+            </div>
+          </div>
+
+          <div className="mb-4">
+            <Label className="text-xs font-semibold mb-1.5 block">Footer</Label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
               <Input
                 className="h-8 text-sm"
                 value={settings.embed_footer || ""}
                 onChange={(e) => updateField("embed_footer", e.target.value)}
+                placeholder="Footer text"
+              />
+              <Input
+                className="h-8 text-sm"
+                value={settings.embed_footer_icon_url || ""}
+                onChange={(e) => updateField("embed_footer_icon_url", e.target.value)}
+                placeholder="Footer icon URL"
               />
             </div>
+            <label className="flex items-center gap-2 text-xs font-medium cursor-pointer w-fit">
+              <Switch
+                checked={!!settings.embed_timestamp}
+                onCheckedChange={(v) => updateField("embed_timestamp", v)}
+              />
+              Show timestamp (updates every time the panel is published)
+            </label>
+          </div>
+
+          <div className="mb-4">
+            <div className="flex justify-between items-center mb-2">
+              <Label className="text-xs font-semibold mb-0 block">Fields</Label>
+              <Button size="sm" variant="outline" onClick={addEmbedField}>
+                <i className="fas fa-plus mr-1.5" /> Add Field
+              </Button>
+            </div>
+            {(settings.embed_fields || []).map((f, i) => (
+              <EmbedFieldRow
+                key={f.id}
+                field={f}
+                onChange={(updated) => updateEmbedField(f.id, updated)}
+                onRemove={() => removeEmbedField(f.id)}
+                onMove={(dir) => moveEmbedField(f.id, dir)}
+                isFirst={i === 0}
+                isLast={i === settings.embed_fields.length - 1}
+              />
+            ))}
           </div>
 
           <div className="mb-4">
@@ -462,6 +696,7 @@ export default function Tickets() {
                   <TableHead>Opener</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Created</TableHead>
+                  <TableHead>Transcript</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -474,6 +709,18 @@ export default function Tickets() {
                       <StatusBadge status={t.status} />
                     </TableCell>
                     <TableCell>{t.created_at ? new Date(t.created_at).toLocaleString() : "—"}</TableCell>
+                    <TableCell>
+                      {t.transcript_slug ? (
+                        <a
+                          href={`/admin/tickets/transcript/${t.transcript_slug}`}
+                          className="text-xs underline text-primary whitespace-nowrap"
+                        >
+                          View <i className="fas fa-arrow-up-right-from-square ml-1" style={{ fontSize: 10 }} />
+                        </a>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -483,4 +730,12 @@ export default function Tickets() {
       </Card>
     </>
   );
+}
+
+export default function Tickets() {
+  const rest = getAdminPageRest();
+  if (rest[0] === "transcript" && rest[1]) {
+    return <TicketTranscript slug={rest[1]} />;
+  }
+  return <TicketSettingsPage />;
 }
