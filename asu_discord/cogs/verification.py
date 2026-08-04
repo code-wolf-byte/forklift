@@ -76,6 +76,51 @@ CAMPUS_ROLES: list[str] = [
 ]
 
 
+def _asurite_from_email(email: str) -> str | None:
+    """ASU emails are {asurite}@asu.edu; anything else has no derivable ASURITE."""
+    local, _, domain = email.strip().lower().partition("@")
+    if not local or not (domain == "asu.edu" or domain.endswith(".asu.edu")):
+        return None
+    return local
+
+
+def _record_verification(discord_user_id: str, email: str) -> str | None:
+    """Link the Discord account to a User row, storing ``email``, and return its ASURITE.
+
+    Keyed on ASURITE (the only unique identity) when an ASU email is supplied,
+    falling back to the existing Discord link. Returns None when there is no
+    record to update and none can be created.
+    """
+    asurite = _asurite_from_email(email) if email else None
+    with session_scope() as session:
+        user = None
+        if asurite:
+            user = (
+                session.query(User)
+                .filter(func.lower(User.asurite_id) == asurite)
+                .one_or_none()
+            )
+        if user is None:
+            user = (
+                session.query(User)
+                .filter(User.discord_user_id == discord_user_id)
+                .order_by(User.id.desc())
+                .first()
+            )
+        if user is None:
+            if not asurite:
+                return None
+            user = User(asurite_id=asurite, email=email)
+            session.add(user)
+
+        if email:
+            user.email = email
+        user.discord_user_id = discord_user_id
+        user.verified = True
+        user.verified_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        return user.asurite_id or None
+
+
 def _is_enrolled_or_admitted(opp: SalesforceOpportunity) -> bool:
     stage = (opp.stageName or "").strip().lower()
     return stage in {"enrolled", "admitted"}
@@ -524,8 +569,14 @@ class VerificationCog(commands.Cog):
         self,
         ctx: discord.ApplicationContext,
         member: discord.Member = Option(discord.Member, "Member to verify"),
+        email: str = Option(
+            str,
+            "ASU email to record for this member and look up in Salesforce",
+            required=False,
+            default=None,
+        ),
     ) -> None:
-        """Assign the verification role to a member."""
+        """Assign the verification role to a member, optionally recording their ASU email."""
         if not await self._require_home_guild(ctx):
             return
 
@@ -534,28 +585,29 @@ class VerificationCog(commands.Cog):
             await ctx.respond("Unable to locate the configured verification role for this server.")
             return
 
-        if role in member.roles:
+        email = (email or "").strip()
+        if email and "@" not in email:
+            await ctx.respond(f"`{email}` is not a valid email address.", ephemeral=True)
+            return
+
+        if role in member.roles and not email:
             await ctx.respond(f"{member.mention} already has the verification role.")
             return
 
+        await ctx.defer()
+
         reason = f"Manual verification by {ctx.author}"
-        await member.add_roles(role, reason=reason)
+        if role not in member.roles:
+            await member.add_roles(role, reason=reason)
         await self._remove_unverified_role(ctx.guild, member, reason=reason)
 
         try:
-            with session_scope() as session:
-                user = (
-                    session.query(User)
-                    .filter(User.discord_user_id == str(member.id))
-                    .order_by(User.id.desc())
-                    .first()
-                )
-            asurite = user.asurite_id if user else None
+            asurite = await asyncio.to_thread(_record_verification, str(member.id), email)
             if asurite:
                 profile = await asyncio.to_thread(get_student_profile, asurite)
-                if "asurite" in profile:
+                if profile and "asurite" in profile:
                     asyncio.create_task(asyncio.to_thread(cache_sf_profile, asurite, profile))
-                if not profile.get("error"):
+                if profile and not profile.get("error"):
                     await self.assign_roles_from_profile(member.id, profile)
         except Exception:
             logger.exception("Failed to assign Salesforce-based roles for user %s", member.id)
@@ -565,7 +617,15 @@ class VerificationCog(commands.Cog):
             )
             return
 
-        await ctx.respond(f"{member.mention} has been marked as verified. ✅")
+        if asurite is None:
+            await ctx.respond(
+                f"{member.mention} has been marked as verified, but they have no record "
+                "in the system — pass an `@asu.edu` email to create one and assign roles.",
+            )
+            return
+
+        recorded = f" Recorded `{email}` and synced roles from Salesforce." if email else ""
+        await ctx.respond(f"{member.mention} has been marked as verified. ✅{recorded}")
 
     async def verify_member_by_id(
         self, user_id: int, *, asurite: str | None = None
