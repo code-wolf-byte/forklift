@@ -817,14 +817,34 @@ def _running_total(joins: list, leaves: list, baseline: int) -> list:
     return out
 
 
+def _membership_query(db_session, date_col, from_dt, to_dt, roles=None, exclude_roles=None):
+    """DiscordMember rows by join/leave date, AND-filtered by role.
+
+    Counts the whole guild, not just verified users: User.joined_at is only set
+    for members who completed verification, so it undercounts the server badly.
+    Roles live on the User record, so a role filter necessarily narrows to
+    members who have verified.
+    """
+    q = db_session.query(date_col).filter(date_col.isnot(None))
+    if from_dt:
+        q = q.filter(date_col >= from_dt)
+    if to_dt:
+        q = q.filter(date_col <= to_dt)
+    for role in (roles or []):
+        q = q.filter(DiscordMember.discord_user_id.in_(_role_member_ids(db_session, role)))
+    for excl in (exclude_roles or []):
+        q = q.filter(~DiscordMember.discord_user_id.in_(_role_member_ids(db_session, excl)))
+    return q
+
+
 @admin_bp.route("/api/admin/membership/chart")
 @require_admin
 def admin_membership_chart():
     """Headcount in the server per day: joined and not yet left, as of each date.
 
     Same role filters as the joins/leaves charts. Only the latest join/leave is
-    stored per user, so a member who left and rejoined counts once, at their most
-    recent dates.
+    stored per member, so someone who left and rejoined counts once, at their
+    most recent dates.
     """
     from_dt       = _parse_az_date(request.args.get("from_date"))
     to_dt         = _parse_az_date(request.args.get("to_date"), end_of_day=True)
@@ -832,30 +852,25 @@ def admin_membership_chart():
     exclude_roles = request.args.getlist("exclude_role") or None
 
     with session_scope() as db_session:
-        def cohort(date_col):
-            return _activity_query(db_session, date_col, None, None, roles, exclude_roles)
-
         if to_dt is None:
             to_dt = datetime.utcnow()
         if from_dt is None:
-            from_dt = cohort(User.joined_at).with_entities(func.min(User.joined_at)).scalar() or to_dt
+            from_dt = (_membership_query(db_session, DiscordMember.joined_at, None, None, roles, exclude_roles)
+                       .with_entities(func.min(DiscordMember.joined_at)).scalar() or to_dt)
 
         # Already in the server when the range opens — the line has to start here,
         # not at zero, or every chart reads as if the server was empty on day one.
         baseline = (
-            cohort(User.joined_at)
-            .filter(User.joined_at < from_dt)
-            .filter(or_(User.left_at.is_(None), User.left_at >= from_dt))
+            _membership_query(db_session, DiscordMember.joined_at, None, None, roles, exclude_roles)
+            .filter(DiscordMember.joined_at < from_dt)
+            .filter(or_(DiscordMember.left_at.is_(None), DiscordMember.left_at >= from_dt))
             .count()
         )
 
-        join_dates = [u.joined_at for u in
-                      _activity_query(db_session, User.joined_at, from_dt, to_dt, roles, exclude_roles).all()]
-        # joined_at must be set for a leave to subtract someone the baseline counted,
-        # otherwise the running total can drift below zero.
-        leave_dates = [u.left_at for u in
-                       _activity_query(db_session, User.left_at, from_dt, to_dt, roles, exclude_roles)
-                       .filter(User.joined_at.isnot(None)).all()]
+        join_dates  = [d for (d,) in _membership_query(
+            db_session, DiscordMember.joined_at, from_dt, to_dt, roles, exclude_roles).all()]
+        leave_dates = [d for (d,) in _membership_query(
+            db_session, DiscordMember.left_at, from_dt, to_dt, roles, exclude_roles).all()]
 
     return jsonify(_running_total(
         _chart_data(join_dates, from_dt, to_dt),
@@ -893,6 +908,17 @@ def admin_joins():
 
 # ─── Message logs ─────────────────────────────────────────────────────────────
 
+def _role_member_ids(db_session, role: str):
+    """Subquery of discord_user_ids belonging to users who hold `role`."""
+    return (
+        db_session.query(User.discord_user_id)
+        .join(UserRole, UserRole.user_id == User.id)
+        .filter(UserRole.role_name == role)
+        .subquery()
+        .select()
+    )
+
+
 def _message_query(db_session, from_dt, to_dt, channel_ids, roles, exclude_roles):
     """Base query for MessageLog with date, channel, and role filters."""
     q = db_session.query(MessageLog)
@@ -903,21 +929,9 @@ def _message_query(db_session, from_dt, to_dt, channel_ids, roles, exclude_roles
     if channel_ids:
         q = q.filter(MessageLog.channel_id.in_(channel_ids))
     for role in (roles or []):
-        subq = (
-            db_session.query(User.discord_user_id)
-            .join(UserRole, UserRole.user_id == User.id)
-            .filter(UserRole.role_name == role)
-            .subquery()
-        )
-        q = q.filter(MessageLog.discord_user_id.in_(subq))
+        q = q.filter(MessageLog.discord_user_id.in_(_role_member_ids(db_session, role)))
     for excl in (exclude_roles or []):
-        subq = (
-            db_session.query(User.discord_user_id)
-            .join(UserRole, UserRole.user_id == User.id)
-            .filter(UserRole.role_name == excl)
-            .subquery()
-        )
-        q = q.filter(~MessageLog.discord_user_id.in_(subq))
+        q = q.filter(~MessageLog.discord_user_id.in_(_role_member_ids(db_session, excl)))
     return q
 
 
