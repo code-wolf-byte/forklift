@@ -122,9 +122,10 @@ export default function Membership({ isDark }) {
     <>
       <h2 className="text-2xl font-bold mb-1">Membership</h2>
       <p className="text-sm text-muted-foreground mb-4">
-        Members in the server on each day, from join and leave dates. Add a series to
-        track a role combination — a member counts only if they have every role under
-        Has and none under Excl.
+        Members in the server on each day — everyone who had joined and not yet left.
+        Add a series to track a role combination: a member counts only if they have
+        every role under Has and none under Excl. Roles come from verification, so a
+        filtered series counts only verified members and will sit below the total.
       </p>
 
       {/* Filters */}
