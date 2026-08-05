@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
+import json
 import logging
 import os
 import threading
@@ -27,6 +28,10 @@ from utils.database import (
     ModerationEvent,
     QnaPost,
     ServerEvent,
+    Ticket,
+    TicketCategory,
+    TicketMessage,
+    TicketSettings,
     User,
     UserRole,
     UserRoleException,
@@ -35,6 +40,7 @@ from utils.database import (
     VolunteerContribution,
     session_scope,
 )
+from utils.settings import CONFIG
 
 AZ_TZ = ZoneInfo("America/Phoenix")
 
@@ -55,6 +61,8 @@ REACT_BUILD_DIR = os.getenv(
 
 def _auth_complete() -> bool:
     """Return True if the session has both CAS and Discord complete."""
+    if CONFIG.DEV_MODE:
+        return True
     verification_state = session.get("verification_state") or {}
     cas_complete = bool(verification_state.get("cas_complete"))
     discord_complete = bool(
@@ -68,6 +76,8 @@ def require_admin(f):
 
     @wraps(f)
     def decorated(*args, **kwargs):
+        if CONFIG.DEV_MODE:
+            return f(*args, **kwargs)
         if not (_auth_complete() and (session.get("is_admin") or session.get("is_officer"))):
             abort(403)
         return f(*args, **kwargs)
@@ -80,6 +90,8 @@ def require_full_admin(f):
 
     @wraps(f)
     def decorated(*args, **kwargs):
+        if CONFIG.DEV_MODE:
+            return f(*args, **kwargs)
         if not (_auth_complete() and session.get("is_admin")):
             abort(403)
         return f(*args, **kwargs)
@@ -89,6 +101,18 @@ def require_full_admin(f):
 
 @admin_bp.route("/api/admin/me")
 def admin_me():
+    if CONFIG.DEV_MODE:
+        return jsonify(
+            {
+                "asurite_id": "devmode",
+                "discord_username": "Dev Mode",
+                "discord_user_id": None,
+                "discord_avatar": None,
+                "is_admin": True,
+                "is_officer": False,
+            }
+        )
+
     verification_state = session.get("verification_state") or {}
     if not _auth_complete():
         return jsonify({"error": "Unauthorized"}), 403
@@ -441,12 +465,28 @@ def admin_reset_automation(job_name: str):
 @admin_bp.route("/api/admin/discord-channels")
 @require_admin
 def admin_discord_channels():
+    channel_type = request.args.get("type")
     try:
-        from asu_discord.api import get_guild_channels
-        channels = get_guild_channels()
+        if channel_type == "category":
+            from asu_discord.api import get_guild_category_channels
+            channels = get_guild_category_channels()
+        else:
+            from asu_discord.api import get_guild_channels
+            channels = get_guild_channels()
     except Exception:
         channels = []
     return jsonify(channels)
+
+
+@admin_bp.route("/api/admin/discord-roles")
+@require_admin
+def admin_discord_roles():
+    try:
+        from asu_discord.api import get_guild_roles
+        roles = get_guild_roles()
+    except Exception:
+        roles = []
+    return jsonify(roles)
 
 
 # ─── Roles ────────────────────────────────────────────────────────────────────
@@ -757,6 +797,71 @@ def admin_server_leaves_chart():
         dates = [u.left_at for u in
                  _activity_query(db_session, User.left_at, from_dt, to_dt, roles, exclude_roles).all()]
     return jsonify(_chart_data(dates, from_dt, to_dt))
+
+
+# ─── Membership over time ─────────────────────────────────────────────────────
+
+def _running_total(joins: list, leaves: list, baseline: int) -> list:
+    """Walk the daily join/leave series and carry a running headcount from `baseline`."""
+    leave_map = {d["date"]: d["count"] for d in leaves}
+    running, out = baseline, []
+    for day in joins:
+        left = leave_map.get(day["date"], 0)
+        running += day["count"] - left
+        out.append({
+            "date": day["date"],
+            "count": running,
+            "joins": day["count"],
+            "leaves": left,
+        })
+    return out
+
+
+@admin_bp.route("/api/admin/membership/chart")
+@require_admin
+def admin_membership_chart():
+    """Headcount in the server per day: joined and not yet left, as of each date.
+
+    Same role filters as the joins/leaves charts. Only the latest join/leave is
+    stored per user, so a member who left and rejoined counts once, at their most
+    recent dates.
+    """
+    from_dt       = _parse_az_date(request.args.get("from_date"))
+    to_dt         = _parse_az_date(request.args.get("to_date"), end_of_day=True)
+    roles         = request.args.getlist("role") or None
+    exclude_roles = request.args.getlist("exclude_role") or None
+
+    with session_scope() as db_session:
+        def cohort(date_col):
+            return _activity_query(db_session, date_col, None, None, roles, exclude_roles)
+
+        if to_dt is None:
+            to_dt = datetime.utcnow()
+        if from_dt is None:
+            from_dt = cohort(User.joined_at).with_entities(func.min(User.joined_at)).scalar() or to_dt
+
+        # Already in the server when the range opens — the line has to start here,
+        # not at zero, or every chart reads as if the server was empty on day one.
+        baseline = (
+            cohort(User.joined_at)
+            .filter(User.joined_at < from_dt)
+            .filter(or_(User.left_at.is_(None), User.left_at >= from_dt))
+            .count()
+        )
+
+        join_dates = [u.joined_at for u in
+                      _activity_query(db_session, User.joined_at, from_dt, to_dt, roles, exclude_roles).all()]
+        # joined_at must be set for a leave to subtract someone the baseline counted,
+        # otherwise the running total can drift below zero.
+        leave_dates = [u.left_at for u in
+                       _activity_query(db_session, User.left_at, from_dt, to_dt, roles, exclude_roles)
+                       .filter(User.joined_at.isnot(None)).all()]
+
+    return jsonify(_running_total(
+        _chart_data(join_dates, from_dt, to_dt),
+        _chart_data(leave_dates, from_dt, to_dt),
+        baseline,
+    ))
 
 
 @admin_bp.route("/api/admin/joins")
@@ -2071,6 +2176,326 @@ def admin_salesforce_status():
     )
 
 
+# ─── Ticketing ────────────────────────────────────────────────────────────────
+
+_DEFAULT_TICKET_SETTINGS = {
+    "panel_channel_id": None,
+    "panel_message_id": None,
+    "transcript_channel_id": None,
+    "embed_title": "Open a Ticket",
+    "embed_description": "Select a category below to open a ticket.",
+    "embed_color": "#8c1d40",
+    "embed_image_url": None,
+    "embed_thumbnail_url": None,
+    "embed_footer": None,
+    "embed_footer_icon_url": None,
+    "embed_url": None,
+    "embed_author_name": None,
+    "embed_author_url": None,
+    "embed_author_icon_url": None,
+    "embed_timestamp": False,
+    "embed_fields": [],
+    "select_placeholder": "Select a ticket category…",
+    "staff_role_ids": [],
+    "categories": [],
+}
+
+
+def _serialize_ticket_settings(settings: TicketSettings, categories: list[TicketCategory]) -> dict:
+    return {
+        "guild_id": settings.guild_id,
+        "panel_channel_id": settings.panel_channel_id,
+        "panel_message_id": settings.panel_message_id,
+        "transcript_channel_id": settings.transcript_channel_id,
+        "embed_title": settings.embed_title,
+        "embed_description": settings.embed_description,
+        "embed_color": settings.embed_color,
+        "embed_image_url": settings.embed_image_url,
+        "embed_thumbnail_url": settings.embed_thumbnail_url,
+        "embed_footer": settings.embed_footer,
+        "embed_footer_icon_url": settings.embed_footer_icon_url,
+        "embed_url": settings.embed_url,
+        "embed_author_name": settings.embed_author_name,
+        "embed_author_url": settings.embed_author_url,
+        "embed_author_icon_url": settings.embed_author_icon_url,
+        "embed_timestamp": bool(settings.embed_timestamp),
+        "embed_fields": json.loads(settings.embed_fields or "[]"),
+        "select_placeholder": settings.select_placeholder,
+        "staff_role_ids": json.loads(settings.staff_role_ids or "[]"),
+        "categories": [
+            {
+                "id": c.id,
+                "label": c.label,
+                "description": c.description,
+                "emoji": c.emoji,
+                "parent_category_id": c.parent_category_id,
+                "extra_role_ids": json.loads(c.extra_role_ids or "[]"),
+            }
+            for c in categories
+        ],
+    }
+
+
+def _current_guild_id() -> str | None:
+    from utils.settings import DISCORD_CONFIG
+    return str(DISCORD_CONFIG.guild_id) if DISCORD_CONFIG else None
+
+
+@admin_bp.route("/api/admin/tickets/settings", methods=["GET"])
+@require_full_admin
+def admin_tickets_settings():
+    guild_id = _current_guild_id()
+    if guild_id is None:
+        return jsonify({"error": "Discord is not configured"}), 503
+
+    with session_scope() as db_session:
+        settings = (
+            db_session.query(TicketSettings)
+            .filter(TicketSettings.guild_id == guild_id)
+            .one_or_none()
+        )
+        if settings is None:
+            return jsonify({"guild_id": guild_id, **_DEFAULT_TICKET_SETTINGS})
+
+        categories = (
+            db_session.query(TicketCategory)
+            .filter(TicketCategory.settings_id == settings.id)
+            .order_by(TicketCategory.position.asc())
+            .all()
+        )
+        return jsonify(_serialize_ticket_settings(settings, categories))
+
+
+@admin_bp.route("/api/admin/tickets/settings", methods=["PUT"])
+@require_full_admin
+def admin_update_tickets_settings():
+    guild_id = _current_guild_id()
+    if guild_id is None:
+        return jsonify({"error": "Discord is not configured"}), 503
+
+    data = request.get_json(silent=True) or {}
+
+    with session_scope() as db_session:
+        settings = (
+            db_session.query(TicketSettings)
+            .filter(TicketSettings.guild_id == guild_id)
+            .one_or_none()
+        )
+        if settings is None:
+            settings = TicketSettings(guild_id=guild_id)
+            db_session.add(settings)
+            db_session.flush()
+
+        for field in (
+            "panel_channel_id",
+            "transcript_channel_id",
+            "embed_title",
+            "embed_description",
+            "embed_color",
+            "embed_image_url",
+            "embed_thumbnail_url",
+            "embed_footer",
+            "embed_footer_icon_url",
+            "embed_url",
+            "embed_author_name",
+            "embed_author_url",
+            "embed_author_icon_url",
+            "select_placeholder",
+        ):
+            if field in data:
+                setattr(settings, field, data[field] or None)
+
+        if "embed_timestamp" in data:
+            settings.embed_timestamp = bool(data["embed_timestamp"])
+
+        if "embed_fields" in data:
+            fields = []
+            for f in data["embed_fields"] or []:
+                name = (f.get("name") or "").strip()[:256]
+                value = (f.get("value") or "").strip()[:1024]
+                if name and value:
+                    fields.append({"name": name, "value": value, "inline": bool(f.get("inline"))})
+            settings.embed_fields = json.dumps(fields)
+
+        if "staff_role_ids" in data:
+            settings.staff_role_ids = json.dumps([str(r) for r in (data["staff_role_ids"] or [])])
+
+        if "categories" in data:
+            existing_by_id = {
+                c.id: c
+                for c in db_session.query(TicketCategory)
+                .filter(TicketCategory.settings_id == settings.id)
+                .all()
+            }
+            keep_ids = set()
+            for i, cat in enumerate(data["categories"] or []):
+                cat_id = cat.get("id")
+                if cat_id and cat_id in existing_by_id:
+                    row = existing_by_id[cat_id]
+                    keep_ids.add(cat_id)
+                else:
+                    row = TicketCategory(settings_id=settings.id, guild_id=guild_id)
+                    db_session.add(row)
+
+                row.label = (cat.get("label") or "").strip()[:100] or f"Category {i + 1}"
+                row.description = cat.get("description") or None
+                row.emoji = cat.get("emoji") or None
+                row.extra_role_ids = json.dumps([str(r) for r in (cat.get("extra_role_ids") or [])])
+                row.position = i
+
+            for cat_id, row in existing_by_id.items():
+                if cat_id not in keep_ids:
+                    db_session.delete(row)
+
+        db_session.flush()
+        categories = (
+            db_session.query(TicketCategory)
+            .filter(TicketCategory.settings_id == settings.id)
+            .order_by(TicketCategory.position.asc())
+            .all()
+        )
+        result = _serialize_ticket_settings(settings, categories)
+
+    return jsonify(result)
+
+
+@admin_bp.route("/api/admin/tickets/settings/publish", methods=["POST"])
+@require_full_admin
+def admin_publish_ticket_panel():
+    """Post or update the ticket panel message on the running bot from current settings."""
+    import asyncio
+
+    from asu_discord.cogs.ticketing import TicketingCog
+    from asu_discord.shared import get_running_bot, get_running_loop
+
+    bot = get_running_bot()
+    loop = get_running_loop()
+    if bot is None or loop is None or loop.is_closed():
+        return jsonify({"error": "Discord bot is not running"}), 503
+
+    cog = bot.get_cog("TicketingCog")
+    if not isinstance(cog, TicketingCog):
+        return jsonify({"error": "TicketingCog not loaded"}), 503
+
+    future = asyncio.run_coroutine_threadsafe(cog.publish_panel(), loop)
+    try:
+        result = future.result(timeout=15)
+    except asyncio.TimeoutError:
+        future.cancel()
+        return jsonify({"error": "Timed out publishing ticket panel"}), 504
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({"status": "published", **result})
+
+
+@admin_bp.route("/api/admin/tickets")
+@require_admin
+def admin_tickets_list():
+    page = max(1, request.args.get("page", 1, type=int))
+    per_page = min(100, max(1, request.args.get("per_page", 25, type=int)))
+    offset = (page - 1) * per_page
+    status = request.args.get("status")
+
+    with session_scope() as db_session:
+        q = db_session.query(Ticket)
+        if status:
+            q = q.filter(Ticket.status == status)
+        total = q.count()
+        rows = q.order_by(Ticket.created_at.desc()).offset(offset).limit(per_page).all()
+
+        category_ids = {r.category_id for r in rows if r.category_id}
+        categories_map = {}
+        if category_ids:
+            categories_map = {
+                c.id: c.label
+                for c in db_session.query(TicketCategory)
+                .filter(TicketCategory.id.in_(category_ids))
+                .all()
+            }
+
+        result = [
+            {
+                "id": t.id,
+                "channel_id": t.channel_id,
+                "category": categories_map.get(t.category_id),
+                "opener_discord_id": t.opener_discord_id,
+                "opener_username": t.opener_username,
+                "subject": t.subject,
+                "status": t.status,
+                "closed_by": t.closed_by,
+                "closed_at": t.closed_at.isoformat() if t.closed_at else None,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+                "transcript_slug": t.transcript_slug if t.transcript_captured_at else None,
+            }
+            for t in rows
+        ]
+
+    return jsonify(
+        {
+            "tickets": result,
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "pages": max(1, (total + per_page - 1) // per_page),
+        }
+    )
+
+
+@admin_bp.route("/api/admin/tickets/transcript/<slug>")
+@require_admin
+def admin_ticket_transcript(slug):
+    with session_scope() as db_session:
+        ticket = (
+            db_session.query(Ticket).filter(Ticket.transcript_slug == slug).one_or_none()
+        )
+        if ticket is None or not ticket.transcript_captured_at:
+            return jsonify({"error": "Transcript not found"}), 404
+
+        category = (
+            db_session.query(TicketCategory).filter(TicketCategory.id == ticket.category_id).one_or_none()
+            if ticket.category_id
+            else None
+        )
+
+        messages = (
+            db_session.query(TicketMessage)
+            .filter(TicketMessage.ticket_id == ticket.id)
+            .order_by(TicketMessage.created_at.asc(), TicketMessage.id.asc())
+            .all()
+        )
+
+        return jsonify(
+            {
+                "id": ticket.id,
+                "subject": ticket.subject,
+                "description": ticket.description,
+                "category": category.label if category else None,
+                "opener_discord_id": ticket.opener_discord_id,
+                "opener_username": ticket.opener_username,
+                "status": ticket.status,
+                "closed_by": ticket.closed_by,
+                "closed_at": ticket.closed_at.isoformat() if ticket.closed_at else None,
+                "created_at": ticket.created_at.isoformat() if ticket.created_at else None,
+                "transcript_captured_at": ticket.transcript_captured_at.isoformat(),
+                "messages": [
+                    {
+                        "id": m.message_id,
+                        "author_id": m.author_id,
+                        "author_username": m.author_username,
+                        "author_display_name": m.author_display_name,
+                        "author_avatar_url": m.author_avatar_url,
+                        "content": m.content,
+                        "created_at": m.created_at.isoformat(),
+                        "attachments": json.loads(m.attachments or "[]"),
+                        "embeds": m.embeds,
+                    }
+                    for m in messages
+                ],
+            }
+        )
+
+
 # ─── Purge Unregistered Roles ─────────────────────────────────────────────────
 
 _purge_unregistered_lock = threading.Lock()
@@ -2635,7 +3060,9 @@ def admin_event_detail(event_id: int):
 @admin_bp.route("/admin")
 @admin_bp.route("/admin/<path:path>")
 def admin_spa(path=""):
-    if not (_auth_complete() and (session.get("is_admin") or session.get("is_officer"))):
+    if not CONFIG.DEV_MODE and not (
+        _auth_complete() and (session.get("is_admin") or session.get("is_officer"))
+    ):
         return redirect("/")
 
     react_index = os.path.join(REACT_BUILD_DIR, "index.html")

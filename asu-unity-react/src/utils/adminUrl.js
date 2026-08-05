@@ -1,12 +1,21 @@
 const ALL_PAGE_IDS = [
   "dashboard", "analytics", "members", "joins", "member-stats",
-  "exceptions", "server-joins", "leaves", "events", "message-logs",
-  "qna", "automations",
+  "exceptions", "server-joins", "leaves", "membership", "events", "message-logs",
+  "qna", "automations", "tickets",
 ];
 
 export function getAdminPage() {
   const seg = window.location.pathname.replace(/^\/admin\/?/, "").split("/")[0];
   return ALL_PAGE_IDS.includes(seg) ? seg : "dashboard";
+}
+
+// Path segments after the page id, e.g. "/admin/tickets/transcript/abc" -> ["transcript", "abc"]
+export function getAdminPageRest() {
+  return window.location.pathname
+    .replace(/^\/admin\/?/, "")
+    .split("/")
+    .filter(Boolean)
+    .slice(1);
 }
 
 export function getUrlParam(key, fallback = "") {

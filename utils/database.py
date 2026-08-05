@@ -409,6 +409,111 @@ class UserSalesforceProfile(Base):
     )
 
 
+class TicketSettings(Base):
+    """Per-guild configuration for the ticketing panel (admin-dashboard managed)."""
+
+    __tablename__ = "ticket_settings"
+
+    id = Column(Integer, primary_key=True)
+    guild_id = Column(String(64), unique=True, nullable=False)
+    panel_channel_id = Column(String(64), nullable=True)
+    panel_message_id = Column(String(64), nullable=True)
+    embed_title = Column(String(256), nullable=True)
+    embed_description = Column(Text, nullable=True)
+    embed_color = Column(String(16), nullable=True)          # hex string, e.g. "#8c1d40"
+    embed_image_url = Column(String(2048), nullable=True)
+    embed_thumbnail_url = Column(String(2048), nullable=True)
+    embed_footer = Column(String(2048), nullable=True)
+    embed_footer_icon_url = Column(String(2048), nullable=True)
+    embed_url = Column(String(2048), nullable=True)
+    embed_author_name = Column(String(256), nullable=True)
+    embed_author_url = Column(String(2048), nullable=True)
+    embed_author_icon_url = Column(String(2048), nullable=True)
+    embed_timestamp = Column(Boolean, default=False, nullable=False)
+    embed_fields = Column(Text, nullable=True)                # JSON array of {name, value, inline}
+    select_placeholder = Column(String(150), nullable=True)
+    staff_role_ids = Column(Text, nullable=True)             # JSON array of role id strings
+    transcript_channel_id = Column(String(64), nullable=True)  # where "transcript ready" links get posted
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    categories = relationship(
+        "TicketCategory", back_populates="settings", order_by="TicketCategory.position"
+    )
+
+
+class TicketCategory(Base):
+    """One selectable ticket category (select-menu option) for a guild's ticket panel."""
+
+    __tablename__ = "ticket_categories"
+
+    id = Column(Integer, primary_key=True)
+    settings_id = Column(
+        Integer, ForeignKey("ticket_settings.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    guild_id = Column(String(64), nullable=False, index=True)
+    label = Column(String(100), nullable=False)
+    description = Column(String(200), nullable=True)
+    emoji = Column(String(64), nullable=True)
+    parent_category_id = Column(String(64), nullable=True)   # Discord category channel snowflake
+    extra_role_ids = Column(Text, nullable=True)              # JSON array, additive to staff_role_ids
+    position = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    settings = relationship("TicketSettings", back_populates="categories")
+
+
+class Ticket(Base):
+    """One row per opened ticket (private text channel)."""
+
+    __tablename__ = "tickets"
+
+    id = Column(Integer, primary_key=True)
+    guild_id = Column(String(64), nullable=False, index=True)
+    channel_id = Column(String(64), unique=True, nullable=False, index=True)
+    category_id = Column(Integer, ForeignKey("ticket_categories.id"), nullable=True, index=True)
+    opener_discord_id = Column(String(64), nullable=False, index=True)
+    opener_username = Column(String(255), nullable=True)
+    subject = Column(String(200), nullable=True)
+    description = Column(Text, nullable=True)
+    status = Column(String(16), default="open", nullable=False, index=True)  # "open" | "closed"
+    closed_by = Column(String(64), nullable=True)
+    closed_at = Column(DateTime, nullable=True)
+    transcript_slug = Column(String(32), unique=True, nullable=True, index=True)
+    transcript_captured_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    category = relationship("TicketCategory")
+
+
+class TicketMessage(Base):
+    """One row per message sent in a ticket channel, captured live as it's posted."""
+
+    __tablename__ = "ticket_messages"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True)
+    message_id = Column(String(64), unique=True, nullable=False, index=True)
+    author_id = Column(String(64), nullable=False)
+    author_username = Column(String(255), nullable=True)
+    author_display_name = Column(String(255), nullable=True)
+    author_avatar_url = Column(String(2048), nullable=True)
+    content = Column(Text, nullable=True)
+    attachments = Column(Text, nullable=True)   # JSON array of {filename, url, content_type}
+    embeds = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+
+    ticket = relationship("Ticket", backref="messages")
+
+
 # Default rows seeded on first startup.
 _CRON_JOB_DEFAULTS = [
     {
@@ -456,6 +561,8 @@ def init_db() -> None:
     _ensure_message_log_columns()
     _ensure_qna_columns()
     _ensure_moderation_event_columns()
+    _ensure_ticket_settings_columns()
+    _ensure_ticket_columns()
     _seed_cron_job_config()
     _backfill_discord_members_from_users()
 
@@ -513,6 +620,51 @@ def _ensure_moderation_event_columns() -> None:
             conn.execute(text("ALTER TABLE moderation_events ADD COLUMN message_id VARCHAR(64)"))
         if "extra_data" not in columns:
             conn.execute(text("ALTER TABLE moderation_events ADD COLUMN extra_data TEXT"))
+
+
+def _ensure_ticket_settings_columns() -> None:
+    """Add embed columns to ticket_settings introduced after the initial schema."""
+    inspector = inspect(engine)
+    if not inspector.has_table(TicketSettings.__tablename__):
+        return
+
+    columns = {col["name"] for col in inspector.get_columns(TicketSettings.__tablename__)}
+
+    with engine.begin() as conn:
+        if "embed_footer_icon_url" not in columns:
+            conn.execute(text("ALTER TABLE ticket_settings ADD COLUMN embed_footer_icon_url VARCHAR(2048)"))
+        if "embed_url" not in columns:
+            conn.execute(text("ALTER TABLE ticket_settings ADD COLUMN embed_url VARCHAR(2048)"))
+        if "embed_author_name" not in columns:
+            conn.execute(text("ALTER TABLE ticket_settings ADD COLUMN embed_author_name VARCHAR(256)"))
+        if "embed_author_url" not in columns:
+            conn.execute(text("ALTER TABLE ticket_settings ADD COLUMN embed_author_url VARCHAR(2048)"))
+        if "embed_author_icon_url" not in columns:
+            conn.execute(text("ALTER TABLE ticket_settings ADD COLUMN embed_author_icon_url VARCHAR(2048)"))
+        if "embed_timestamp" not in columns:
+            default = "FALSE" if engine.dialect.name == "postgresql" else "0"
+            conn.execute(
+                text(f"ALTER TABLE ticket_settings ADD COLUMN embed_timestamp BOOLEAN NOT NULL DEFAULT {default}")
+            )
+        if "embed_fields" not in columns:
+            conn.execute(text("ALTER TABLE ticket_settings ADD COLUMN embed_fields TEXT"))
+        if "transcript_channel_id" not in columns:
+            conn.execute(text("ALTER TABLE ticket_settings ADD COLUMN transcript_channel_id VARCHAR(64)"))
+
+
+def _ensure_ticket_columns() -> None:
+    """Add transcript columns to tickets introduced after the initial schema."""
+    inspector = inspect(engine)
+    if not inspector.has_table(Ticket.__tablename__):
+        return
+
+    columns = {col["name"] for col in inspector.get_columns(Ticket.__tablename__)}
+
+    with engine.begin() as conn:
+        if "transcript_slug" not in columns:
+            conn.execute(text("ALTER TABLE tickets ADD COLUMN transcript_slug VARCHAR(32)"))
+        if "transcript_captured_at" not in columns:
+            conn.execute(text("ALTER TABLE tickets ADD COLUMN transcript_captured_at DATETIME"))
 
 
 def _ensure_qna_columns() -> None:
