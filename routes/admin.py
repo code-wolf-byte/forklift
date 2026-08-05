@@ -798,6 +798,71 @@ def admin_server_leaves_chart():
     return jsonify(_chart_data(dates, from_dt, to_dt))
 
 
+# ─── Membership over time ─────────────────────────────────────────────────────
+
+def _running_total(joins: list, leaves: list, baseline: int) -> list:
+    """Walk the daily join/leave series and carry a running headcount from `baseline`."""
+    leave_map = {d["date"]: d["count"] for d in leaves}
+    running, out = baseline, []
+    for day in joins:
+        left = leave_map.get(day["date"], 0)
+        running += day["count"] - left
+        out.append({
+            "date": day["date"],
+            "count": running,
+            "joins": day["count"],
+            "leaves": left,
+        })
+    return out
+
+
+@admin_bp.route("/api/admin/membership/chart")
+@require_admin
+def admin_membership_chart():
+    """Headcount in the server per day: joined and not yet left, as of each date.
+
+    Same role filters as the joins/leaves charts. Only the latest join/leave is
+    stored per user, so a member who left and rejoined counts once, at their most
+    recent dates.
+    """
+    from_dt       = _parse_az_date(request.args.get("from_date"))
+    to_dt         = _parse_az_date(request.args.get("to_date"), end_of_day=True)
+    roles         = request.args.getlist("role") or None
+    exclude_roles = request.args.getlist("exclude_role") or None
+
+    with session_scope() as db_session:
+        def cohort(date_col):
+            return _activity_query(db_session, date_col, None, None, roles, exclude_roles)
+
+        if to_dt is None:
+            to_dt = datetime.utcnow()
+        if from_dt is None:
+            from_dt = cohort(User.joined_at).with_entities(func.min(User.joined_at)).scalar() or to_dt
+
+        # Already in the server when the range opens — the line has to start here,
+        # not at zero, or every chart reads as if the server was empty on day one.
+        baseline = (
+            cohort(User.joined_at)
+            .filter(User.joined_at < from_dt)
+            .filter(or_(User.left_at.is_(None), User.left_at >= from_dt))
+            .count()
+        )
+
+        join_dates = [u.joined_at for u in
+                      _activity_query(db_session, User.joined_at, from_dt, to_dt, roles, exclude_roles).all()]
+        # joined_at must be set for a leave to subtract someone the baseline counted,
+        # otherwise the running total can drift below zero.
+        leave_dates = [u.left_at for u in
+                       _activity_query(db_session, User.left_at, from_dt, to_dt, roles, exclude_roles)
+                       .filter(User.joined_at.isnot(None)).all()]
+
+    return jsonify(_running_total(
+        _chart_data(join_dates, from_dt, to_dt),
+        _chart_data(leave_dates, from_dt, to_dt),
+        baseline,
+    ))
+
+
 @admin_bp.route("/api/admin/joins")
 @require_admin
 def admin_joins():

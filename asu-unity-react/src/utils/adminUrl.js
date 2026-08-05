@@ -1,6 +1,6 @@
 const ALL_PAGE_IDS = [
   "dashboard", "analytics", "members", "joins", "member-stats",
-  "exceptions", "server-joins", "leaves", "events", "message-logs",
+  "exceptions", "server-joins", "leaves", "membership", "events", "message-logs",
   "qna", "automations", "tickets",
 ];
 

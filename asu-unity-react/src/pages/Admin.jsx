@@ -9,6 +9,7 @@ import Users from "./admin/Users.jsx";
 import Joins from "./admin/Joins.jsx";
 import ServerJoins from "./admin/ServerJoins.jsx";
 import Leaves from "./admin/Leaves.jsx";
+import Membership from "./admin/Membership.jsx";
 import MemberStats from "./admin/MemberStats.jsx";
 import MessageLogs from "./admin/MessageLogs.jsx";
 import QnA from "./admin/QnA.jsx";
@@ -40,6 +41,7 @@ const NAV = [
     items: [
       { id: "server-joins",  icon: "fa-sign-in-alt",  label: "Joins"         },
       { id: "leaves",        icon: "fa-sign-out-alt", label: "Leaves"        },
+      { id: "membership",    icon: "fa-users",        label: "Membership"    },
       { id: "events",        icon: "fa-calendar-alt", label: "Events"        },
       { id: "message-logs",  icon: "fa-comments",     label: "Message Logs"  },
     ],
@@ -157,6 +159,7 @@ export default function Admin() {
       case "member-stats":  return <MemberStats />;
       case "server-joins":  return <ServerJoins isDark={darkMode} />;
       case "leaves":        return <Leaves isDark={darkMode} />;
+      case "membership":    return <Membership isDark={darkMode} />;
       case "events":        return <Events />;
       case "message-logs":  return <MessageLogs />;
       case "automations":   return <Automations />;
