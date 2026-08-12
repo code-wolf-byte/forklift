@@ -38,8 +38,13 @@ const SelectScrollDownButton = React.forwardRef(({ className, ...props }, ref) =
 ));
 SelectScrollDownButton.displayName = SelectPrimitive.ScrollDownButton.displayName;
 
-const SelectContent = React.forwardRef(({ className, children, position = "popper", ...props }, ref) => (
-  <SelectPrimitive.Portal>
+const SelectContent = React.forwardRef(({ className, children, position = "popper", ...props }, ref) => {
+  // Same scoping problem as DialogContent: the admin theme's CSS variables live
+  // on .admin-layout, so a portal to document.body renders bg-card transparent.
+  const container =
+    typeof document !== "undefined" ? document.querySelector(".admin-layout") : undefined;
+  return (
+  <SelectPrimitive.Portal container={container || undefined}>
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
@@ -57,7 +62,8 @@ const SelectContent = React.forwardRef(({ className, children, position = "poppe
       <SelectScrollDownButton />
     </SelectPrimitive.Content>
   </SelectPrimitive.Portal>
-));
+  );
+});
 SelectContent.displayName = SelectPrimitive.Content.displayName;
 
 const SelectLabel = React.forwardRef(({ className, ...props }, ref) => (
