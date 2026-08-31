@@ -5,6 +5,8 @@ application paired with a Discord bot (py-cord) that verifies students, manages
 Discord roles, tracks server activity, runs a support-ticket system, and answers
 student questions with an AI-backed Q&A bot — all behind a React admin dashboard.
 
+# Test Commit
+
 ## What it does
 
 - **Student verification** — students sign in with ASU CAS and link their Discord
