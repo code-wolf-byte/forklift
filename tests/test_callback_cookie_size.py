@@ -83,7 +83,6 @@ def client(monkeypatch):
     monkeypatch.setattr(discord_routes, "assign_verified_role", lambda *a, **k: None)
     monkeypatch.setattr(discord_routes, "assign_roles_from_profile", lambda *a, **k: None)
     monkeypatch.setattr(discord_routes, "remove_roles_from_profile", lambda *a, **k: None)
-    monkeypatch.setattr(discord_routes, "check_member_is_admin", lambda uid: False)
     monkeypatch.setattr(discord_routes, "check_member_has_any_role", lambda uid, roles: False)
     monkeypatch.setattr("utils.salesforce.cache_sf_profile", lambda *a, **k: None)
     monkeypatch.setattr(discord_routes.CONFIG, "CAS_ENABLED", True)

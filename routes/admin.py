@@ -49,9 +49,9 @@ logger = logging.getLogger(__name__)
 
 _ADMIN_CONFIG_PATH = Path(__file__).parent.parent / "config" / "verification.yaml"
 with _ADMIN_CONFIG_PATH.open() as _f:
-    _ADMIN_RESTRICTED_ROLE_IDS: list[str] = (
-        yaml.safe_load(_f).get("admin", {}).get("restricted_role_ids", [])
-    )
+    _admin_cfg = yaml.safe_load(_f).get("admin", {})
+    _ADMIN_ROLE_IDS: list[str] = _admin_cfg.get("role_ids") or []
+    _ADMIN_RESTRICTED_ROLE_IDS: list[str] = _admin_cfg.get("restricted_role_ids") or []
 
 REACT_BUILD_DIR = os.getenv(
     "REACT_BUILD_DIR",
@@ -136,13 +136,18 @@ def admin_me():
         discord_username = user.discord_username
         discord_avatar = user.discord_avatar
 
-    # Refresh is_admin from DB and is_officer via live Discord role check
+    # Refresh both tiers via live Discord role checks (DB value is the fallback)
+    from asu_discord.api import check_member_has_any_role
+
+    try:
+        is_admin = check_member_has_any_role(discord_user_id, _ADMIN_ROLE_IDS)
+    except Exception:
+        logger.warning("Failed to refresh admin role for %s", discord_user_id)
     session["is_admin"] = is_admin
 
     is_officer = False
     if not is_admin:
         try:
-            from asu_discord.api import check_member_has_any_role
             is_officer = check_member_has_any_role(discord_user_id, _ADMIN_RESTRICTED_ROLE_IDS)
         except Exception:
             logger.warning("Failed to refresh officer role for %s", discord_user_id)

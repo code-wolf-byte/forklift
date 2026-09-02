@@ -5,7 +5,10 @@ verification:
   target_term_code: "2267"
 
 # Admin panel access configuration
+# role_ids: roles that get full admin panel access
 # restricted_role_ids: roles that can access the admin panel but NOT message logs or stats
 admin:
+  role_ids:
+    - "1213199035968528434"  # Admin
   restricted_role_ids:
     - "1477021385187655740"  # Officer

@@ -11,9 +11,9 @@ from flask import Blueprint, jsonify, redirect, request, session, url_for
 
 _ADMIN_CONFIG_PATH = Path(__file__).parent.parent / "config" / "verification.yaml"
 with _ADMIN_CONFIG_PATH.open() as _f:
-    _ADMIN_RESTRICTED_ROLE_IDS: list[str] = (
-        yaml.safe_load(_f).get("admin", {}).get("restricted_role_ids", [])
-    )
+    _admin_cfg = yaml.safe_load(_f).get("admin", {})
+    _ADMIN_ROLE_IDS: list[str] = _admin_cfg.get("role_ids") or []
+    _ADMIN_RESTRICTED_ROLE_IDS: list[str] = _admin_cfg.get("restricted_role_ids") or []
 
 from asu_discord.api import (
     DiscordAPIError,
@@ -21,7 +21,6 @@ from asu_discord.api import (
     assign_roles_from_profile,
     build_authorize_url,
     check_member_has_any_role,
-    check_member_is_admin,
     exchange_code_for_token,
     fetch_user_profile,
     remove_verified_role,
@@ -295,7 +294,7 @@ def discord_callback():
     # Check and persist admin status (non-fatal if bot is unavailable)
     is_admin = False
     try:
-        is_admin = check_member_is_admin(discord_user_id)
+        is_admin = check_member_has_any_role(discord_user_id, _ADMIN_ROLE_IDS)
     except Exception:
         logger.warning("Failed to check admin status for Discord user %s", discord_user_id)
     try:

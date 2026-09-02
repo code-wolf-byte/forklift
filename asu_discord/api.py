@@ -363,19 +363,6 @@ def get_member_info(discord_user_id: str) -> dict | None:
     }
 
 
-def check_member_is_admin(discord_user_id: str) -> bool:
-    """Return True if the Discord user has Administrator permission in the guild."""
-    bot = get_running_bot()
-    if bot is None:
-        return False
-    cfg = _config()
-    guild = bot.get_guild(int(cfg.guild_id))
-    if guild is None:
-        return False
-    member = guild.get_member(int(discord_user_id))
-    return bool(member and member.guild_permissions.administrator)
-
-
 def check_member_has_any_role(discord_user_id: str, role_ids: list[str]) -> bool:
     """Return True if the Discord user has any of the given role IDs in the guild."""
     if not role_ids:
@@ -464,7 +451,6 @@ __all__ = [
     "assign_roles_from_profile",
     "build_authorize_url",
     "check_member_has_any_role",
-    "check_member_is_admin",
     "exchange_code_for_token",
     "fetch_user_profile",
     "get_guild_category_channels",
