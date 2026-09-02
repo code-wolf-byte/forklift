@@ -315,9 +315,10 @@ def discord_callback():
     session["is_officer"] = is_officer
 
     if student_profile is not None:
-        profile_dict = student_profile.model_dump()
-        verification_state["student_profile"] = profile_dict
-        session["student_profile"] = profile_dict
+        # The full Salesforce profile is NOT stored in the session: `opportunities` is
+        # unbounded (39 entries -> 112KB JSON -> 11.8KB Set-Cookie even after zlib),
+        # which blows past nginx's 4K proxy_buffer_size (502) and the browser's 4K
+        # per-cookie limit. Nothing reads it back. Roles are derived from it here.
 
         # Assign additional Discord roles based on Salesforce profile data.
         try:
