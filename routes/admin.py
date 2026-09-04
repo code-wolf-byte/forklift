@@ -169,22 +169,22 @@ def admin_stats():
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     today_naive = today_start.replace(tzinfo=None)
 
-    # Period for retention/leaves stats — defaults to current month in UTC
+    # Period for retention/leaves stats — defaults to current month in AZ time
     from_date_str = request.args.get("from_date")
     to_date_str = request.args.get("to_date")
 
-    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    now_az = datetime.now(AZ_TZ)
     if from_date_str:
         from_dt = _parse_az_date(from_date_str)
     else:
-        from_dt = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        from_date_str = from_dt.date().isoformat()
+        from_date_str = now_az.replace(day=1).date().isoformat()
+        from_dt = _parse_az_date(from_date_str)
 
     if to_date_str:
         to_dt = _parse_az_date(to_date_str, end_of_day=True)
     else:
-        to_dt = now_utc
-        to_date_str = now_utc.date().isoformat()
+        to_dt = now_az.astimezone(timezone.utc).replace(tzinfo=None)
+        to_date_str = now_az.date().isoformat()
 
     with session_scope() as db_session:
         total_users = db_session.query(User).count()
@@ -623,14 +623,19 @@ def admin_member_stats():
 # ─── Activity helpers ─────────────────────────────────────────────────────────
 
 def _parse_az_date(date_str: str | None, *, end_of_day: bool = False) -> datetime | None:
-    """Parse a YYYY-MM-DD string as UTC midnight and return a naive UTC datetime."""
+    """Parse a YYYY-MM-DD string in AZ time and return a naive UTC datetime.
+
+    Timestamps are stored as naive UTC, but admins pick dates on an Arizona
+    calendar and _chart_data buckets results by AZ date, so the window bounds
+    have to be AZ day boundaries expressed in UTC.
+    """
     if not date_str:
         return None
     try:
         dt = datetime.fromisoformat(date_str)
         if end_of_day:
-            dt = dt.replace(hour=23, minute=59, second=59)
-        return dt
+            dt = dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+        return dt.replace(tzinfo=AZ_TZ).astimezone(timezone.utc).replace(tzinfo=None)
     except ValueError:
         return None
 
@@ -1301,14 +1306,12 @@ def admin_gold_guide_stats():
     from_dt = None
     to_dt = None
     if from_date_str:
-        try:
-            from_dt = datetime.strptime(from_date_str, "%Y-%m-%d")
-        except ValueError:
+        from_dt = _parse_az_date(from_date_str)
+        if from_dt is None:
             return jsonify({"error": "Invalid from_date, expected YYYY-MM-DD"}), 400
     if to_date_str:
-        try:
-            to_dt = datetime.strptime(to_date_str, "%Y-%m-%d") + timedelta(days=1)
-        except ValueError:
+        to_dt = _parse_az_date(to_date_str, end_of_day=True)
+        if to_dt is None:
             return jsonify({"error": "Invalid to_date, expected YYYY-MM-DD"}), 400
 
     with session_scope() as db_session:
@@ -1316,7 +1319,7 @@ def admin_gold_guide_stats():
         if from_dt:
             q = q.filter(GoldGuideContribution.responded_at >= from_dt)
         if to_dt:
-            q = q.filter(GoldGuideContribution.responded_at < to_dt)
+            q = q.filter(GoldGuideContribution.responded_at <= to_dt)
         contributions = q.order_by(GoldGuideContribution.responded_at.asc()).all()
 
     # Aggregate: per guide → per channel → count
