@@ -4,12 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const monthStartISO = () => {
-  const d = new Date();
-  d.setDate(1);
-  return d.toISOString().slice(0, 10);
-};
+// Dates are interpreted in Arizona time by the backend (_parse_az_date), so the
+// presets must use the AZ calendar day, not the UTC one. en-CA formats as YYYY-MM-DD.
+const azDateISO = () =>
+  new Date().toLocaleDateString("en-CA", { timeZone: "America/Phoenix" });
+const todayISO = () => azDateISO();
+const monthStartISO = () => `${azDateISO().slice(0, 8)}01`;
 
 function NotTracked() {
   return <span className="text-xs text-muted-foreground italic">not tracked</span>;
@@ -126,16 +126,21 @@ export default function Analytics() {
 
   useEffect(() => {
     setLoading(true);
+    let stale = false;
     const params = new URLSearchParams();
     if (applied.from) params.set("from_date", applied.from);
     if (applied.to) params.set("to_date", applied.to);
     fetch(`/api/admin/analytics?${params}`)
       .then((r) => r.json())
       .then((d) => {
+        if (stale) return;
         setData(d);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch(() => !stale && setLoading(false));
+    return () => {
+      stale = true;
+    };
   }, [applied]);
 
   useEffect(() => {
