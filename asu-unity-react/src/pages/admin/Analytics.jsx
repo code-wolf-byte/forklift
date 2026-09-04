@@ -5,13 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { getUrlParam, replaceUrlParams } from "@/utils/adminUrl";
-
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const monthStartISO = () => {
-  const d = new Date();
-  d.setDate(1);
-  return d.toISOString().slice(0, 10);
-};
+import { todayISO, monthStartISO } from "@/utils/adminDates";
 
 // ── Looker Studio deep link ────────────────────────────────────────────────────────────────────
 const LOOKER_STUDIO_REPORT_ID = "2018cce5-1438-48b6-8f39-568376eed976";
@@ -180,16 +174,21 @@ export default function Analytics() {
 
   useEffect(() => {
     setLoading(true);
+    let stale = false;
     const params = new URLSearchParams();
     if (applied.from) params.set("from_date", applied.from);
     if (applied.to) params.set("to_date", applied.to);
     fetch(`/api/admin/analytics?${params}`)
       .then((r) => r.json())
       .then((d) => {
+        if (stale) return;
         setData(d);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch(() => !stale && setLoading(false));
+    return () => {
+      stale = true;
+    };
   }, [applied]);
 
   useEffect(() => {
@@ -722,7 +721,7 @@ export default function Analytics() {
             <strong>Note:</strong> Discord Insights only retains the last 120 days of data.
           </p>
           <a
-            href={`https://discord.com/developers/servers/1187144343400751234/analytics/engagement?interval=2${applied.from ? `&start=${applied.from}` : ""}&end=${applied.to || new Date().toISOString().slice(0, 10)}`}
+            href={`https://discord.com/developers/servers/1187144343400751234/analytics/engagement?interval=2${applied.from ? `&start=${applied.from}` : ""}&end=${applied.to || todayISO()}`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 text-sm font-medium text-blue-500 hover:text-blue-400 hover:underline"

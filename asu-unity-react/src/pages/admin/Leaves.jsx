@@ -6,16 +6,10 @@ import { Label } from "@/components/ui/label";
 import ActivityChart from "./ActivityChart.jsx";
 import SeriesBuilder, { seriesLabel, seriesParams } from "./SeriesBuilder.jsx";
 import { getUrlParam, replaceUrlParams } from "@/utils/adminUrl";
+import { todayISO, daysAgoISO } from "@/utils/adminDates";
 
 const COLORS = ["#8c1d40", "#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444"];
 const SCALE_PRESETS = [7, 14, 30, 90];
-
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const daysAgoISO = (n) => {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
-};
 
 function Avatar({ userId, avatarHash, username }) {
   const src =

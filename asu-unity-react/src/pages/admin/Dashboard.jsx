@@ -4,13 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getUrlParam, replaceUrlParams } from "@/utils/adminUrl";
-
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const monthStartISO = () => {
-  const d = new Date();
-  d.setDate(1);
-  return d.toISOString().slice(0, 10);
-};
+import { todayISO, monthStartISO } from "@/utils/adminDates";
 
 function StatCard({ value, label, icon, color }) {
   const c = color || "#8c1d40";

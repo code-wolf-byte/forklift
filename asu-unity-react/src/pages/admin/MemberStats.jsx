@@ -5,13 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { getUrlParam, replaceUrlParams } from "@/utils/adminUrl";
-
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const monthStartISO = () => {
-  const d = new Date();
-  d.setDate(1);
-  return d.toISOString().slice(0, 10);
-};
+import { todayISO, monthStartISO } from "@/utils/adminDates";
 
 const CAT_META = {
   "Academic Level": { icon: "fa-graduation-cap", color: "#8c1d40" },

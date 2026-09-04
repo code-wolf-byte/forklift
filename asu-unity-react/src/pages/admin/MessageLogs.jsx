@@ -14,6 +14,7 @@ import {
   TableCell,
 } from "@/components/ui/table";
 import RoleFilter from "./RoleFilter.jsx";
+import { todayISO, daysAgoISO } from "@/utils/adminDates";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -21,13 +22,6 @@ const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
 const DOW_ABBR = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const daysAgoISO = (n) => {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
-};
 
 function fmtHour(h) {
   if (h === 0) return "12a";
