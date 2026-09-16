@@ -11,10 +11,10 @@ from utils.database import EventParticipant, ServerEvent, session_scope
 
 logger = logging.getLogger(__name__)
 
-# Only track in-server events — filter out external locations.
 _TRACKED_ENTITY_TYPES: dict[discord.ScheduledEventLocationType, str] = {
     discord.ScheduledEventLocationType.voice: "voice",
     discord.ScheduledEventLocationType.stage_instance: "stage_instance",
+    discord.ScheduledEventLocationType.external: "external",
 }
 
 
@@ -43,7 +43,8 @@ class EventTrackerCog(commands.Cog):
         )
         status = event.status.name.lower() if event.status else "scheduled"
         entity_type = _TRACKED_ENTITY_TYPES[event.location.type]
-        channel_id = str(event.location.value.id) if event.location.value else None
+        loc_val = event.location.value
+        channel_id = str(loc_val.id) if loc_val is not None and hasattr(loc_val, "id") else None
 
         existing = (
             db_session.query(ServerEvent)
@@ -64,7 +65,7 @@ class EventTrackerCog(commands.Cog):
 
         new_ev = ServerEvent(
             discord_event_id=str(event.id),
-            guild_id=str(event.guild_id),
+            guild_id=str(event.guild.id),
             name=event.name,
             description=event.description,
             start_time=start_time,
@@ -126,7 +127,7 @@ class EventTrackerCog(commands.Cog):
         """Insert 'joined' rows for users already subscribed to a live event on startup."""
         try:
             user_ids: list[str] = []
-            async for user in event.fetch_users():
+            async for user in event.subscribers(limit=None):
                 user_ids.append(str(user.id))
         except Exception:
             logger.warning(

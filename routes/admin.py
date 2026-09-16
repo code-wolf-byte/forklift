@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
+import json
 import logging
 import os
 import threading
@@ -11,11 +13,12 @@ from functools import wraps
 from zoneinfo import ZoneInfo
 
 from flask import Blueprint, Response, abort, jsonify, redirect, request, send_from_directory, session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from utils import app_settings
 from utils.database import (
     CronJobConfig,
+    DiscordMember,
     EventParticipant,
     ForumPost,
     GoldGuideContribution,
@@ -24,13 +27,19 @@ from utils.database import (
     ModerationEvent,
     QnaPost,
     ServerEvent,
+    Ticket,
+    TicketCategory,
+    TicketMessage,
+    TicketSettings,
     User,
     UserRole,
     UserRoleException,
     UserSalesforceProfile,
     VoiceSession,
+    VolunteerContribution,
     session_scope,
 )
+from utils.settings import CONFIG
 
 AZ_TZ = ZoneInfo("America/Phoenix")
 
@@ -45,6 +54,8 @@ REACT_BUILD_DIR = os.getenv(
 
 def _auth_complete() -> bool:
     """Return True if the session has both CAS and Discord complete."""
+    if CONFIG.DEV_MODE:
+        return True
     verification_state = session.get("verification_state") or {}
     cas_complete = bool(verification_state.get("cas_complete"))
     discord_complete = bool(
@@ -58,6 +69,8 @@ def require_admin(f):
 
     @wraps(f)
     def decorated(*args, **kwargs):
+        if CONFIG.DEV_MODE:
+            return f(*args, **kwargs)
         if not (_auth_complete() and (session.get("is_admin") or session.get("is_officer"))):
             abort(403)
         return f(*args, **kwargs)
@@ -70,6 +83,8 @@ def require_full_admin(f):
 
     @wraps(f)
     def decorated(*args, **kwargs):
+        if CONFIG.DEV_MODE:
+            return f(*args, **kwargs)
         if not (_auth_complete() and session.get("is_admin")):
             abort(403)
         return f(*args, **kwargs)
@@ -79,6 +94,18 @@ def require_full_admin(f):
 
 @admin_bp.route("/api/admin/me")
 def admin_me():
+    if CONFIG.DEV_MODE:
+        return jsonify(
+            {
+                "asurite_id": "devmode",
+                "discord_username": "Dev Mode",
+                "discord_user_id": None,
+                "discord_avatar": None,
+                "is_admin": True,
+                "is_officer": False,
+            }
+        )
+
     verification_state = session.get("verification_state") or {}
     if not _auth_complete():
         return jsonify({"error": "Unauthorized"}), 403
@@ -92,7 +119,8 @@ def admin_me():
         user = (
             db_session.query(User)
             .filter(User.discord_user_id == discord_user_id)
-            .one_or_none()
+            .order_by(User.id.desc())
+            .first()
         )
         if user is None:
             return jsonify({"error": "User not found"}), 404
@@ -142,12 +170,8 @@ def admin_stats():
     if from_date_str:
         from_dt = _parse_az_date(from_date_str)
     else:
-        from_dt = (
-            now_az.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            .astimezone(timezone.utc)
-            .replace(tzinfo=None)
-        )
         from_date_str = now_az.replace(day=1).date().isoformat()
+        from_dt = _parse_az_date(from_date_str)
 
     if to_date_str:
         to_dt = _parse_az_date(to_date_str, end_of_day=True)
@@ -210,17 +234,39 @@ def admin_stats():
     )
 
 
+@admin_bp.route("/api/admin/live-member-counts")
+@require_admin
+def admin_live_member_counts():
+    from asu_discord.api import get_live_member_counts
+    counts = get_live_member_counts()
+    if counts is None:
+        return jsonify({"error": "Bot or guild unavailable"}), 503
+    return jsonify(counts)
+
+
 @admin_bp.route("/api/admin/users")
 @require_admin
 def admin_users():
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(100, max(1, request.args.get("per_page", 50, type=int)))
     offset = (page - 1) * per_page
+    search = (request.args.get("q") or "").strip()
 
     with session_scope() as db_session:
-        total = db_session.query(User).count()
+        base_query = db_session.query(User)
+        if search:
+            like = f"%{search}%"
+            base_query = base_query.filter(
+                or_(
+                    User.asurite_id.ilike(like),
+                    User.discord_username.ilike(like),
+                    User.discord_user_id.ilike(like),
+                )
+            )
+
+        total = base_query.count()
         users = (
-            db_session.query(User).order_by(User.id.desc()).offset(offset).limit(per_page).all()
+            base_query.order_by(User.id.desc()).offset(offset).limit(per_page).all()
         )
         user_list = [
             {
@@ -412,19 +458,23 @@ def admin_reset_automation(job_name: str):
 @admin_bp.route("/api/admin/discord-channels")
 @require_admin
 def admin_discord_channels():
-    """Text channels by default; ?include=forum adds forum channels."""
+    """Text channels by default; ?include=forum adds forums, ?type=category lists categories."""
     try:
         from asu_discord.api import (
             _DISCORD_FORUM_CHANNEL_TYPES,
             _DISCORD_TEXT_CHANNEL_TYPES,
+            get_guild_category_channels,
             get_guild_channels,
         )
 
-        wanted = _DISCORD_TEXT_CHANNEL_TYPES
-        include = {part.strip() for part in (request.args.get("include") or "").split(",")}
-        if "forum" in include:
-            wanted = wanted | _DISCORD_FORUM_CHANNEL_TYPES
-        channels = get_guild_channels(channel_types=wanted)
+        if request.args.get("type") == "category":
+            channels = get_guild_category_channels()
+        else:
+            wanted = _DISCORD_TEXT_CHANNEL_TYPES
+            include = {part.strip() for part in (request.args.get("include") or "").split(",")}
+            if "forum" in include:
+                wanted = wanted | _DISCORD_FORUM_CHANNEL_TYPES
+            channels = get_guild_channels(channel_types=wanted)
     except Exception:
         logger.exception("Failed to fetch guild channels")
         channels = []
@@ -660,7 +710,12 @@ def admin_member_stats():
 # ─── Activity helpers ─────────────────────────────────────────────────────────
 
 def _parse_az_date(date_str: str | None, *, end_of_day: bool = False) -> datetime | None:
-    """Parse a YYYY-MM-DD string in AZ time and return a naive UTC datetime."""
+    """Parse a YYYY-MM-DD string in AZ time and return a naive UTC datetime.
+
+    Timestamps are stored as naive UTC, but admins pick dates on an Arizona
+    calendar and _chart_data buckets results by AZ date, so the window bounds
+    have to be AZ day boundaries expressed in UTC.
+    """
     if not date_str:
         return None
     try:
@@ -771,6 +826,29 @@ def _chart_activity(date_col):
     return jsonify(_chart_data(dates, from_dt, to_dt))
 
 
+# ─── Verifications ────────────────────────────────────────────────────────────
+
+@admin_bp.route("/api/admin/verifications/chart")
+@require_admin
+def admin_verifications_chart():
+    from_dt = _parse_az_date(request.args.get("from_date"))
+    to_dt   = _parse_az_date(request.args.get("to_date"), end_of_day=True)
+    with session_scope() as db_session:
+        dates = [
+            u.verified_at
+            for u in _activity_query(db_session, User.verified_at, from_dt, to_dt)
+            .filter(User.verified == True)  # noqa: E712
+            .all()
+        ]
+    return jsonify(_chart_data(dates, from_dt, to_dt))
+
+
+@admin_bp.route("/api/admin/verifications")
+@require_admin
+def admin_verifications():
+    return _paginated_activity(User.verified_at, "verified_at")
+
+
 # ─── Server joins ─────────────────────────────────────────────────────────────
 
 @admin_bp.route("/api/admin/server-joins")
@@ -813,6 +891,86 @@ def admin_server_leaves_chart():
     return jsonify(_chart_data(dates, from_dt, to_dt))
 
 
+# ─── Membership over time ─────────────────────────────────────────────────────
+
+def _running_total(joins: list, leaves: list, baseline: int) -> list:
+    """Walk the daily join/leave series and carry a running headcount from `baseline`."""
+    leave_map = {d["date"]: d["count"] for d in leaves}
+    running, out = baseline, []
+    for day in joins:
+        left = leave_map.get(day["date"], 0)
+        running += day["count"] - left
+        out.append({
+            "date": day["date"],
+            "count": running,
+            "joins": day["count"],
+            "leaves": left,
+        })
+    return out
+
+
+def _membership_query(db_session, date_col, from_dt, to_dt, roles=None, exclude_roles=None):
+    """DiscordMember rows by join/leave date, AND-filtered by role.
+
+    Counts the whole guild, not just verified users: User.joined_at is only set
+    for members who completed verification, so it undercounts the server badly.
+    Roles live on the User record, so a role filter necessarily narrows to
+    members who have verified.
+    """
+    q = db_session.query(date_col).filter(date_col.isnot(None))
+    if from_dt:
+        q = q.filter(date_col >= from_dt)
+    if to_dt:
+        q = q.filter(date_col <= to_dt)
+    for role in (roles or []):
+        q = q.filter(DiscordMember.discord_user_id.in_(_role_member_ids(db_session, role)))
+    for excl in (exclude_roles or []):
+        q = q.filter(~DiscordMember.discord_user_id.in_(_role_member_ids(db_session, excl)))
+    return q
+
+
+@admin_bp.route("/api/admin/membership/chart")
+@require_admin
+def admin_membership_chart():
+    """Headcount in the server per day: joined and not yet left, as of each date.
+
+    Same role filters as the joins/leaves charts. Only the latest join/leave is
+    stored per member, so someone who left and rejoined counts once, at their
+    most recent dates.
+    """
+    from_dt       = _parse_az_date(request.args.get("from_date"))
+    to_dt         = _parse_az_date(request.args.get("to_date"), end_of_day=True)
+    roles         = request.args.getlist("role") or None
+    exclude_roles = request.args.getlist("exclude_role") or None
+
+    with session_scope() as db_session:
+        if to_dt is None:
+            to_dt = datetime.utcnow()
+        if from_dt is None:
+            from_dt = (_membership_query(db_session, DiscordMember.joined_at, None, None, roles, exclude_roles)
+                       .with_entities(func.min(DiscordMember.joined_at)).scalar() or to_dt)
+
+        # Already in the server when the range opens — the line has to start here,
+        # not at zero, or every chart reads as if the server was empty on day one.
+        baseline = (
+            _membership_query(db_session, DiscordMember.joined_at, None, None, roles, exclude_roles)
+            .filter(DiscordMember.joined_at < from_dt)
+            .filter(or_(DiscordMember.left_at.is_(None), DiscordMember.left_at >= from_dt))
+            .count()
+        )
+
+        join_dates  = [d for (d,) in _membership_query(
+            db_session, DiscordMember.joined_at, from_dt, to_dt, roles, exclude_roles).all()]
+        leave_dates = [d for (d,) in _membership_query(
+            db_session, DiscordMember.left_at, from_dt, to_dt, roles, exclude_roles).all()]
+
+    return jsonify(_running_total(
+        _chart_data(join_dates, from_dt, to_dt),
+        _chart_data(leave_dates, from_dt, to_dt),
+        baseline,
+    ))
+
+
 @admin_bp.route("/api/admin/joins")
 @require_admin
 def admin_joins():
@@ -842,6 +1000,17 @@ def admin_joins():
 
 # ─── Message logs ─────────────────────────────────────────────────────────────
 
+def _role_member_ids(db_session, role: str):
+    """Subquery of discord_user_ids belonging to users who hold `role`."""
+    return (
+        db_session.query(User.discord_user_id)
+        .join(UserRole, UserRole.user_id == User.id)
+        .filter(UserRole.role_name == role)
+        .subquery()
+        .select()
+    )
+
+
 def _message_query(db_session, from_dt, to_dt, channel_ids, roles, exclude_roles):
     """Base query for MessageLog with date, channel, and role filters."""
     q = db_session.query(MessageLog)
@@ -852,21 +1021,9 @@ def _message_query(db_session, from_dt, to_dt, channel_ids, roles, exclude_roles
     if channel_ids:
         q = q.filter(MessageLog.channel_id.in_(channel_ids))
     for role in (roles or []):
-        subq = (
-            db_session.query(User.discord_user_id)
-            .join(UserRole, UserRole.user_id == User.id)
-            .filter(UserRole.role_name == role)
-            .subquery()
-        )
-        q = q.filter(MessageLog.discord_user_id.in_(subq))
+        q = q.filter(MessageLog.discord_user_id.in_(_role_member_ids(db_session, role)))
     for excl in (exclude_roles or []):
-        subq = (
-            db_session.query(User.discord_user_id)
-            .join(UserRole, UserRole.user_id == User.id)
-            .filter(UserRole.role_name == excl)
-            .subquery()
-        )
-        q = q.filter(~MessageLog.discord_user_id.in_(subq))
+        q = q.filter(~MessageLog.discord_user_id.in_(_role_member_ids(db_session, excl)))
     return q
 
 
@@ -1069,6 +1226,32 @@ def admin_message_backfill_start():
     return jsonify({"status": "started"})
 
 
+@admin_bp.route("/api/admin/message-logs/sync-thread-parents", methods=["POST"])
+@require_full_admin
+def admin_sync_thread_parents():
+    """Populate parent_channel_id on existing message_log rows that are threads."""
+    from asu_discord.shared import get_running_bot, get_running_loop
+    from asu_discord.cogs.analytics import AnalyticsCog
+
+    bot = get_running_bot()
+    if bot is None:
+        return jsonify({"error": "Discord bot is not running"}), 503
+
+    cog = bot.cogs.get("AnalyticsCog")
+    if cog is None or not isinstance(cog, AnalyticsCog):
+        return jsonify({"error": "AnalyticsCog not loaded"}), 503
+
+    loop = get_running_loop()
+    if loop is None:
+        return jsonify({"error": "Bot event loop unavailable"}), 503
+
+    if cog._thread_parent_sync_running:
+        return jsonify({"status": "already_running"})
+
+    asyncio.run_coroutine_threadsafe(cog._sync_thread_parents(), loop)
+    return jsonify({"status": "started"})
+
+
 @admin_bp.route("/api/admin/message-logs/backfill/status")
 @require_full_admin
 def admin_message_backfill_status():
@@ -1210,14 +1393,12 @@ def admin_gold_guide_stats():
     from_dt = None
     to_dt = None
     if from_date_str:
-        try:
-            from_dt = datetime.strptime(from_date_str, "%Y-%m-%d").replace(tzinfo=AZ_TZ).astimezone(timezone.utc).replace(tzinfo=None)
-        except ValueError:
+        from_dt = _parse_az_date(from_date_str)
+        if from_dt is None:
             return jsonify({"error": "Invalid from_date, expected YYYY-MM-DD"}), 400
     if to_date_str:
-        try:
-            to_dt = (datetime.strptime(to_date_str, "%Y-%m-%d") + timedelta(days=1)).replace(tzinfo=AZ_TZ).astimezone(timezone.utc).replace(tzinfo=None)
-        except ValueError:
+        to_dt = _parse_az_date(to_date_str, end_of_day=True)
+        if to_dt is None:
             return jsonify({"error": "Invalid to_date, expected YYYY-MM-DD"}), 400
 
     with session_scope() as db_session:
@@ -1225,7 +1406,7 @@ def admin_gold_guide_stats():
         if from_dt:
             q = q.filter(GoldGuideContribution.responded_at >= from_dt)
         if to_dt:
-            q = q.filter(GoldGuideContribution.responded_at < to_dt)
+            q = q.filter(GoldGuideContribution.responded_at <= to_dt)
         contributions = q.order_by(GoldGuideContribution.responded_at.asc()).all()
 
     # Aggregate: per guide → per channel → count
@@ -1267,6 +1448,7 @@ def admin_gold_guide_stats():
 # ─── Analytics ───────────────────────────────────────────────────────────────
 
 _COLLEGE_ROLES = [
+    "Barrett The Honors College",
     "New College of Interdisciplinary Arts and Sciences",
     "Herberger Institute for Design and the Arts",
     "Edson College of Nursing and Health Innovation",
@@ -1282,6 +1464,8 @@ _COLLEGE_ROLES = [
     "Thunderbird School of Global Management",
     "University College",
 ]
+
+VOLUNTEER_ROLE_ID = 1396918560340705291
 
 
 @admin_bp.route("/api/admin/analytics")
@@ -1305,53 +1489,55 @@ def admin_analytics():
         )
 
         # ── Growth & Funnel / Onboarding ───────────────────────────────────────
-        joins_q = db_session.query(User).filter(User.joined_at.isnot(None))
+        joins_q = db_session.query(DiscordMember)
         if from_dt:
-            joins_q = joins_q.filter(User.joined_at >= from_dt)
+            joins_q = joins_q.filter(DiscordMember.joined_at >= from_dt)
         if to_dt:
-            joins_q = joins_q.filter(User.joined_at <= to_dt)
+            joins_q = joins_q.filter(DiscordMember.joined_at <= to_dt)
         total_joins = joins_q.count()
 
-        verified_q = db_session.query(User).filter(User.verified == True)  # noqa: E712
-        if from_dt:
-            verified_q = verified_q.filter(User.verified_at >= from_dt)
-        if to_dt:
-            verified_q = verified_q.filter(User.verified_at <= to_dt)
-        period_verified = verified_q.count()
-
-        unverified_q = db_session.query(User).filter(
-            User.verified == False, User.joined_at.isnot(None)  # noqa: E712
+        verified_discord_ids = db_session.query(User.discord_user_id).filter(
+            User.verified == True, User.discord_user_id.isnot(None)  # noqa: E712
         )
-        if from_dt:
-            unverified_q = unverified_q.filter(User.joined_at >= from_dt)
-        if to_dt:
-            unverified_q = unverified_q.filter(User.joined_at <= to_dt)
-        period_unverified = unverified_q.count()
+        period_verified = joins_q.filter(
+            DiscordMember.discord_user_id.in_(verified_discord_ids)
+        ).count()
+        period_unverified = total_joins - period_verified
 
         # ── Growth & Funnel / Retention ────────────────────────────────────────
-        total_verified_alltime = (
-            db_session.query(User).filter(User.verified == True).count()  # noqa: E712
-        )
+        verified_period_q = db_session.query(User).filter(User.verified == True)  # noqa: E712
+        if from_dt:
+            verified_period_q = verified_period_q.filter(User.verified_at >= from_dt)
+        if to_dt:
+            verified_period_q = verified_period_q.filter(User.verified_at <= to_dt)
+        total_verified = verified_period_q.count()
         in_server_count = (
             db_session.query(User)
             .filter(User.verified == True, User.left_at.is_(None))  # noqa: E712
             .count()
         )
-        total_unverified_alltime = (
-            db_session.query(User)
-            .filter(User.verified == False, User.discord_user_id.isnot(None))  # noqa: E712
-            .count()
-        )
 
+        from sqlalchemy import or_
         retention_rate = None
-        if from_dt:
+        if not from_dt:
+            all_time_verified = (
+                db_session.query(User).filter(User.verified == True).count()  # noqa: E712
+            )
+            if all_time_verified > 0:
+                retention_rate = round((in_server_count / all_time_verified) * 100, 1)
+        else:
             verified_at_start = (
                 db_session.query(User)
-                .filter(User.verified == True, User.verified_at < from_dt)  # noqa: E712
+                .filter(
+                    User.verified == True,  # noqa: E712
+                    User.verified_at < from_dt,
+                    or_(User.left_at.is_(None), User.left_at >= from_dt),
+                )
                 .count()
             )
             leaves_q = db_session.query(User).filter(
                 User.verified == True,  # noqa: E712
+                User.verified_at < from_dt,
                 User.left_at.isnot(None),
                 User.left_at >= from_dt,
             )
@@ -1360,13 +1546,15 @@ def admin_analytics():
             leaves_count = leaves_q.count()
             if verified_at_start > 0:
                 retention_rate = round(
-                    ((verified_at_start - leaves_count) / verified_at_start) * 100, 1
+                    (max(0, verified_at_start - leaves_count) / verified_at_start) * 100, 1
                 )
 
         # ── Channel Engagement ─────────────────────────────────────────────────
         ch_q = db_session.query(
             MessageLog.channel_id,
             MessageLog.channel_name,
+            MessageLog.parent_channel_id,
+            MessageLog.parent_channel_name,
             func.count(MessageLog.id).label("cnt"),
         )
         if from_dt:
@@ -1374,15 +1562,58 @@ def admin_analytics():
         if to_dt:
             ch_q = ch_q.filter(MessageLog.sent_at <= to_dt)
         ch_rows = (
-            ch_q.group_by(MessageLog.channel_id, MessageLog.channel_name)
+            ch_q.group_by(
+                MessageLog.channel_id,
+                MessageLog.channel_name,
+                MessageLog.parent_channel_id,
+                MessageLog.parent_channel_name,
+            )
             .order_by(func.count(MessageLog.id).desc())
-            .limit(25)
             .all()
         )
-        channels = [
-            {"rank": i + 1, "channel_id": cid, "channel_name": cname or cid, "messages": cnt}
-            for i, (cid, cname, cnt) in enumerate(ch_rows)
-        ]
+
+        # Group threads under their parent channel
+        ch_parent_map: dict[str, dict] = {}  # parent_channel_id -> aggregated data
+        ch_standalone: dict[str, dict] = {}  # channel_id -> data for channels without parent
+        for cid, cname, parent_cid, parent_cname, cnt in ch_rows:
+            if parent_cid:
+                if parent_cid not in ch_parent_map:
+                    ch_parent_map[parent_cid] = {
+                        "channel_id": parent_cid,
+                        "channel_name": parent_cname or parent_cid,
+                        "messages": 0,
+                        "threads": [],
+                    }
+                ch_parent_map[parent_cid]["messages"] += cnt
+                ch_parent_map[parent_cid]["threads"].append({
+                    "channel_id": cid,
+                    "channel_name": cname or cid,
+                    "messages": cnt,
+                })
+            else:
+                if cid not in ch_standalone:
+                    ch_standalone[cid] = {
+                        "channel_id": cid,
+                        "channel_name": cname or cid,
+                        "messages": cnt,
+                        "threads": [],
+                    }
+                else:
+                    ch_standalone[cid]["messages"] += cnt
+
+        # Merge parent_map into standalone (parent may also have direct messages)
+        for parent_cid, parent_data in ch_parent_map.items():
+            if parent_cid in ch_standalone:
+                ch_standalone[parent_cid]["messages"] += parent_data["messages"]
+                ch_standalone[parent_cid]["threads"].extend(parent_data["threads"])
+            else:
+                ch_standalone[parent_cid] = parent_data
+
+        for ch_data in ch_standalone.values():
+            ch_data["threads"].sort(key=lambda x: -x["messages"])
+
+        all_channels_sorted = sorted(ch_standalone.values(), key=lambda x: -x["messages"])[:25]
+        channels = [{"rank": i + 1, **ch} for i, ch in enumerate(all_channels_sorted)]
 
         # ── Demographics ───────────────────────────────────────────────────────
         demo_q = (
@@ -1400,36 +1631,46 @@ def admin_analytics():
         role_counts = {name: cnt for name, cnt in demo_q.group_by(UserRole.role_name).all()}
 
         # ── Voice (from voice_sessions) ────────────────────────────────────────
+        # Select sessions that overlap the period (started before end, ended after start),
+        # then clip each session's duration to the period boundary in Python so sessions
+        # that straddle the period edges are counted correctly rather than dropped.
         vs_q = db_session.query(VoiceSession).filter(VoiceSession.left_at.isnot(None))
         if from_dt:
-            vs_q = vs_q.filter(VoiceSession.joined_at >= from_dt)
+            vs_q = vs_q.filter(VoiceSession.left_at > from_dt)
         if to_dt:
-            vs_q = vs_q.filter(VoiceSession.joined_at <= to_dt)
-        total_voice_seconds = (
-            vs_q.with_entities(func.coalesce(func.sum(VoiceSession.duration_seconds), 0)).scalar()
-            or 0
-        )
-        voice_hours = round(total_voice_seconds / 3600, 1) if total_voice_seconds else None
-        unique_speakers = (
-            vs_q.with_entities(func.count(VoiceSession.discord_user_id.distinct())).scalar() or 0
-        ) or None
+            vs_q = vs_q.filter(VoiceSession.joined_at < to_dt)
+        voice_sessions = vs_q.all()
 
-        # Channel voice activity
-        vc_rows = (
-            vs_q.with_entities(
-                VoiceSession.channel_id,
-                VoiceSession.channel_name,
-                func.sum(VoiceSession.duration_seconds).label("dur"),
-                func.count(VoiceSession.id).label("sessions"),
-            )
-            .group_by(VoiceSession.channel_id, VoiceSession.channel_name)
-            .order_by(func.sum(VoiceSession.duration_seconds).desc())
-            .limit(25)
-            .all()
-        )
+        total_voice_seconds = 0
+        ch_seconds: dict[str, int] = {}
+        ch_sessions: dict[str, int] = {}
+        ch_names: dict[str, str] = {}
+        unique_speaker_ids: set[str] = set()
+        incomplete_voice_sessions = 0
+        for s in voice_sessions:
+            clip_start = max(s.joined_at, from_dt) if from_dt else s.joined_at
+            clip_end = min(s.left_at, to_dt) if to_dt else s.left_at
+            clipped = int(max(0, (clip_end - clip_start).total_seconds()))
+            total_voice_seconds += clipped
+            cid = str(s.channel_id)
+            ch_seconds[cid] = ch_seconds.get(cid, 0) + clipped
+            ch_sessions[cid] = ch_sessions.get(cid, 0) + 1
+            ch_names[cid] = s.channel_name or cid
+            unique_speaker_ids.add(s.discord_user_id)
+            if not s.is_complete:
+                incomplete_voice_sessions += 1
+
+        voice_hours = round(total_voice_seconds / 3600, 1) if total_voice_seconds else None
+        unique_speakers = len(unique_speaker_ids) or None
+
+        top_voice_channels = sorted(ch_seconds.items(), key=lambda x: -x[1])[:25]
         voice_by_channel = {
-            str(cid): {"channel_name": cname or cid, "voice_seconds": dur or 0, "sessions": ses}
-            for cid, cname, dur, ses in vc_rows
+            cid: {
+                "channel_name": ch_names[cid],
+                "voice_seconds": ch_seconds[cid],
+                "sessions": ch_sessions[cid],
+            }
+            for cid, _ in top_voice_channels
         }
 
         # ── Moderation (from moderation_events + User.banned) ──────────────────
@@ -1441,6 +1682,9 @@ def admin_analytics():
             me_q = me_q.filter(ModerationEvent.occurred_at <= to_dt)
         period_bans = me_q.filter(ModerationEvent.event_type == "ban").count()
         period_unbans = me_q.filter(ModerationEvent.event_type == "unban").count()
+        period_kicks = me_q.filter(ModerationEvent.event_type == "kick").count()
+        period_timeouts = me_q.filter(ModerationEvent.event_type == "timeout").count()
+        period_message_deletes = me_q.filter(ModerationEvent.event_type == "message_delete").count()
 
         # ── Forum Posts (from forum_posts) ─────────────────────────────────────
         fp_q = db_session.query(ForumPost)
@@ -1465,6 +1709,55 @@ def admin_analytics():
             .order_by(func.count(ForumPost.id).desc())
             .all()
         )
+
+        # Connect by Major / forums per college — map each post's author to their
+        # college role (via UserRole), bucket unmatched authors as "Unknown".
+        major_posts = fp_q.filter(ForumPost.parent_channel_name.ilike("%major%")).all()
+        major_discord_ids = {p.discord_user_id for p in major_posts if p.discord_user_id}
+        college_by_discord_id: dict[str, str] = {}
+        if major_discord_ids:
+            role_rows = (
+                db_session.query(User.discord_user_id, UserRole.role_name)
+                .join(UserRole, UserRole.user_id == User.id)
+                .filter(
+                    User.discord_user_id.in_(major_discord_ids),
+                    UserRole.role_name.in_(_COLLEGE_ROLES),
+                )
+                .all()
+            )
+            for did, role_name in role_rows:
+                college_by_discord_id.setdefault(did, role_name)
+
+        college_counts: dict[str, int] = {}
+        for p in major_posts:
+            college = (
+                college_by_discord_id.get(p.discord_user_id, "Unknown")
+                if p.discord_user_id
+                else "Unknown"
+            )
+            college_counts[college] = college_counts.get(college, 0) + 1
+        activity_by_major = (
+            sorted(
+                [
+                    {"college": c, "count": n}
+                    for c, n in college_counts.items()
+                    if c != "Unknown"
+                ],
+                key=lambda x: -x["count"],
+            )
+            or None
+        )
+
+        # Connect by Major / messages sent + top 5 threads — reuse ch_rows
+        # (pre-truncation) so we aren't limited by the top-25-overall-channels
+        # cutoff applied to `channels`.
+        major_threads = [
+            {"channel_id": cid, "channel_name": cname or cid, "messages": cnt}
+            for cid, cname, parent_cid, parent_cname, cnt in ch_rows
+            if parent_cname and "major" in parent_cname.lower()
+        ]
+        major_messages_sent = sum(t["messages"] for t in major_threads) or None
+        top_major_threads = sorted(major_threads, key=lambda x: -x["messages"])[:5] or None
 
         # ── International / Country of Origin ─────────────────────────────────
         country_q = (
@@ -1535,6 +1828,7 @@ def admin_analytics():
         total_posts = len(all_posts)
         bot_answered = sum(1 for p in all_posts if p.status == "satisfied")
         staff_answered = sum(1 for p in all_posts if p.status == "needs_help")
+        staff_confirmed = sum(1 for p in all_posts if p.status == "staff_confirmed")
 
         tag_counts: dict[str, int] = {}
         for post in all_posts:
@@ -1550,6 +1844,81 @@ def admin_analytics():
             key=lambda x: -x["count"],
         )
 
+        # Actual message count within Ask ASU Staff threads during the period
+        # (thread_id is unfiltered — a thread may predate the period but still
+        # receive messages within it).
+        qna_thread_ids = [tid for (tid,) in db_session.query(QnaPost.thread_id).all()]
+        askasu_msg_q = db_session.query(MessageLog).filter(
+            MessageLog.channel_id.in_(qna_thread_ids)
+        )
+        if from_dt:
+            askasu_msg_q = askasu_msg_q.filter(MessageLog.sent_at >= from_dt)
+        if to_dt:
+            askasu_msg_q = askasu_msg_q.filter(MessageLog.sent_at <= to_dt)
+        askasu_messages_sent = askasu_msg_q.count() if qna_thread_ids else 0
+
+        # ── Programs / Volunteers ───────────────────────────────────────────────
+        vol_q = db_session.query(VolunteerContribution)
+        if from_dt:
+            vol_q = vol_q.filter(VolunteerContribution.responded_at >= from_dt)
+        if to_dt:
+            vol_q = vol_q.filter(VolunteerContribution.responded_at <= to_dt)
+        vol_total = vol_q.count()
+        active_volunteers = (
+            vol_q.with_entities(
+                func.count(VolunteerContribution.responder_discord_id.distinct())
+            ).scalar()
+            or 0
+        )
+        vol_dist_rows = (
+            vol_q.with_entities(
+                VolunteerContribution.responder_discord_id,
+                VolunteerContribution.responder_username,
+                func.count(VolunteerContribution.id).label("cnt"),
+            )
+            .group_by(
+                VolunteerContribution.responder_discord_id,
+                VolunteerContribution.responder_username,
+            )
+            .order_by(func.count(VolunteerContribution.id).desc())
+            .limit(15)
+            .all()
+        )
+        volunteer_distribution = [
+            {"discord_id": did, "username": uname or did, "messages": cnt}
+            for did, uname, cnt in vol_dist_rows
+        ]
+        avg_messages_per_volunteer = (
+            round(vol_total / active_volunteers, 1) if active_volunteers else None
+        )
+
+        # Voice hours reflect CURRENT Volunteer role holders only (live lookup via
+        # the bot's guild cache) — same accepted tradeoff as moderation.banned_users
+        # above, which also reflects current state rather than historical membership.
+        try:
+            from asu_discord.api import get_role_member_ids
+
+            volunteer_ids = get_role_member_ids(VOLUNTEER_ROLE_ID)
+        except Exception:
+            volunteer_ids = None
+
+        vol_voice_hours = None
+        if volunteer_ids:
+            vvs_q = db_session.query(VoiceSession).filter(
+                VoiceSession.left_at.isnot(None),
+                VoiceSession.discord_user_id.in_(volunteer_ids),
+            )
+            if from_dt:
+                vvs_q = vvs_q.filter(VoiceSession.left_at > from_dt)
+            if to_dt:
+                vvs_q = vvs_q.filter(VoiceSession.joined_at < to_dt)
+            vol_voice_seconds = 0
+            for s in vvs_q.all():
+                clip_start = max(s.joined_at, from_dt) if from_dt else s.joined_at
+                clip_end = min(s.left_at, to_dt) if to_dt else s.left_at
+                vol_voice_seconds += int(max(0, (clip_end - clip_start).total_seconds()))
+            vol_voice_hours = round(vol_voice_seconds / 3600, 1) if vol_voice_seconds else None
+
     return jsonify(
         {
             "period": {
@@ -1561,6 +1930,7 @@ def admin_analytics():
                 "unique_talkers": unique_talkers,
                 "voice_hours": voice_hours,
                 "unique_speakers": unique_speakers,
+                "incomplete_voice_sessions": incomplete_voice_sessions or None,
             },
             "growth_funnel": {
                 "onboarding": {
@@ -1571,11 +1941,11 @@ def admin_analytics():
                 },
                 "retention": {
                     "verified_retention_rate": retention_rate,
-                    "total_verified": total_verified_alltime,
+                    "total_verified": total_verified,
                     "currently_in_server": in_server_count,
                     "verified_vs_unverified": {
-                        "verified": total_verified_alltime,
-                        "unverified": total_unverified_alltime,
+                        "verified": period_verified,
+                        "unverified": period_unverified,
                     },
                 },
             },
@@ -1583,6 +1953,13 @@ def admin_analytics():
                 {
                     **ch,
                     "voice_seconds": voice_by_channel.get(ch["channel_id"], {}).get("voice_seconds"),
+                    "threads": [
+                        {
+                            **t,
+                            "voice_seconds": voice_by_channel.get(t["channel_id"], {}).get("voice_seconds"),
+                        }
+                        for t in ch.get("threads", [])
+                    ],
                 }
                 for ch in channels
             ],
@@ -1617,6 +1994,9 @@ def admin_analytics():
                 "banned_users": banned_count,
                 "period_bans": period_bans,
                 "period_unbans": period_unbans,
+                "period_kicks": period_kicks,
+                "period_timeouts": period_timeouts,
+                "period_message_deletes": period_message_deletes,
                 "support_tickets": None,
                 "inappropriate_speech_incidents": None,
                 "harassment_incidents": None,
@@ -1630,25 +2010,28 @@ def admin_analytics():
                     "contribution_distribution": guide_distribution,
                 },
                 "volunteers": {
-                    "active_volunteers": None,
-                    "messages_sent": None,
-                    "avg_messages_per_volunteer": None,
-                    "voice_hours": None,
-                    "contribution_distribution": None,
+                    "active_volunteers": active_volunteers or None,
+                    "messages_sent": vol_total or None,
+                    "avg_messages_per_volunteer": avg_messages_per_volunteer,
+                    "voice_hours": vol_voice_hours,
+                    "contribution_distribution": volunteer_distribution or None,
                 },
             },
             "forums": {
                 "ask_asu_staff": {
-                    "total_questions_answered": bot_answered + staff_answered,
-                    "total_messages": total_posts,
+                    "total_questions_answered": bot_answered + staff_answered + staff_confirmed,
+                    "posts_created": total_posts,
+                    "total_messages": askasu_messages_sent,
                     "bot_answered": bot_answered,
                     "staff_answered": staff_answered,
+                    "staff_confirmed": staff_confirmed,
                     "by_tag": by_tag,
                 },
                 "connect_by_major": {
                     "posts_created": connect_posts or None,
-                    "messages_sent": None,
-                    "activity_by_major": None,
+                    "messages_sent": major_messages_sent,
+                    "activity_by_major": activity_by_major,
+                    "top_threads": top_major_threads,
                 },
                 "roommate_finder": {
                     "posts_by_campus": roommate_posts or None,
@@ -1667,6 +2050,93 @@ def admin_analytics():
                 "session_duration": None,
             },
         }
+    )
+
+
+@admin_bp.route("/api/admin/analytics/moderation/message-deletes")
+@require_full_admin
+def admin_analytics_message_deletes():
+    """Full detail for message_delete moderation events in the period, for the popup."""
+    import json as _json
+
+    from_dt = _parse_az_date(request.args.get("from_date"))
+    to_dt = _parse_az_date(request.args.get("to_date"), end_of_day=True)
+
+    with session_scope() as db_session:
+        q = (
+            db_session.query(ModerationEvent, MessageLog.channel_name)
+            .outerjoin(MessageLog, ModerationEvent.message_id == MessageLog.message_id)
+            .filter(ModerationEvent.event_type == "message_delete")
+        )
+        if from_dt:
+            q = q.filter(ModerationEvent.occurred_at >= from_dt)
+        if to_dt:
+            q = q.filter(ModerationEvent.occurred_at <= to_dt)
+        rows = q.order_by(ModerationEvent.occurred_at.desc()).limit(500).all()
+
+        results = []
+        for event, channel_name in rows:
+            content = None
+            if event.extra_data:
+                try:
+                    content = _json.loads(event.extra_data).get("content")
+                except Exception:
+                    content = None
+            results.append({
+                "message_id": event.message_id,
+                "channel_id": event.channel_id,
+                "channel_name": channel_name,
+                "content": content,
+                "discord_username": event.discord_username,
+                "moderator_username": event.moderator_username,
+                "occurred_at": event.occurred_at.replace(tzinfo=timezone.utc)
+                .astimezone(AZ_TZ)
+                .isoformat(),
+            })
+
+    return jsonify({"rows": results, "total": len(results)})
+
+
+@admin_bp.route("/api/admin/analytics/gold-guides/export/csv")
+@require_admin
+def admin_analytics_gold_guides_export_csv():
+    """Stream all Gold Guide contributions (unlimited, not just top 15) as a CSV download."""
+    from_dt = _parse_az_date(request.args.get("from_date"))
+    to_dt = _parse_az_date(request.args.get("to_date"), end_of_day=True)
+
+    with session_scope() as db_session:
+        q = db_session.query(GoldGuideContribution)
+        if from_dt:
+            q = q.filter(GoldGuideContribution.responded_at >= from_dt)
+        if to_dt:
+            q = q.filter(GoldGuideContribution.responded_at <= to_dt)
+        rows = (
+            q.with_entities(
+                GoldGuideContribution.responder_discord_id,
+                GoldGuideContribution.responder_username,
+                func.count(GoldGuideContribution.id).label("cnt"),
+            )
+            .group_by(
+                GoldGuideContribution.responder_discord_id,
+                GoldGuideContribution.responder_username,
+            )
+            .order_by(func.count(GoldGuideContribution.id).desc())
+            .all()
+        )
+
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["discord_username", "discord_user_id", "messages_in_period"])
+        for did, uname, cnt in rows:
+            writer.writerow([uname or did, did, cnt])
+
+    from_label = from_dt.strftime("%Y-%m-%d") if from_dt else "start"
+    to_label = to_dt.strftime("%Y-%m-%d") if to_dt else "end"
+    filename = f"gold_guide_contributions_{from_label}_to_{to_label}.csv"
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -1812,6 +2282,409 @@ def admin_salesforce_status():
     )
 
 
+# ─── Ticketing ────────────────────────────────────────────────────────────────
+
+_DEFAULT_TICKET_SETTINGS = {
+    "panel_channel_id": None,
+    "panel_message_id": None,
+    "transcript_channel_id": None,
+    "embed_title": "Open a Ticket",
+    "embed_description": "Select a category below to open a ticket.",
+    "embed_color": "#8c1d40",
+    "embed_image_url": None,
+    "embed_thumbnail_url": None,
+    "embed_footer": None,
+    "embed_footer_icon_url": None,
+    "embed_url": None,
+    "embed_author_name": None,
+    "embed_author_url": None,
+    "embed_author_icon_url": None,
+    "embed_timestamp": False,
+    "embed_fields": [],
+    "select_placeholder": "Select a ticket category…",
+    "staff_role_ids": [],
+    "categories": [],
+}
+
+
+def _serialize_ticket_settings(settings: TicketSettings, categories: list[TicketCategory]) -> dict:
+    return {
+        "guild_id": settings.guild_id,
+        "panel_channel_id": settings.panel_channel_id,
+        "panel_message_id": settings.panel_message_id,
+        "transcript_channel_id": settings.transcript_channel_id,
+        "embed_title": settings.embed_title,
+        "embed_description": settings.embed_description,
+        "embed_color": settings.embed_color,
+        "embed_image_url": settings.embed_image_url,
+        "embed_thumbnail_url": settings.embed_thumbnail_url,
+        "embed_footer": settings.embed_footer,
+        "embed_footer_icon_url": settings.embed_footer_icon_url,
+        "embed_url": settings.embed_url,
+        "embed_author_name": settings.embed_author_name,
+        "embed_author_url": settings.embed_author_url,
+        "embed_author_icon_url": settings.embed_author_icon_url,
+        "embed_timestamp": bool(settings.embed_timestamp),
+        "embed_fields": json.loads(settings.embed_fields or "[]"),
+        "select_placeholder": settings.select_placeholder,
+        "staff_role_ids": json.loads(settings.staff_role_ids or "[]"),
+        "categories": [
+            {
+                "id": c.id,
+                "label": c.label,
+                "description": c.description,
+                "emoji": c.emoji,
+                "parent_category_id": c.parent_category_id,
+                "extra_role_ids": json.loads(c.extra_role_ids or "[]"),
+            }
+            for c in categories
+        ],
+    }
+
+
+def _current_guild_id() -> str | None:
+    from utils.settings import DISCORD_CONFIG
+    return str(DISCORD_CONFIG.guild_id) if DISCORD_CONFIG else None
+
+
+@admin_bp.route("/api/admin/tickets/settings", methods=["GET"])
+@require_full_admin
+def admin_tickets_settings():
+    guild_id = _current_guild_id()
+    if guild_id is None:
+        return jsonify({"error": "Discord is not configured"}), 503
+
+    with session_scope() as db_session:
+        settings = (
+            db_session.query(TicketSettings)
+            .filter(TicketSettings.guild_id == guild_id)
+            .one_or_none()
+        )
+        if settings is None:
+            return jsonify({"guild_id": guild_id, **_DEFAULT_TICKET_SETTINGS})
+
+        categories = (
+            db_session.query(TicketCategory)
+            .filter(TicketCategory.settings_id == settings.id)
+            .order_by(TicketCategory.position.asc())
+            .all()
+        )
+        return jsonify(_serialize_ticket_settings(settings, categories))
+
+
+@admin_bp.route("/api/admin/tickets/settings", methods=["PUT"])
+@require_full_admin
+def admin_update_tickets_settings():
+    guild_id = _current_guild_id()
+    if guild_id is None:
+        return jsonify({"error": "Discord is not configured"}), 503
+
+    data = request.get_json(silent=True) or {}
+
+    with session_scope() as db_session:
+        settings = (
+            db_session.query(TicketSettings)
+            .filter(TicketSettings.guild_id == guild_id)
+            .one_or_none()
+        )
+        if settings is None:
+            settings = TicketSettings(guild_id=guild_id)
+            db_session.add(settings)
+            db_session.flush()
+
+        for field in (
+            "panel_channel_id",
+            "transcript_channel_id",
+            "embed_title",
+            "embed_description",
+            "embed_color",
+            "embed_image_url",
+            "embed_thumbnail_url",
+            "embed_footer",
+            "embed_footer_icon_url",
+            "embed_url",
+            "embed_author_name",
+            "embed_author_url",
+            "embed_author_icon_url",
+            "select_placeholder",
+        ):
+            if field in data:
+                setattr(settings, field, data[field] or None)
+
+        if "embed_timestamp" in data:
+            settings.embed_timestamp = bool(data["embed_timestamp"])
+
+        if "embed_fields" in data:
+            fields = []
+            for f in data["embed_fields"] or []:
+                name = (f.get("name") or "").strip()[:256]
+                value = (f.get("value") or "").strip()[:1024]
+                if name and value:
+                    fields.append({"name": name, "value": value, "inline": bool(f.get("inline"))})
+            settings.embed_fields = json.dumps(fields)
+
+        if "staff_role_ids" in data:
+            settings.staff_role_ids = json.dumps([str(r) for r in (data["staff_role_ids"] or [])])
+
+        if "categories" in data:
+            existing_by_id = {
+                c.id: c
+                for c in db_session.query(TicketCategory)
+                .filter(TicketCategory.settings_id == settings.id)
+                .all()
+            }
+            keep_ids = set()
+            for i, cat in enumerate(data["categories"] or []):
+                cat_id = cat.get("id")
+                if cat_id and cat_id in existing_by_id:
+                    row = existing_by_id[cat_id]
+                    keep_ids.add(cat_id)
+                else:
+                    row = TicketCategory(settings_id=settings.id, guild_id=guild_id)
+                    db_session.add(row)
+
+                row.label = (cat.get("label") or "").strip()[:100] or f"Category {i + 1}"
+                row.description = cat.get("description") or None
+                row.emoji = cat.get("emoji") or None
+                row.extra_role_ids = json.dumps([str(r) for r in (cat.get("extra_role_ids") or [])])
+                row.position = i
+
+            for cat_id, row in existing_by_id.items():
+                if cat_id not in keep_ids:
+                    db_session.delete(row)
+
+        db_session.flush()
+        categories = (
+            db_session.query(TicketCategory)
+            .filter(TicketCategory.settings_id == settings.id)
+            .order_by(TicketCategory.position.asc())
+            .all()
+        )
+        result = _serialize_ticket_settings(settings, categories)
+
+    return jsonify(result)
+
+
+@admin_bp.route("/api/admin/tickets/settings/publish", methods=["POST"])
+@require_full_admin
+def admin_publish_ticket_panel():
+    """Post or update the ticket panel message on the running bot from current settings."""
+    import asyncio
+
+    from asu_discord.cogs.ticketing import TicketingCog
+    from asu_discord.shared import get_running_bot, get_running_loop
+
+    bot = get_running_bot()
+    loop = get_running_loop()
+    if bot is None or loop is None or loop.is_closed():
+        return jsonify({"error": "Discord bot is not running"}), 503
+
+    cog = bot.get_cog("TicketingCog")
+    if not isinstance(cog, TicketingCog):
+        return jsonify({"error": "TicketingCog not loaded"}), 503
+
+    future = asyncio.run_coroutine_threadsafe(cog.publish_panel(), loop)
+    try:
+        result = future.result(timeout=15)
+    except asyncio.TimeoutError:
+        future.cancel()
+        return jsonify({"error": "Timed out publishing ticket panel"}), 504
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({"status": "published", **result})
+
+
+@admin_bp.route("/api/admin/tickets")
+@require_admin
+def admin_tickets_list():
+    page = max(1, request.args.get("page", 1, type=int))
+    per_page = min(100, max(1, request.args.get("per_page", 25, type=int)))
+    offset = (page - 1) * per_page
+    status = request.args.get("status")
+
+    with session_scope() as db_session:
+        q = db_session.query(Ticket)
+        if status:
+            q = q.filter(Ticket.status == status)
+        total = q.count()
+        rows = q.order_by(Ticket.created_at.desc()).offset(offset).limit(per_page).all()
+
+        category_ids = {r.category_id for r in rows if r.category_id}
+        categories_map = {}
+        if category_ids:
+            categories_map = {
+                c.id: c.label
+                for c in db_session.query(TicketCategory)
+                .filter(TicketCategory.id.in_(category_ids))
+                .all()
+            }
+
+        result = [
+            {
+                "id": t.id,
+                "channel_id": t.channel_id,
+                "category": categories_map.get(t.category_id),
+                "opener_discord_id": t.opener_discord_id,
+                "opener_username": t.opener_username,
+                "subject": t.subject,
+                "status": t.status,
+                "closed_by": t.closed_by,
+                "closed_at": t.closed_at.isoformat() if t.closed_at else None,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+                "transcript_slug": t.transcript_slug if t.transcript_captured_at else None,
+            }
+            for t in rows
+        ]
+
+    return jsonify(
+        {
+            "tickets": result,
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "pages": max(1, (total + per_page - 1) // per_page),
+        }
+    )
+
+
+@admin_bp.route("/api/admin/tickets/transcript/<slug>")
+@require_admin
+def admin_ticket_transcript(slug):
+    with session_scope() as db_session:
+        ticket = (
+            db_session.query(Ticket).filter(Ticket.transcript_slug == slug).one_or_none()
+        )
+        if ticket is None or not ticket.transcript_captured_at:
+            return jsonify({"error": "Transcript not found"}), 404
+
+        category = (
+            db_session.query(TicketCategory).filter(TicketCategory.id == ticket.category_id).one_or_none()
+            if ticket.category_id
+            else None
+        )
+
+        messages = (
+            db_session.query(TicketMessage)
+            .filter(TicketMessage.ticket_id == ticket.id)
+            .order_by(TicketMessage.created_at.asc(), TicketMessage.id.asc())
+            .all()
+        )
+
+        return jsonify(
+            {
+                "id": ticket.id,
+                "subject": ticket.subject,
+                "description": ticket.description,
+                "category": category.label if category else None,
+                "opener_discord_id": ticket.opener_discord_id,
+                "opener_username": ticket.opener_username,
+                "status": ticket.status,
+                "closed_by": ticket.closed_by,
+                "closed_at": ticket.closed_at.isoformat() if ticket.closed_at else None,
+                "created_at": ticket.created_at.isoformat() if ticket.created_at else None,
+                "transcript_captured_at": ticket.transcript_captured_at.isoformat(),
+                "messages": [
+                    {
+                        "id": m.message_id,
+                        "author_id": m.author_id,
+                        "author_username": m.author_username,
+                        "author_display_name": m.author_display_name,
+                        "author_avatar_url": m.author_avatar_url,
+                        "content": m.content,
+                        "created_at": m.created_at.isoformat(),
+                        "attachments": json.loads(m.attachments or "[]"),
+                        "embeds": m.embeds,
+                    }
+                    for m in messages
+                ],
+            }
+        )
+
+
+# ─── Purge Unregistered Roles ─────────────────────────────────────────────────
+
+_purge_unregistered_lock = threading.Lock()
+_purge_unregistered_running = False
+_purge_unregistered_last: dict = {
+    "started_at": None,
+    "finished_at": None,
+    "stripped": 0,
+    "errors": 0,
+    "error": None,
+}
+
+
+def _run_purge_unregistered() -> None:
+    """Background thread: strip managed roles from guild members not in the DB."""
+    global _purge_unregistered_running
+
+    try:
+        from asu_discord.shared import get_running_bot, get_running_loop
+
+        bot = get_running_bot()
+        loop = get_running_loop()
+        if bot is None or loop is None or loop.is_closed():
+            raise RuntimeError("Discord bot is not running")
+
+        cog = bot.get_cog("VerificationCog")
+        if cog is None:
+            raise RuntimeError("VerificationCog is not loaded")
+
+        with session_scope() as db:
+            registered_ids = {
+                row[0]
+                for row in db.query(User.discord_user_id)
+                .filter(User.discord_user_id.isnot(None))
+                .all()
+            }
+
+        future = asyncio.run_coroutine_threadsafe(
+            cog.strip_unregistered_members(registered_ids),
+            loop,
+        )
+        stripped, errors = future.result(timeout=300)
+        _purge_unregistered_last["stripped"] = stripped
+        _purge_unregistered_last["errors"] = errors
+        _purge_unregistered_last["finished_at"] = datetime.utcnow().isoformat()
+    except Exception as exc:
+        _purge_unregistered_last["error"] = str(exc)
+        _purge_unregistered_last["finished_at"] = datetime.utcnow().isoformat()
+        logger.exception("Purge unregistered roles failed")
+    finally:
+        _purge_unregistered_running = False
+
+
+@admin_bp.route("/api/admin/purge-unregistered-roles", methods=["POST"])
+@require_full_admin
+def admin_purge_unregistered_roles():
+    """Trigger background removal of verified and managed roles from non-registered guild members."""
+    global _purge_unregistered_running
+
+    with _purge_unregistered_lock:
+        if _purge_unregistered_running:
+            return jsonify({"status": "already_running", "last": _purge_unregistered_last})
+        _purge_unregistered_running = True
+        _purge_unregistered_last["started_at"] = datetime.utcnow().isoformat()
+        _purge_unregistered_last["finished_at"] = None
+        _purge_unregistered_last["error"] = None
+        _purge_unregistered_last["errors"] = 0
+        _purge_unregistered_last["stripped"] = 0
+
+    threading.Thread(target=_run_purge_unregistered, daemon=True).start()
+    return jsonify({"status": "started"})
+
+
+@admin_bp.route("/api/admin/purge-unregistered-roles/status", methods=["GET"])
+@require_full_admin
+def admin_purge_unregistered_status():
+    """Return current status of the purge-unregistered-roles operation."""
+    return jsonify({
+        "running": _purge_unregistered_running,
+        "last": _purge_unregistered_last,
+    })
+
+
 # ─── Role Exceptions ──────────────────────────────────────────────────────────
 
 def _serialize_exception(exc: UserRoleException) -> dict:
@@ -1855,7 +2728,8 @@ def admin_exceptions_for_user(discord_user_id: str):
         db_user = (
             db_session.query(User)
             .filter(User.discord_user_id == discord_user_id)
-            .one_or_none()
+            .order_by(User.id.desc())
+            .first()
         )
         db_roles = (
             db_session.query(UserRole)
@@ -1982,7 +2856,210 @@ def admin_exceptions_delete(exception_id: int):
     return jsonify({"status": "deleted", "id": exception_id})
 
 
+@admin_bp.route("/api/admin/exceptions/campus")
+@require_admin
+def admin_campus_exceptions():
+    """All campus role exceptions — consolidated view for reviewing /changecampus requests."""
+    campus_roles = MEMBER_ROLE_CATEGORIES["Campus"]
+    with session_scope() as db_session:
+        exceptions = (
+            db_session.query(UserRoleException)
+            .filter(UserRoleException.role_name.in_(campus_roles))
+            .order_by(UserRoleException.created_at.desc())
+            .all()
+        )
+        discord_ids = list({e.discord_user_id for e in exceptions})
+        users_map: dict[str, User] = {}
+        if discord_ids:
+            users_map = {
+                u.discord_user_id: u
+                for u in db_session.query(User)
+                .filter(User.discord_user_id.in_(discord_ids))
+                .all()
+            }
+
+    result = []
+    for exc in exceptions:
+        u = users_map.get(exc.discord_user_id)
+        result.append({
+            **_serialize_exception(exc),
+            "asurite_id": u.asurite_id if u else None,
+            "discord_username": u.discord_username if u else None,
+        })
+    return jsonify(result)
+
+
 # ── Server Events ─────────────────────────────────────────────────────────────
+
+@admin_bp.route("/api/admin/events/voice-channels")
+@require_admin
+def voice_channels():
+    with session_scope() as db:
+        rows = (
+            db.query(VoiceSession.channel_name)
+            .distinct()
+            .order_by(VoiceSession.channel_name)
+            .all()
+        )
+    return jsonify([r[0] for r in rows if r[0]])
+
+
+@admin_bp.route("/api/admin/events/voice-search", methods=["POST"])
+@require_admin
+def voice_search():
+    data = request.get_json(force=True)
+    start_str = data.get("start_time")
+    end_str = data.get("end_time")
+    channel = data.get("channel_name") or None
+
+    if not start_str or not end_str:
+        return jsonify({"error": "start_time and end_time are required"}), 400
+
+    start_utc = (
+        datetime.fromisoformat(start_str)
+        .replace(tzinfo=AZ_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+    end_utc = (
+        datetime.fromisoformat(end_str)
+        .replace(tzinfo=AZ_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+
+    with session_scope() as db:
+        q = db.query(VoiceSession).filter(
+            VoiceSession.joined_at < end_utc,
+            or_(VoiceSession.left_at.is_(None), VoiceSession.left_at >= start_utc),
+        )
+        if channel:
+            q = q.filter(VoiceSession.channel_name == channel)
+        sessions = q.order_by(VoiceSession.joined_at).all()
+
+        user_ids = list({s.discord_user_id for s in sessions})
+        users_map: dict[str, User] = {}
+        if user_ids:
+            users_map = {
+                u.discord_user_id: u
+                for u in db.query(User).filter(User.discord_user_id.in_(user_ids)).all()
+            }
+
+        # One row per unique user: earliest joined_at, latest left_at
+        seen: dict[str, dict] = {}
+        for s in sessions:
+            uid = s.discord_user_id
+            if uid not in seen:
+                seen[uid] = {
+                    "discord_user_id": uid,
+                    "discord_username": s.discord_username,
+                    "channel_name": s.channel_name,
+                    "joined_at": s.joined_at,
+                    "left_at": s.left_at,
+                }
+            else:
+                if s.left_at is None:
+                    seen[uid]["left_at"] = None
+                elif seen[uid]["left_at"] is not None and s.left_at > seen[uid]["left_at"]:
+                    seen[uid]["left_at"] = s.left_at
+
+        def _to_az(dt):
+            if dt is None:
+                return None
+            return dt.replace(tzinfo=timezone.utc).astimezone(AZ_TZ).isoformat()
+
+        result = []
+        for uid, info in seen.items():
+            u = users_map.get(uid)
+            result.append({
+                "discord_user_id": uid,
+                "discord_username": info["discord_username"],
+                "email": u.email if u else None,
+                "asurite_id": u.asurite_id if u else None,
+                "channel_name": info["channel_name"],
+                "joined_at": _to_az(info["joined_at"]),
+                "left_at": _to_az(info["left_at"]),
+            })
+
+    return jsonify(result)
+
+
+@admin_bp.route("/api/admin/events/voice-save", methods=["POST"])
+@require_admin
+def voice_save():
+    data = request.get_json(force=True)
+    name = (data.get("name") or "").strip()
+    start_str = data.get("start_time")
+    end_str = data.get("end_time")
+    channel = data.get("channel_name") or None
+
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+    if not start_str or not end_str:
+        return jsonify({"error": "start_time and end_time are required"}), 400
+
+    start_utc = (
+        datetime.fromisoformat(start_str)
+        .replace(tzinfo=AZ_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+    end_utc = (
+        datetime.fromisoformat(end_str)
+        .replace(tzinfo=AZ_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+
+    with session_scope() as db:
+        sample = db.query(VoiceSession).first()
+        guild_id = sample.guild_id if sample else "0"
+
+        channel_id = None
+        if channel:
+            row = db.query(VoiceSession.channel_id).filter(VoiceSession.channel_name == channel).first()
+            if row:
+                channel_id = row[0]
+
+        q = db.query(VoiceSession).filter(
+            VoiceSession.joined_at < end_utc,
+            or_(VoiceSession.left_at.is_(None), VoiceSession.left_at >= start_utc),
+        )
+        if channel:
+            q = q.filter(VoiceSession.channel_name == channel)
+        sessions = q.order_by(VoiceSession.joined_at).all()
+
+        first_session: dict[str, VoiceSession] = {}
+        for s in sessions:
+            if s.discord_user_id not in first_session:
+                first_session[s.discord_user_id] = s
+
+        synthetic_id = f"manual_voice_{int(datetime.utcnow().timestamp() * 1000)}"
+        event = ServerEvent(
+            discord_event_id=synthetic_id,
+            guild_id=guild_id,
+            name=name,
+            start_time=start_utc,
+            end_time=end_utc,
+            status="completed",
+            entity_type="voice",
+            channel_id=channel_id,
+        )
+        db.add(event)
+        db.flush()
+
+        for s in first_session.values():
+            db.add(EventParticipant(
+                event_id=event.id,
+                discord_user_id=s.discord_user_id,
+                action="joined",
+                timestamp=s.joined_at,
+            ))
+
+        event_id = event.id
+
+    return jsonify({"id": event_id})
+
 
 @admin_bp.route("/api/admin/events")
 @require_admin
@@ -2089,7 +3166,9 @@ def admin_event_detail(event_id: int):
 @admin_bp.route("/admin")
 @admin_bp.route("/admin/<path:path>")
 def admin_spa(path=""):
-    if not (_auth_complete() and (session.get("is_admin") or session.get("is_officer"))):
+    if not CONFIG.DEV_MODE and not (
+        _auth_complete() and (session.get("is_admin") or session.get("is_officer"))
+    ):
         return redirect("/")
 
     react_index = os.path.join(REACT_BUILD_DIR, "index.html")

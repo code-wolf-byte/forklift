@@ -1,15 +1,16 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { getUrlParam, replaceUrlParams } from "@/utils/adminUrl";
+import { todayISO, monthStartISO } from "@/utils/adminDates";
 
-// Dates are interpreted in Arizona time by the backend (_parse_az_date), so the
-// presets must use the AZ calendar day, not the UTC one. en-CA formats as YYYY-MM-DD.
-const azDateISO = () =>
-  new Date().toLocaleDateString("en-CA", { timeZone: "America/Phoenix" });
-const todayISO = () => azDateISO();
-const monthStartISO = () => `${azDateISO().slice(0, 8)}01`;
+// ── Looker Studio deep link ────────────────────────────────────────────────────────────────────
+const LOOKER_STUDIO_REPORT_ID = "2018cce5-1438-48b6-8f39-568376eed976";
+const LOOKER_STUDIO_PAGE_ID = "p_7ydex1a7uc";
+const LOOKER_STUDIO_URL = `https://datastudio.google.com/u/1/reporting/${LOOKER_STUDIO_REPORT_ID}/page/${LOOKER_STUDIO_PAGE_ID}`;
 
 function NotTracked() {
   return <span className="text-xs text-muted-foreground italic">not tracked</span>;
@@ -27,10 +28,13 @@ function Tooltip({ text }) {
   );
 }
 
-function StatCard({ label, value, icon, color = "#8c1d40", note, tooltip }) {
+function StatCard({ label, value, icon, color = "#8c1d40", note, tooltip, onClick }) {
   const isNull = value === null || value === undefined;
   return (
-    <Card className="relative overflow-hidden">
+    <Card
+      className={`relative overflow-hidden ${onClick ? "cursor-pointer hover:shadow-md transition-shadow" : ""}`}
+      onClick={onClick}
+    >
       <div className="absolute top-0 left-0 w-1 h-full rounded-l-lg" style={{ background: color }} />
       <CardContent className="p-3 pl-5">
         <div className="flex items-center gap-2 mb-1">
@@ -62,9 +66,9 @@ function StatCard({ label, value, icon, color = "#8c1d40", note, tooltip }) {
   );
 }
 
-function SectionHeader({ title, icon, subtitle, tooltip }) {
-  return (
-    <div className="flex items-center gap-2.5 mb-3 mt-7 pb-2 border-b">
+function SectionHeader({ title, icon, subtitle, tooltip, collapsible, collapsed, onToggle }) {
+  const content = (
+    <>
       {icon && (
         <div
           className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
@@ -73,14 +77,37 @@ function SectionHeader({ title, icon, subtitle, tooltip }) {
           <i className={`fas ${icon} fa-sm`} />
         </div>
       )}
-      <div>
+      <div className="min-w-0">
         <h3 className="text-base font-bold mb-0 flex items-center">
           {title}
           {tooltip && <Tooltip text={tooltip} />}
         </h3>
         {subtitle && <p className="text-xs text-muted-foreground mb-0">{subtitle}</p>}
       </div>
-    </div>
+      {collapsible && (
+        <i
+          className={`fas fa-chevron-down fa-sm text-muted-foreground ml-auto shrink-0 transition-transform ${
+            collapsed ? "-rotate-90" : ""
+          }`}
+        />
+      )}
+    </>
+  );
+
+  if (collapsible) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-center gap-2.5 mb-3 mt-7 pb-2 border-b text-left cursor-pointer bg-transparent border-x-0 border-t-0 text-inherit"
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2.5 mb-3 mt-7 pb-2 border-b">{content}</div>
   );
 }
 
@@ -118,11 +145,32 @@ function ProgressBar({ name, count, total, color = "#8c1d40" }) {
 export default function Analytics() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
-  const [applied, setApplied] = useState({ from: "", to: "" });
+  const [fromDate, setFromDate] = useState(() => getUrlParam("from_date", ""));
+  const [toDate, setToDate] = useState(() => getUrlParam("to_date", ""));
+  const [applied, setApplied] = useState(() => ({
+    from: getUrlParam("from_date", ""),
+    to: getUrlParam("to_date", ""),
+  }));
+  const [liveStats, setLiveStats] = useState(null);
   const [sfStatus, setSfStatus] = useState(null);
   const [sfRefreshing, setSfRefreshing] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState({
+    core: true,
+    growth: true,
+    channels: true,
+    readership: true,
+    demographics: true,
+    moderation: true,
+    programs: true,
+    forums: true,
+    acquisition: true,
+  });
+  const [expandedChannels, setExpandedChannels] = useState(new Set());
+  const [goldGuideListCollapsed, setGoldGuideListCollapsed] = useState(true);
+  const [volunteerListCollapsed, setVolunteerListCollapsed] = useState(true);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteRows, setDeleteRows] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -142,6 +190,13 @@ export default function Analytics() {
       stale = true;
     };
   }, [applied]);
+
+  useEffect(() => {
+    fetch("/api/admin/live-member-counts")
+      .then((r) => r.json())
+      .then((d) => setLiveStats(d))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch("/api/admin/salesforce/status")
@@ -173,24 +228,57 @@ export default function Analytics() {
       .catch(() => setSfRefreshing(false));
   };
 
-  const handleApply = () => setApplied({ from: fromDate, to: toDate });
+  const toggleChannel = (channelId) => {
+    setExpandedChannels((prev) => {
+      const next = new Set(prev);
+      if (next.has(channelId)) next.delete(channelId);
+      else next.add(channelId);
+      return next;
+    });
+  };
+
+  const toggleSection = (key) => {
+    setCollapsedSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const openDeleteModal = () => {
+    setDeleteModalOpen(true);
+    setDeleteLoading(true);
+    const params = new URLSearchParams();
+    if (applied.from) params.set("from_date", applied.from);
+    if (applied.to) params.set("to_date", applied.to);
+    fetch(`/api/admin/analytics/moderation/message-deletes?${params}`)
+      .then((r) => r.json())
+      .then((d) => {
+        setDeleteRows(d.rows || []);
+        setDeleteLoading(false);
+      })
+      .catch(() => setDeleteLoading(false));
+  };
+
+  const handleApply = () => {
+    setApplied({ from: fromDate, to: toDate });
+    replaceUrlParams({ from_date: fromDate, to_date: toDate });
+  };
 
   const handlePreset = (preset) => {
     if (preset === "alltime") {
       setFromDate("");
       setToDate("");
       setApplied({ from: "", to: "" });
+      replaceUrlParams({ from_date: "", to_date: "" });
     } else if (preset === "month") {
-      const f = monthStartISO(),
-        t = todayISO();
+      const f = monthStartISO(), t = todayISO();
       setFromDate(f);
       setToDate(t);
       setApplied({ from: f, to: t });
+      replaceUrlParams({ from_date: f, to_date: t });
     } else if (preset === "today") {
       const t = todayISO();
       setFromDate(t);
       setToDate(t);
       setApplied({ from: t, to: t });
+      replaceUrlParams({ from_date: t, to_date: t });
     }
   };
 
@@ -218,9 +306,9 @@ export default function Analytics() {
   const askAsu = forums.ask_asu_staff || {};
   const moderation = d.moderation || {};
 
-  const totalVerified = retention.total_verified || 0;
-  const totalUnverified = (retention.verified_vs_unverified || {}).unverified || 0;
-  const totalAllTime = totalVerified + totalUnverified;
+  const splitVerified = onboarding.verified_users || 0;
+  const splitUnverified = onboarding.unverified_users || 0;
+  const splitTotal = onboarding.total_joins || 0;
 
   const collegeEntries = Object.entries(demo.college || {}).sort(([, a], [, b]) => b - a);
   const collegeTotal = collegeEntries.reduce((s, [, c]) => s + c, 0);
@@ -242,9 +330,27 @@ export default function Analytics() {
   return (
     <>
       <h2 className="text-2xl font-bold mb-1">Analytics</h2>
-      <p className="text-sm text-muted-foreground mb-5">
+      <p className="text-sm text-muted-foreground mb-4">
         Comprehensive server metrics across engagement, demographics, programs, and forums.
       </p>
+
+      {/* ── Live server membership ── */}
+      <div className="grid grid-cols-2 gap-3 mb-5">
+        <StatCard
+          label="Verified Members"
+          value={liveStats ? liveStats.verified : undefined}
+          icon="fa-user-check"
+          color="#10b981"
+          tooltip="Current number of verified members in the Discord server. Live from the bot cache — not affected by the date filter."
+        />
+        <StatCard
+          label="Unverified Members"
+          value={liveStats ? liveStats.unverified : undefined}
+          icon="fa-user-clock"
+          color="#f59e0b"
+          tooltip="Current number of members who have joined but not yet completed verification. Live — not affected by the date filter."
+        />
+      </div>
 
       {/* ── Date filter ── */}
       <Card className="mb-6">
@@ -351,36 +457,41 @@ export default function Analytics() {
         icon="fa-bolt"
         subtitle="High-level engagement signals for the selected period"
         tooltip="Top-line metrics showing how active the server is. All counts are filtered by the selected date range."
+        collapsible
+        collapsed={collapsedSections.core}
+        onToggle={() => toggleSection("core")}
       />
+      {!collapsedSections.core && (
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <StatCard
           label="Messages Sent"
           value={ca.messages_sent}
           icon="fa-comment"
-          tooltip="Total messages logged across all channels during the period. Populated by the message backfill and real-time listener."
+          tooltip="Total messages logged across all tracked channels during the period. Accuracy depends on the backfill being complete — gaps exist for channels or time ranges not yet backfilled."
         />
         <StatCard
           label="Unique Talkers"
           value={ca.unique_talkers}
           icon="fa-user"
           color="#3b82f6"
-          tooltip="Number of distinct members who sent at least one message during the period. A measure of how many people actively participated."
+          tooltip="Distinct members who sent at least one message in any tracked channel during the period. Subject to the same backfill coverage as Messages Sent — under-counts if backfill is incomplete."
         />
         <StatCard
           label="Voice Hours"
           value={ca.voice_hours != null ? `${ca.voice_hours}h` : null}
           icon="fa-microphone"
           color="#10b981"
-          tooltip="Total cumulative time members spent in voice channels during the period, summed across all sessions. Tracked per-session in voice_sessions."
+          tooltip="Total time members spent in voice channels, summed across all completed sessions (left_at is set). Sessions clipped to the selected period boundaries. Ongoing sessions with no left_at are excluded."
         />
         <StatCard
           label="Unique Speakers"
           value={ca.unique_speakers}
           icon="fa-headphones"
           color="#f59e0b"
-          tooltip="Number of distinct members who joined at least one voice channel during the period. Complements Voice Hours by showing breadth vs. depth."
+          tooltip="Distinct members who joined at least one voice channel during the period. Only counts members with at least one completed session — members currently in voice with no left_at are excluded."
         />
       </div>
+      )}
 
       {/* ════════════════════════════════════════════════════════════════════════
           Growth & Funnel
@@ -390,33 +501,41 @@ export default function Analytics() {
         icon="fa-filter"
         subtitle="Onboarding conversion and member retention"
         tooltip="Tracks how new members move through the join → verify pipeline and how well the server retains verified members over time."
+        collapsible
+        collapsed={collapsedSections.growth}
+        onToggle={() => toggleSection("growth")}
       />
+      {!collapsedSections.growth && (
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-6">
         {/* Onboarding */}
         <div>
-          <SubLabel tooltip="Counts for members who joined or verified during the selected period.">
+          <SubLabel tooltip="All counts are based on joined_at from the discord_members table — the date the member joined the server, not when they verified.">
             Onboarding
           </SubLabel>
+          <p className="text-[11px] text-amber-600 dark:text-amber-400 mb-2">
+            <i className="fas fa-exclamation-triangle mr-1" />
+            Join data is only recorded since May 2026 and is not historically accurate for earlier dates.
+          </p>
           <div className="grid grid-cols-2 gap-3">
             <StatCard
               label="Total Joins"
               value={onboarding.total_joins}
               icon="fa-sign-in-alt"
-              tooltip="Members whose joined_at timestamp falls within the selected period. Recorded when the bot detects a new guild member."
+              tooltip="Members whose joined_at falls within the period. Recorded by the on_member_join bot event. May under-count if the bot was offline during joins."
             />
             <StatCard
               label="Verified Users"
               value={onboarding.verified_users}
               icon="fa-user-check"
               color="#10b981"
-              tooltip="Members who completed both CAS (ASU login) and Discord linking during the period. Their verified_at timestamp is used for filtering."
+              tooltip="Of members who joined in the period, how many are currently verified. Filtered by joined_at — not verified_at — so a member who joined now but verified later would still count here once verified."
             />
             <StatCard
               label="Unverified Users"
               value={onboarding.unverified_users}
               icon="fa-user-clock"
               color="#f59e0b"
-              tooltip="Members who joined during the period but did not complete verification. Calculated as: joined in range AND verified = false."
+              tooltip="Of members who joined in the period, how many have not completed verification. Calculated as total joins minus verified users."
             />
             <StatCard
               label="Venue Users"
@@ -430,47 +549,39 @@ export default function Analytics() {
 
         {/* Retention */}
         <div>
-          <SubLabel tooltip="How well the server keeps members who were already verified before the period started.">
+          <SubLabel tooltip="Retention measures how well the server keeps verified members who were already present before the selected period.">
             Retention
           </SubLabel>
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            <StatCard
-              label="Retention Rate"
-              value={
-                retention.verified_retention_rate !== null &&
-                retention.verified_retention_rate !== undefined
-                  ? `${retention.verified_retention_rate}%`
-                  : null
-              }
-              icon="fa-chart-line"
-              color="#10b981"
-              note={applied.from ? periodLabel : "Select a date range"}
-              tooltip="% of verified members who were in the server at the start of the period and did not leave by the end. Formula: (verified_at_start − leaves) ÷ verified_at_start × 100. Requires a date range to calculate."
-            />
-            <StatCard
-              label="Currently in Server"
-              value={retention.currently_in_server}
-              icon="fa-users"
-              color="#3b82f6"
-              tooltip="All-time count of verified members whose left_at is null — i.e., still present in the server right now."
-            />
-          </div>
-          {totalAllTime > 0 && (
+          <StatCard
+            label="Retention Rate"
+            value={
+              retention.verified_retention_rate !== null &&
+              retention.verified_retention_rate !== undefined
+                ? `${retention.verified_retention_rate}%`
+                : null
+            }
+            icon="fa-chart-line"
+            color="#10b981"
+            note={applied.from ? periodLabel : "Select a date range"}
+            tooltip="% of verified members who were present at the start of the period and had not left by the end. Formula: (verified_at_start − leaves in period) ÷ verified_at_start × 100. A member counts as 'left' when the bot records an on_member_remove event. Requires a date range to calculate."
+            className="mb-3"
+          />
+          {splitTotal > 0 && (
             <Card>
               <CardContent className="p-3">
-                <SubLabel tooltip="All-time ratio of members who completed verification vs. those who joined but never verified.">
+                <SubLabel tooltip="Of all members who joined during the selected period, what share completed verification. Both numbers come from the same joined_at-filtered query so they always sum to total joins.">
                   Verified vs Unverified Split
                 </SubLabel>
                 <ProgressBar
                   name="Verified"
-                  count={totalVerified}
-                  total={totalAllTime}
+                  count={splitVerified}
+                  total={splitTotal}
                   color="#10b981"
                 />
                 <ProgressBar
                   name="Unverified"
-                  count={totalUnverified}
-                  total={totalAllTime}
+                  count={splitUnverified}
+                  total={splitTotal}
                   color="#f59e0b"
                 />
               </CardContent>
@@ -478,6 +589,7 @@ export default function Analytics() {
           )}
         </div>
       </div>
+      )}
 
       {/* ════════════════════════════════════════════════════════════════════════
           Channel Engagement
@@ -487,8 +599,11 @@ export default function Analytics() {
         icon="fa-hashtag"
         subtitle="Top 25 channels by message volume for the period"
         tooltip="Ranks channels by message count. Voice Activity shows accumulated voice time in the same channel during the period — only applicable to voice channels."
+        collapsible
+        collapsed={collapsedSections.channels}
+        onToggle={() => toggleSection("channels")}
       />
-      {channels.length > 0 ? (
+      {collapsedSections.channels ? null : channels.length > 0 ? (
         <Card className="mb-6">
           <CardContent className="p-0">
             <table className="w-full text-sm">
@@ -504,26 +619,75 @@ export default function Analytics() {
                 </tr>
               </thead>
               <tbody>
-                {channels.map((ch) => (
-                  <tr
-                    key={ch.channel_id}
-                    className="border-b last:border-0 hover:bg-muted/30 transition-colors"
-                  >
-                    <td className="px-4 py-2 text-muted-foreground tabular-nums">{ch.rank}</td>
-                    <td className="px-4 py-2 font-medium">
-                      <i className="fas fa-hashtag text-xs mr-1.5 text-muted-foreground" />
-                      {ch.channel_name}
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums font-semibold">
-                      {ch.messages.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums">
-                      {ch.voice_seconds != null
-                        ? `${(ch.voice_seconds / 3600).toFixed(1)}h`
-                        : <NotTracked />}
-                    </td>
-                  </tr>
-                ))}
+                {channels.map((ch) => {
+                  const hasThreads = ch.threads && ch.threads.length > 0;
+                  const isExpanded = expandedChannels.has(ch.channel_id);
+                  return (
+                    <React.Fragment key={ch.channel_id}>
+                      <tr
+                        className={`border-b transition-colors ${hasThreads ? "cursor-pointer hover:bg-muted/40" : "hover:bg-muted/30"}`}
+                        onClick={hasThreads ? () => toggleChannel(ch.channel_id) : undefined}
+                      >
+                        <td className="px-4 py-2 text-muted-foreground tabular-nums">{ch.rank}</td>
+                        <td className="px-4 py-2 font-medium">
+                          {hasThreads ? (
+                            <span className="flex items-center gap-1.5">
+                              <i
+                                className={`fas fa-chevron-right text-[10px] text-muted-foreground transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
+                              />
+                              <i className="fas fa-hashtag text-xs text-muted-foreground" />
+                              {ch.channel_name}
+                              <span className="ml-1.5 text-[10px] font-normal text-muted-foreground/60 bg-muted px-1.5 py-0.5 rounded-full">
+                                {ch.threads.length} thread{ch.threads.length !== 1 ? "s" : ""}
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1.5">
+                              <i className="fas fa-hashtag text-xs text-muted-foreground" />
+                              {ch.channel_name}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums font-semibold">
+                          {ch.messages.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums">
+                          {ch.voice_seconds != null ? (
+                            `${(ch.voice_seconds / 3600).toFixed(1)}h`
+                          ) : (
+                            <NotTracked />
+                          )}
+                        </td>
+                      </tr>
+                      {hasThreads && isExpanded &&
+                        ch.threads.map((t) => (
+                          <tr
+                            key={t.channel_id}
+                            className="border-b last:border-0 bg-muted/20 hover:bg-muted/40 transition-colors"
+                          >
+                            <td className="px-4 py-1.5 text-muted-foreground/50 tabular-nums text-xs" />
+                            <td className="py-1.5 pr-4 font-normal text-muted-foreground">
+                              <span className="flex items-center gap-1.5 pl-8">
+                                <i className="fas fa-level-right text-[10px] text-muted-foreground/40" />
+                                <i className="fas fa-comment-alt text-[10px] text-muted-foreground/60" />
+                                <span className="text-xs">{t.channel_name}</span>
+                              </span>
+                            </td>
+                            <td className="px-4 py-1.5 text-right tabular-nums text-xs font-medium text-muted-foreground">
+                              {t.messages.toLocaleString()}
+                            </td>
+                            <td className="px-4 py-1.5 text-right tabular-nums text-xs text-muted-foreground">
+                              {t.voice_seconds != null ? (
+                                `${(t.voice_seconds / 3600).toFixed(1)}h`
+                              ) : (
+                                <NotTracked />
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </CardContent>
@@ -544,36 +708,31 @@ export default function Analytics() {
         icon="fa-eye"
         subtitle="Passive engagement — requires Discord Insights access"
         tooltip="Readership tracks members who read channels without posting. Discord does not expose this data via bot API — it requires access to the server's Discord Insights dashboard."
+        collapsible
+        collapsed={collapsedSections.readership}
+        onToggle={() => toggleSection("readership")}
       />
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <StatCard
-          label="Monthly Visitors"
-          value={null}
-          icon="fa-user-friends"
-          tooltip="Unique members who viewed any channel in the past 30 days. Requires Discord Insights — not accessible via bot API."
-        />
-        <StatCard
-          label="Monthly Readers / Channel"
-          value={null}
-          icon="fa-book-open"
-          color="#3b82f6"
-          tooltip="Average number of unique readers per channel per month. Requires Discord Insights."
-        />
-        <StatCard
-          label="Weekly Readers / Channel"
-          value={null}
-          icon="fa-calendar-week"
-          color="#10b981"
-          tooltip="Average number of unique readers per channel per week. Requires Discord Insights."
-        />
-        <StatCard
-          label="Channel Followers"
-          value={null}
-          icon="fa-bell"
-          color="#f59e0b"
-          tooltip="Members who follow individual announcement channels to receive cross-server notifications. Requires Discord Insights."
-        />
-      </div>
+      {!collapsedSections.readership && (
+      <Card className="mb-6">
+        <CardContent className="py-5 px-5">
+          <p className="text-sm text-muted-foreground mb-3">
+            Readership data is not accessible via the bot API. View it directly in the Discord Insights dashboard.
+            {" "}
+            <strong>Note:</strong> Discord Insights only retains the last 120 days of data.
+          </p>
+          <a
+            href={`https://discord.com/developers/servers/1187144343400751234/analytics/engagement?interval=2${applied.from ? `&start=${applied.from}` : ""}&end=${applied.to || todayISO()}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 text-sm font-medium text-blue-500 hover:text-blue-400 hover:underline"
+          >
+            <i className="fab fa-discord" />
+            Open Discord Insights — Engagement
+            <i className="fas fa-external-link-alt text-xs" />
+          </a>
+        </CardContent>
+      </Card>
+      )}
 
       {/* ════════════════════════════════════════════════════════════════════════
           Demographics
@@ -583,8 +742,11 @@ export default function Analytics() {
         icon="fa-chart-pie"
         subtitle="Role breakdown for verified members"
         tooltip="Shows how verified members are distributed across academic level, residency, campus, college, and country of origin. Roles are assigned during Salesforce sync at verification. Date filter applies to verified_at."
+        collapsible
+        collapsed={collapsedSections.demographics}
+        onToggle={() => toggleSection("demographics")}
       />
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-4">
+      {collapsedSections.demographics ? null : <><div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-4">
         {/* Student Role */}
         <Card>
           <CardContent className="p-4">
@@ -692,7 +854,7 @@ export default function Analytics() {
             </p>
           )}
         </CardContent>
-      </Card>
+      </Card></>}
 
       {/* ════════════════════════════════════════════════════════════════════════
           Moderation
@@ -700,22 +862,20 @@ export default function Analytics() {
       <SectionHeader
         title="Moderation"
         icon="fa-shield-alt"
-        subtitle="Bans, unbans, and safety incidents"
-        tooltip="Tracks moderation actions taken in the server. Bans and unbans are recorded in the moderation_events table by the bot in real time and backfilled from the Discord audit log on startup."
+        subtitle="Bans, unbans, kicks, timeouts, and message deletions"
+        tooltip="Tracks moderation actions taken in the server. All events are recorded in the moderation_events table by the bot in real time and backfilled from the Discord audit log on startup."
+        collapsible
+        collapsed={collapsedSections.moderation}
+        onToggle={() => toggleSection("moderation")}
       />
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3 mb-6">
+      {!collapsedSections.moderation && (
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
         <StatCard
-          label="Support Tickets"
-          value={moderation.support_tickets}
-          icon="fa-ticket-alt"
-          tooltip="Formal support tickets submitted via a moderation ticketing bot. Not currently tracked — requires integration with a ticket system."
-        />
-        <StatCard
-          label="Banned (all-time)"
+          label="Banned (from verifying)"
           value={moderation.banned_users}
           icon="fa-ban"
           color="#ef4444"
-          tooltip="Total number of members currently flagged as banned in the database (users.banned = true). Not filtered by date — reflects current state."
+          tooltip="Members currently flagged as banned in the database (users.banned = true). These users are blocked from completing the verification flow. Not filtered by date — reflects current state."
         />
         <StatCard
           label="Bans (period)"
@@ -732,27 +892,79 @@ export default function Analytics() {
           tooltip="Members unbanned via the /whitelist command during the selected period. Recorded in moderation_events with event_type = 'unban'."
         />
         <StatCard
-          label="Inappropriate Speech"
-          value={moderation.inappropriate_speech_incidents}
-          icon="fa-exclamation-triangle"
+          label="Kicks (period)"
+          value={moderation.period_kicks ?? 0}
+          icon="fa-boot"
           color="#f59e0b"
-          tooltip="Messages flagged for inappropriate language by an automod or manual report. Not currently tracked."
+          tooltip="Members kicked from the server during the selected period. Detected via the Discord audit log when a member is removed by a moderator."
         />
         <StatCard
-          label="Harassment Incidents"
-          value={moderation.harassment_incidents}
-          icon="fa-user-slash"
+          label="Timeouts (period)"
+          value={moderation.period_timeouts ?? 0}
+          icon="fa-clock"
           color="#f59e0b"
-          tooltip="Reported harassment cases. Not currently tracked — would require a ticketing or report system."
+          tooltip="Members timed out by a moderator during the selected period. Detected when a member's timeout expiry is set via Discord."
         />
         <StatCard
-          label="Spam / Phishing"
-          value={moderation.spam_phishing_attempts}
-          icon="fa-fish"
+          label="Deleted Messages (period)"
+          value={moderation.period_message_deletes ?? 0}
+          icon="fa-trash-alt"
           color="#6b7280"
-          tooltip="Messages flagged as spam or phishing by automod. Not currently tracked."
+          tooltip="Messages deleted by a moderator during the selected period. Detected via the Discord audit log when a message is removed by someone other than the author. Click to view details."
+          onClick={openDeleteModal}
         />
       </div>
+      )}
+
+      <Dialog open={deleteModalOpen} onOpenChange={setDeleteModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Deleted Messages — {periodLabel}</DialogTitle>
+          </DialogHeader>
+          <div className="overflow-y-auto flex-1">
+            {deleteLoading ? (
+              <div className="flex justify-center py-10">
+                <div className="spinner-border spinner-border-sm" role="status" style={{ color: "#8c1d40" }}>
+                  <span className="visually-hidden">Loading…</span>
+                </div>
+              </div>
+            ) : deleteRows && deleteRows.length > 0 ? (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-xs text-muted-foreground uppercase tracking-wide border-b sticky top-0 bg-card">
+                    <th className="text-left px-3 py-2 font-semibold">Author</th>
+                    <th className="text-left px-3 py-2 font-semibold">Channel</th>
+                    <th className="text-left px-3 py-2 font-semibold">Moderator</th>
+                    <th className="text-left px-3 py-2 font-semibold">Deleted At</th>
+                    <th className="text-left px-3 py-2 font-semibold">Content</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deleteRows.map((row) => (
+                    <tr key={row.message_id} className="border-b last:border-0 align-top">
+                      <td className="px-3 py-2 whitespace-nowrap">{row.discord_username || "—"}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {row.channel_name || <NotTracked />}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">{row.moderator_username || "—"}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {new Date(row.occurred_at).toLocaleString()}
+                      </td>
+                      <td className="px-3 py-2 max-w-xs break-words">
+                        {row.content || <span className="text-muted-foreground italic">no content</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                No deleted messages for this period.
+              </p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* ════════════════════════════════════════════════════════════════════════
           Programs
@@ -762,8 +974,12 @@ export default function Analytics() {
         icon="fa-star"
         subtitle="Gold Guides and Volunteers"
         tooltip="Tracks activity from organized member programs. Gold Guides are trained peer advisors who answer questions in the Q&A forum. Volunteer tracking is not yet implemented."
+        collapsible
+        collapsed={collapsedSections.programs}
+        onToggle={() => toggleSection("programs")}
       />
-
+      {!collapsedSections.programs && (
+      <>
       <SubLabel tooltip="Gold Guides are members with the Gold Guide role who respond to questions in Q&A forum threads. Contributions are tracked per-message in gold_guide_contributions.">
         Gold Guides
       </SubLabel>
@@ -776,7 +992,7 @@ export default function Analytics() {
           tooltip="Distinct Gold Guide members who sent at least one message in a Q&A thread during the period. A guide counts as 'active' if they contributed at least once."
         />
         <StatCard
-          label="Q&A Sessions"
+          label="Questions answered in Ask ASU Staff"
           value={gg.qna_sessions}
           icon="fa-comments"
           color="#8c1d40"
@@ -794,65 +1010,140 @@ export default function Analytics() {
         <Card className="mb-5">
           <CardContent className="p-0">
             <div className="px-4 py-2.5 border-b flex items-center gap-1">
-              <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                Guide Contribution Distribution
-              </span>
+              <button
+                type="button"
+                onClick={() => setGoldGuideListCollapsed((c) => !c)}
+                className="flex items-center gap-1 cursor-pointer bg-transparent border-0 p-0 text-inherit"
+              >
+                <i
+                  className={`fas fa-chevron-down fa-sm text-muted-foreground transition-transform ${
+                    goldGuideListCollapsed ? "-rotate-90" : ""
+                  }`}
+                />
+                <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                  Guide Contribution Distribution
+                </span>
+              </button>
               <Tooltip text="Top 15 Gold Guides ranked by total messages sent in Q&A threads during the period. Shows which guides are most active." />
+              <Button
+                size="sm"
+                variant="outline"
+                asChild
+                className="ml-auto h-7 px-2 text-xs"
+              >
+                <a
+                  href={`/api/admin/analytics/gold-guides/export/csv?${new URLSearchParams({
+                    ...(applied.from ? { from_date: applied.from } : {}),
+                    ...(applied.to ? { to_date: applied.to } : {}),
+                  })}`}
+                  download={`gold_guide_contributions_${applied.from || "start"}_to_${applied.to || "end"}.csv`}
+                >
+                  <i className="fas fa-download mr-1" />
+                  Download CSV
+                </a>
+              </Button>
             </div>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs text-muted-foreground uppercase tracking-wide border-b">
-                  <th className="text-left px-4 py-2 font-semibold">Guide</th>
-                  <th className="text-right px-4 py-2 font-semibold w-28">Messages</th>
-                </tr>
-              </thead>
-              <tbody>
-                {gg.contribution_distribution.map((g) => (
-                  <tr key={g.discord_id} className="border-b last:border-0 hover:bg-muted/30">
-                    <td className="px-4 py-2 font-medium">{g.username}</td>
-                    <td className="px-4 py-2 text-right tabular-nums font-semibold">
-                      {g.messages.toLocaleString()}
-                    </td>
+            {!goldGuideListCollapsed && (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-xs text-muted-foreground uppercase tracking-wide border-b">
+                    <th className="text-left px-4 py-2 font-semibold">Guide</th>
+                    <th className="text-right px-4 py-2 font-semibold w-28">Messages</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {gg.contribution_distribution.map((g) => (
+                    <tr key={g.discord_id} className="border-b last:border-0 hover:bg-muted/30">
+                      <td className="px-4 py-2 font-medium">{g.username}</td>
+                      <td className="px-4 py-2 text-right tabular-nums font-semibold">
+                        {g.messages.toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </CardContent>
         </Card>
       )}
 
-      <SubLabel tooltip="Volunteer program tracking is planned but not yet implemented. These metrics will reflect a separate volunteer role cohort once configured.">
+      <SubLabel tooltip="Volunteers are members with the Volunteer role who send messages anywhere in the server (not restricted to a specific forum, unlike Gold Guides). Contributions are tracked per-message in volunteer_contributions.">
         Volunteers
       </SubLabel>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
         <StatCard
           label="Active Volunteers"
           value={vol.active_volunteers}
           icon="fa-hands-helping"
           color="#10b981"
-          tooltip="Distinct volunteers who sent at least one message during the period. Not currently tracked."
+          tooltip="Distinct Volunteer-role members who sent at least one message anywhere in the server during the period."
         />
         <StatCard
           label="Messages Sent"
           value={vol.messages_sent}
           icon="fa-comment"
-          tooltip="Total messages sent by members with the Volunteer role. Not currently tracked."
+          tooltip="Total messages sent by members with the Volunteer role during the period, across all channels. Tracked per-message in volunteer_contributions."
         />
         <StatCard
           label="Avg Messages / Volunteer"
           value={vol.avg_messages_per_volunteer}
           icon="fa-chart-bar"
           color="#3b82f6"
-          tooltip="Average messages per active volunteer. Not currently tracked."
+          tooltip="Average messages per active volunteer during the period (messages sent ÷ active volunteers)."
         />
         <StatCard
           label="Voice Hours"
-          value={vol.voice_hours}
+          value={vol.voice_hours != null ? `${vol.voice_hours}h` : null}
           icon="fa-microphone"
           color="#f59e0b"
-          tooltip="Total voice time logged by volunteers. Not currently tracked."
+          tooltip="Total voice time logged by members currently holding the Volunteer role, clipped to the selected period. Reflects current role membership, not historical — a member who left the role won't be counted even if they volunteered during the period."
         />
       </div>
+      {vol.contribution_distribution?.length > 0 && (
+        <Card className="mb-6">
+          <CardContent className="p-0">
+            <div className="px-4 py-2.5 border-b flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setVolunteerListCollapsed((c) => !c)}
+                className="flex items-center gap-1 cursor-pointer bg-transparent border-0 p-0 text-inherit"
+              >
+                <i
+                  className={`fas fa-chevron-down fa-sm text-muted-foreground transition-transform ${
+                    volunteerListCollapsed ? "-rotate-90" : ""
+                  }`}
+                />
+                <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                  Volunteer Contribution Distribution
+                </span>
+              </button>
+              <Tooltip text="Top 15 Volunteers ranked by total messages sent anywhere in the server during the period." />
+            </div>
+            {!volunteerListCollapsed && (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-xs text-muted-foreground uppercase tracking-wide border-b">
+                    <th className="text-left px-4 py-2 font-semibold">Volunteer</th>
+                    <th className="text-right px-4 py-2 font-semibold w-28">Messages</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {vol.contribution_distribution.map((v) => (
+                    <tr key={v.discord_id} className="border-b last:border-0 hover:bg-muted/30">
+                      <td className="px-4 py-2 font-medium">{v.username}</td>
+                      <td className="px-4 py-2 text-right tabular-nums font-semibold">
+                        {v.messages.toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </CardContent>
+        </Card>
+      )}
+      </>
+      )}
 
       {/* ════════════════════════════════════════════════════════════════════════
           Forums
@@ -862,24 +1153,35 @@ export default function Analytics() {
         icon="fa-comments"
         subtitle="Ask ASU Staff · Connect by Major · Roommate Finder"
         tooltip="Tracks activity across Discord forum channels. Ask ASU Staff is the AI-assisted Q&A channel. Connect by Major and Roommate Finder are peer connection forums. All forum threads are tracked in forum_posts."
+        collapsible
+        collapsed={collapsedSections.forums}
+        onToggle={() => toggleSection("forums")}
       />
-
+      {!collapsedSections.forums && (
+      <>
       <SubLabel tooltip="Ask ASU Staff is a forum where students ask questions. The bot attempts to answer via AI; unresolved questions are flagged for staff. Tracked in qna_posts.">
         Ask ASU Staff
       </SubLabel>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-3">
         <StatCard
           label="Questions Answered"
           value={askAsu.total_questions_answered}
           icon="fa-check-circle"
           color="#10b981"
-          tooltip="Questions resolved by either the AI bot (status: satisfied) or a staff member (status: needs_help). Sum of bot_answered + staff_answered."
+          tooltip="Questions resolved by the AI bot (status: satisfied), escalated to a staff member (status: needs_help), or verified by ASU staff (status: staff_confirmed). Sum of bot_answered + staff_answered + staff_confirmed."
+        />
+        <StatCard
+          label="Posts Created"
+          value={askAsu.posts_created}
+          icon="fa-edit"
+          tooltip="Total Q&A threads opened during the period, regardless of resolution status. Each thread corresponds to one student question."
         />
         <StatCard
           label="Total Messages"
           value={askAsu.total_messages}
           icon="fa-comments"
-          tooltip="Total Q&A threads opened during the period, regardless of resolution status. Each thread corresponds to one student question."
+          color="#8c1d40"
+          tooltip="Total messages sent within Ask ASU Staff threads during the period (student questions, bot replies, and staff replies combined), regardless of when the thread itself was created."
         />
         <StatCard
           label="Bot Answered"
@@ -894,6 +1196,13 @@ export default function Analytics() {
           icon="fa-user-tie"
           color="#f59e0b"
           tooltip="Threads escalated to staff because the bot could not resolve them (status: needs_help). Lower is better if bot resolution rate is high."
+        />
+        <StatCard
+          label="Staff Confirmed"
+          value={askAsu.staff_confirmed}
+          icon="fa-user-shield"
+          color="#8b5cf6"
+          tooltip="Threads where an ASU staff member (admin) verified the bot's answer to be correct via the 'Staff Confirmed' button (status: staff_confirmed)."
         />
       </div>
       {askAsu.by_tag?.length > 0 && (
@@ -944,12 +1253,59 @@ export default function Analytics() {
               value={forums.connect_by_major?.messages_sent}
               icon="fa-comment"
               color="#3b82f6"
-              tooltip="Total replies within Connect by Major threads. Not currently tracked — would require message-level forum tracking."
+              tooltip="Total messages sent within Connect by Major threads during the period, summed across every thread under that forum."
             />
           </div>
-          <p className="text-xs text-muted-foreground mt-2">
-            Activity by Major: <NotTracked />
-          </p>
+          {forums.connect_by_major?.activity_by_major?.length > 0 && (
+            <Card className="mt-3">
+              <CardContent className="p-0">
+                <div className="px-3 py-2 border-b flex items-center gap-1">
+                  <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                    Forums by College
+                  </span>
+                  <Tooltip text="Number of Connect by Major posts during the period, bucketed by the author's college role. Posts from authors with no matching college role (e.g. not verified) are excluded." />
+                </div>
+                <table className="w-full text-sm">
+                  <tbody>
+                    {forums.connect_by_major.activity_by_major.map((row) => (
+                      <tr key={row.college} className="border-b last:border-0 hover:bg-muted/30">
+                        <td className="px-3 py-1.5">{row.college}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums font-semibold w-16">
+                          {row.count.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          )}
+          {forums.connect_by_major?.top_threads?.length > 0 && (
+            <Card className="mt-3">
+              <CardContent className="p-0">
+                <div className="px-3 py-2 border-b flex items-center gap-1">
+                  <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                    Top 5 Threads
+                  </span>
+                  <Tooltip text="The 5 Connect by Major threads with the most messages during the selected period." />
+                </div>
+                <table className="w-full text-sm">
+                  <tbody>
+                    {forums.connect_by_major.top_threads.map((t) => (
+                      <tr key={t.channel_id} className="border-b last:border-0 hover:bg-muted/30">
+                        <td className="px-3 py-1.5 truncate max-w-[10rem]" title={t.channel_name}>
+                          {t.channel_name}
+                        </td>
+                        <td className="px-3 py-1.5 text-right tabular-nums font-semibold w-16">
+                          {t.messages.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          )}
         </div>
         <div>
           <SubLabel tooltip="Forum channel where students looking for roommates post listings. Posts are tracked in forum_posts by parent channel name.">
@@ -964,6 +1320,8 @@ export default function Analytics() {
           />
         </div>
       </div>
+      </>
+      )}
 
       {/* ════════════════════════════════════════════════════════════════════════
           Acquisition
@@ -973,95 +1331,33 @@ export default function Analytics() {
         icon="fa-search"
         subtitle="Traffic source — requires Google Analytics integration"
         tooltip="Shows how people find and arrive at the verification page. All metrics require Google Analytics (or similar) to be integrated with the web app. Currently not connected."
+        collapsible
+        collapsed={collapsedSections.acquisition}
+        onToggle={() => toggleSection("acquisition")}
       />
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
-        <StatCard
-          label="Source / Medium"
-          value={null}
-          icon="fa-link"
-          tooltip="The traffic source and medium (e.g., email / campaign, organic / google). Requires Google Analytics UTM tracking."
-        />
-        <StatCard
-          label="Users"
-          value={null}
-          icon="fa-users"
-          color="#3b82f6"
-          tooltip="Unique visitors to the verification page from this source. Requires Google Analytics."
-        />
-        <StatCard
-          label="Sessions"
-          value={null}
-          icon="fa-layer-group"
-          color="#10b981"
-          tooltip="Total sessions initiated from this source. One user can have multiple sessions. Requires Google Analytics."
-        />
-        <StatCard
-          label="Pageviews"
-          value={null}
-          icon="fa-eye"
-          color="#f59e0b"
-          tooltip="Total page views from this source, including repeat views within a session. Requires Google Analytics."
-        />
-        <StatCard
-          label="Bounce Rate"
-          value={null}
-          icon="fa-percentage"
-          color="#ef4444"
-          tooltip="% of sessions where the user left without interacting (single-page visit). Lower bounce rate = more engaged visitors. Requires Google Analytics."
-        />
-        <StatCard
-          label="Session Duration"
-          value={null}
-          icon="fa-clock"
-          color="#8b5cf6"
-          tooltip="Average time users spend on the verification page per session. Longer duration may indicate friction in the flow. Requires Google Analytics."
-        />
-      </div>
-
-      {/* ════════════════════════════════════════════════════════════════════════
-          Suggested Additions
-      ════════════════════════════════════════════════════════════════════════ */}
-      <SectionHeader
-        title="Suggested Additions"
-        icon="fa-lightbulb"
-        subtitle="Metrics recommended for future tracking"
-        tooltip="These metrics are not currently tracked but would provide valuable insight if implemented. Each would require additional data collection, instrumentation, or external integrations."
-      />
+      {!collapsedSections.acquisition && (
+      <>
+      <SubLabel tooltip="Deep link into the org-wide Looker Studio acquisition report. The report's own date range is not URL-controllable (a Looker Studio platform limitation), so it reflects whatever range was last set inside the report — adjust it there after clicking through.">
+        Acquisition Report (Looker Studio)
+      </SubLabel>
       <Card className="mb-6">
-        <CardContent className="p-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-8 gap-y-1.5">
-            {[
-              "Join to Verify Conversion Rate",
-              "Time to First Message",
-              "7-Day Retention",
-              "30-Day Retention",
-              "Messages per Active User",
-              "Lurker vs Contributor Rate",
-              "Replies per Thread",
-              "New vs Returning Users per Channel",
-              "Channel Retention",
-              "Event Attendance",
-              "Event Impact on Activity",
-              "Event Impact on Retention",
-              "Reports per 1k Users",
-              "Moderation Response Time",
-              "Repeat Offenders",
-              "DM Connections After Join",
-              "Group Formation Success Rate",
-              "Retention by Source",
-              "Engagement by Source",
-              "Response Time to Questions",
-              "Answer Rate",
-              "User Satisfaction Score",
-            ].map((label) => (
-              <div key={label} className="flex items-center gap-2 text-sm text-muted-foreground">
-                <i className="fas fa-circle text-[5px] shrink-0 opacity-40" />
-                {label}
-              </div>
-            ))}
-          </div>
+        <CardContent className="p-4 flex items-center justify-between">
+          <span className="text-sm text-muted-foreground">
+            Full acquisition breakdown, including campaigns, lives in Looker Studio.
+          </span>
+          <a
+            href={LOOKER_STUDIO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-500 hover:text-blue-400 hover:underline shrink-0 ml-4"
+          >
+            Open in Data Studio
+            <i className="fas fa-external-link-alt text-xs" />
+          </a>
         </CardContent>
       </Card>
+      </>
+      )}
     </>
   );
 }

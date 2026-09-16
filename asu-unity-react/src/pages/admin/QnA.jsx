@@ -4,13 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const yearStartISO = () => {
-  const d = new Date();
-  d.setMonth(0, 1);
-  return d.toISOString().slice(0, 10);
-};
+import { todayISO, yearStartISO } from "@/utils/adminDates";
 
 const STATUS_META = {
   satisfied:  { label: "Bot answered",       color: "#10b981" },

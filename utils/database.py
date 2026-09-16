@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     create_engine,
+    event,
     inspect,
     text,
 )
@@ -22,7 +23,26 @@ from sqlalchemy.orm import Session, declarative_base, relationship, scoped_sessi
 
 from utils.settings import CONFIG
 
-engine = create_engine(CONFIG.DATABASE_URL, future=True)
+_is_sqlite = CONFIG.DATABASE_URL.startswith("sqlite")
+# sqlite3's default connect `timeout` is 5s — too short once multiple background
+# backfill tasks (forum posts, moderation events, QnA, volunteers, message backfill)
+# write concurrently on startup. A longer timeout makes writers wait/retry instead
+# of immediately raising "database is locked"; WAL mode lets readers proceed
+# without blocking on a concurrent writer at all.
+engine = create_engine(
+    CONFIG.DATABASE_URL,
+    future=True,
+    connect_args={"timeout": 30} if _is_sqlite else {},
+)
+
+if _is_sqlite:
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection, _connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.close()
+
 SessionLocal = scoped_session(
     sessionmaker(bind=engine, autocommit=False, autoflush=False, expire_on_commit=False)
 )
@@ -41,7 +61,9 @@ class User(Base):
     affiliations = Column(String(255), nullable=True)
     saml_session_index = Column(String(128), nullable=True)
     saml_attributes = Column(Text, nullable=True)
-    discord_user_id = Column(String(64), unique=True, index=True, nullable=True)
+    # ASURITE is the only unique identity. A Discord account may be re-linked to a
+    # new ASURITE record, so discord_user_id is intentionally NOT unique.
+    discord_user_id = Column(String(64), index=True, nullable=True)
     discord_username = Column(String(255), nullable=True)
     discord_global_name = Column(String(255), nullable=True)
     discord_avatar = Column(String(255), nullable=True)
@@ -81,6 +103,22 @@ class User(Base):
     @property
     def is_employee(self) -> bool:
         return self._has_affiliation("employee@asu.edu")
+
+
+class DiscordMember(Base):
+    """Tracks every Discord guild join/leave event, keyed by Discord user ID.
+
+    Populated independently of the User table so joins are recorded even before
+    a member completes SAML verification.
+    """
+
+    __tablename__ = "discord_members"
+
+    id = Column(Integer, primary_key=True, index=True)
+    discord_user_id = Column(String(64), unique=True, index=True, nullable=False)
+    discord_username = Column(String(255), nullable=True)
+    joined_at = Column(DateTime, nullable=False)   # naive UTC
+    left_at = Column(DateTime, nullable=True)      # naive UTC; NULL = currently in server
 
 
 class UserRole(Base):
@@ -161,6 +199,24 @@ class GoldGuideContribution(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class VolunteerContribution(Base):
+    """One row per message sent anywhere in the server by a Volunteer-role member."""
+
+    __tablename__ = "volunteer_contributions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(String(64), nullable=True)
+    channel_id = Column(String(64), nullable=False, index=True)
+    channel_name = Column(String(255), nullable=True)
+    parent_channel_id = Column(String(64), nullable=True, index=True)
+    parent_channel_name = Column(String(255), nullable=True)
+    message_id = Column(String(64), unique=True, nullable=True, index=True)  # dedup key
+    responder_discord_id = Column(String(64), nullable=False, index=True)
+    responder_username = Column(String(255), nullable=True)
+    responded_at = Column(DateTime, nullable=False)               # naive UTC
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class QnaModule(Base):
     __tablename__ = "qna_modules"
 
@@ -204,6 +260,8 @@ class MessageLog(Base):
     message_id = Column(String(64), unique=True, nullable=False, index=True)
     channel_id = Column(String(64), nullable=False, index=True)
     channel_name = Column(String(255), nullable=True)
+    parent_channel_id = Column(String(64), nullable=True, index=True)
+    parent_channel_name = Column(String(255), nullable=True)
     guild_id = Column(String(64), nullable=False, index=True)
     discord_user_id = Column(String(64), nullable=False, index=True)
     content = Column(Text, nullable=True)
@@ -287,7 +345,12 @@ class VoiceSession(Base):
 
 
 class ModerationEvent(Base):
-    """One row per moderation action recorded by AnalyticsCog (ban, unban)."""
+    """One row per moderation action recorded by AnalyticsCog.
+
+    event_type: "ban" | "unban" | "kick" | "timeout" | "timeout_remove" | "message_delete"
+    channel_id / message_id: set for "message_delete" events only.
+    extra_data: JSON string; "timeout_until" for timeouts, "content" for message_delete.
+    """
 
     __tablename__ = "moderation_events"
 
@@ -295,11 +358,14 @@ class ModerationEvent(Base):
     discord_user_id = Column(String(64), nullable=False, index=True)
     discord_username = Column(String(255), nullable=True)
     guild_id = Column(String(64), nullable=False, index=True)
-    event_type = Column(String(32), nullable=False, index=True)  # "ban" | "unban"
+    event_type = Column(String(32), nullable=False, index=True)
     reason = Column(Text, nullable=True)
     moderator_discord_id = Column(String(64), nullable=True)
     moderator_username = Column(String(255), nullable=True)
     occurred_at = Column(DateTime, nullable=False, index=True)   # naive UTC
+    channel_id = Column(String(64), nullable=True)               # message_delete only
+    message_id = Column(String(64), nullable=True)               # message_delete only
+    extra_data = Column(Text, nullable=True)                     # JSON
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
@@ -357,6 +423,111 @@ class AppSetting(Base):
     updated_by = Column(String(64), nullable=True)         # discord_user_id
 
 
+class TicketSettings(Base):
+    """Per-guild configuration for the ticketing panel (admin-dashboard managed)."""
+
+    __tablename__ = "ticket_settings"
+
+    id = Column(Integer, primary_key=True)
+    guild_id = Column(String(64), unique=True, nullable=False)
+    panel_channel_id = Column(String(64), nullable=True)
+    panel_message_id = Column(String(64), nullable=True)
+    embed_title = Column(String(256), nullable=True)
+    embed_description = Column(Text, nullable=True)
+    embed_color = Column(String(16), nullable=True)          # hex string, e.g. "#8c1d40"
+    embed_image_url = Column(String(2048), nullable=True)
+    embed_thumbnail_url = Column(String(2048), nullable=True)
+    embed_footer = Column(String(2048), nullable=True)
+    embed_footer_icon_url = Column(String(2048), nullable=True)
+    embed_url = Column(String(2048), nullable=True)
+    embed_author_name = Column(String(256), nullable=True)
+    embed_author_url = Column(String(2048), nullable=True)
+    embed_author_icon_url = Column(String(2048), nullable=True)
+    embed_timestamp = Column(Boolean, default=False, nullable=False)
+    embed_fields = Column(Text, nullable=True)                # JSON array of {name, value, inline}
+    select_placeholder = Column(String(150), nullable=True)
+    staff_role_ids = Column(Text, nullable=True)             # JSON array of role id strings
+    transcript_channel_id = Column(String(64), nullable=True)  # where "transcript ready" links get posted
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    categories = relationship(
+        "TicketCategory", back_populates="settings", order_by="TicketCategory.position"
+    )
+
+
+class TicketCategory(Base):
+    """One selectable ticket category (select-menu option) for a guild's ticket panel."""
+
+    __tablename__ = "ticket_categories"
+
+    id = Column(Integer, primary_key=True)
+    settings_id = Column(
+        Integer, ForeignKey("ticket_settings.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    guild_id = Column(String(64), nullable=False, index=True)
+    label = Column(String(100), nullable=False)
+    description = Column(String(200), nullable=True)
+    emoji = Column(String(64), nullable=True)
+    parent_category_id = Column(String(64), nullable=True)   # Discord category channel snowflake
+    extra_role_ids = Column(Text, nullable=True)              # JSON array, additive to staff_role_ids
+    position = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    settings = relationship("TicketSettings", back_populates="categories")
+
+
+class Ticket(Base):
+    """One row per opened ticket (private text channel)."""
+
+    __tablename__ = "tickets"
+
+    id = Column(Integer, primary_key=True)
+    guild_id = Column(String(64), nullable=False, index=True)
+    channel_id = Column(String(64), unique=True, nullable=False, index=True)
+    category_id = Column(Integer, ForeignKey("ticket_categories.id"), nullable=True, index=True)
+    opener_discord_id = Column(String(64), nullable=False, index=True)
+    opener_username = Column(String(255), nullable=True)
+    subject = Column(String(200), nullable=True)
+    description = Column(Text, nullable=True)
+    status = Column(String(16), default="open", nullable=False, index=True)  # "open" | "closed"
+    closed_by = Column(String(64), nullable=True)
+    closed_at = Column(DateTime, nullable=True)
+    transcript_slug = Column(String(32), unique=True, nullable=True, index=True)
+    transcript_captured_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    category = relationship("TicketCategory")
+
+
+class TicketMessage(Base):
+    """One row per message sent in a ticket channel, captured live as it's posted."""
+
+    __tablename__ = "ticket_messages"
+
+    id = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True)
+    message_id = Column(String(64), unique=True, nullable=False, index=True)
+    author_id = Column(String(64), nullable=False)
+    author_username = Column(String(255), nullable=True)
+    author_display_name = Column(String(255), nullable=True)
+    author_avatar_url = Column(String(2048), nullable=True)
+    content = Column(Text, nullable=True)
+    attachments = Column(Text, nullable=True)   # JSON array of {filename, url, content_type}
+    embeds = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+
+    ticket = relationship("Ticket", backref="messages")
+
+
 # Default rows seeded on first startup.
 _CRON_JOB_DEFAULTS = [
     {
@@ -399,10 +570,115 @@ _LEGACY_STATE_FILES: dict[str, Path] = {
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_user_columns()
+    _ensure_user_discord_id_not_unique()
     _ensure_cron_job_config_columns()
     _ensure_message_log_columns()
     _ensure_qna_columns()
+    _ensure_moderation_event_columns()
+    _ensure_ticket_settings_columns()
+    _ensure_ticket_columns()
     _seed_cron_job_config()
+    _backfill_discord_members_from_users()
+
+
+def _backfill_discord_members_from_users() -> None:
+    """Seed DiscordMember from existing User rows that have a discord_user_id and joined_at.
+
+    Runs at startup so historical join/leave data is available before the bot
+    connects. The on_ready Discord-API backfill then fills in any current members
+    that are missing or have a newer joined_at.
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    with session_scope() as session:
+        existing_ids = {
+            row[0]
+            for row in session.query(DiscordMember.discord_user_id).all()
+        }
+        users = (
+            session.query(User)
+            .filter(
+                User.discord_user_id.isnot(None),
+                User.joined_at.isnot(None),
+            )
+            .all()
+        )
+        new_rows = [
+            DiscordMember(
+                discord_user_id=u.discord_user_id,
+                discord_username=u.discord_username,
+                joined_at=u.joined_at,
+                left_at=u.left_at,
+            )
+            for u in users
+            if u.discord_user_id not in existing_ids
+        ]
+        if new_rows:
+            session.bulk_save_objects(new_rows)
+    _log.info("DiscordMember backfill from users table: inserted %d row(s)", len(new_rows))
+
+
+def _ensure_moderation_event_columns() -> None:
+    """Add columns to moderation_events introduced after the initial schema."""
+    inspector = inspect(engine)
+    if not inspector.has_table(ModerationEvent.__tablename__):
+        return
+
+    columns = {col["name"] for col in inspector.get_columns(ModerationEvent.__tablename__)}
+
+    with engine.begin() as conn:
+        if "channel_id" not in columns:
+            conn.execute(text("ALTER TABLE moderation_events ADD COLUMN channel_id VARCHAR(64)"))
+        if "message_id" not in columns:
+            conn.execute(text("ALTER TABLE moderation_events ADD COLUMN message_id VARCHAR(64)"))
+        if "extra_data" not in columns:
+            conn.execute(text("ALTER TABLE moderation_events ADD COLUMN extra_data TEXT"))
+
+
+def _ensure_ticket_settings_columns() -> None:
+    """Add embed columns to ticket_settings introduced after the initial schema."""
+    inspector = inspect(engine)
+    if not inspector.has_table(TicketSettings.__tablename__):
+        return
+
+    columns = {col["name"] for col in inspector.get_columns(TicketSettings.__tablename__)}
+
+    with engine.begin() as conn:
+        if "embed_footer_icon_url" not in columns:
+            conn.execute(text("ALTER TABLE ticket_settings ADD COLUMN embed_footer_icon_url VARCHAR(2048)"))
+        if "embed_url" not in columns:
+            conn.execute(text("ALTER TABLE ticket_settings ADD COLUMN embed_url VARCHAR(2048)"))
+        if "embed_author_name" not in columns:
+            conn.execute(text("ALTER TABLE ticket_settings ADD COLUMN embed_author_name VARCHAR(256)"))
+        if "embed_author_url" not in columns:
+            conn.execute(text("ALTER TABLE ticket_settings ADD COLUMN embed_author_url VARCHAR(2048)"))
+        if "embed_author_icon_url" not in columns:
+            conn.execute(text("ALTER TABLE ticket_settings ADD COLUMN embed_author_icon_url VARCHAR(2048)"))
+        if "embed_timestamp" not in columns:
+            default = "FALSE" if engine.dialect.name == "postgresql" else "0"
+            conn.execute(
+                text(f"ALTER TABLE ticket_settings ADD COLUMN embed_timestamp BOOLEAN NOT NULL DEFAULT {default}")
+            )
+        if "embed_fields" not in columns:
+            conn.execute(text("ALTER TABLE ticket_settings ADD COLUMN embed_fields TEXT"))
+        if "transcript_channel_id" not in columns:
+            conn.execute(text("ALTER TABLE ticket_settings ADD COLUMN transcript_channel_id VARCHAR(64)"))
+
+
+def _ensure_ticket_columns() -> None:
+    """Add transcript columns to tickets introduced after the initial schema."""
+    inspector = inspect(engine)
+    if not inspector.has_table(Ticket.__tablename__):
+        return
+
+    columns = {col["name"] for col in inspector.get_columns(Ticket.__tablename__)}
+
+    with engine.begin() as conn:
+        if "transcript_slug" not in columns:
+            conn.execute(text("ALTER TABLE tickets ADD COLUMN transcript_slug VARCHAR(32)"))
+        if "transcript_captured_at" not in columns:
+            conn.execute(text("ALTER TABLE tickets ADD COLUMN transcript_captured_at DATETIME"))
 
 
 def _ensure_qna_columns() -> None:
@@ -434,6 +710,14 @@ def _ensure_message_log_columns() -> None:
     if "content" not in columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE message_logs ADD COLUMN content TEXT"))
+
+    if "parent_channel_id" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE message_logs ADD COLUMN parent_channel_id VARCHAR(64)"))
+
+    if "parent_channel_name" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE message_logs ADD COLUMN parent_channel_name VARCHAR(255)"))
 
 
 def _ensure_cron_job_config_columns() -> None:
@@ -485,6 +769,47 @@ def _ensure_user_columns() -> None:
     with engine.begin() as conn:
         for ddl in ddl_statements:
             conn.execute(text(ddl))
+
+
+def _ensure_user_discord_id_not_unique() -> None:
+    """Drop any legacy UNIQUE index on users.discord_user_id.
+
+    ASURITE is now the only unique identity; a Discord account may be re-linked to a
+    different ASURITE. Existing databases were created with a unique index on
+    discord_user_id, so replace it with a plain (non-unique) index.
+    """
+    inspector = inspect(engine)
+    if not inspector.has_table(User.__tablename__):
+        return
+
+    unique_indexes = [
+        idx
+        for idx in inspector.get_indexes(User.__tablename__)
+        if idx.get("unique") and idx.get("column_names") == ["discord_user_id"]
+    ]
+    if not unique_indexes:
+        return
+
+    with engine.begin() as conn:
+        for idx in unique_indexes:
+            name = idx["name"]
+            conn.execute(text(f'DROP INDEX {_quote_ident(name)}'))
+        # Recreate a non-unique index so lookups by discord_user_id stay fast.
+        existing_names = {
+            i["name"] for i in inspect(engine).get_indexes(User.__tablename__)
+        }
+        if "ix_users_discord_user_id" not in existing_names:
+            conn.execute(
+                text(
+                    "CREATE INDEX ix_users_discord_user_id "
+                    "ON users (discord_user_id)"
+                )
+            )
+
+
+def _quote_ident(name: str) -> str:
+    """Quote an identifier for the active dialect."""
+    return engine.dialect.identifier_preparer.quote(name)
 
 
 def _seed_cron_job_config() -> None:
