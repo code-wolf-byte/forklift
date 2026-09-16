@@ -143,3 +143,4 @@ class TestGetUnverifiedRole:
     def test_returns_none_for_wrong_guild(self, cog, unverified_role_id):
         wrong_guild = make_guild(guild_id=9999, roles={unverified_role_id: make_role(unverified_role_id)})
         assert cog._get_unverified_role(wrong_guild) is None
+

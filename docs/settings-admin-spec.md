@@ -16,6 +16,23 @@ secrets (bot token, Salesforce creds, AWS keys), SFTP/Sheets config, a general
 
 Every setting this feature covers, with its current home and every consumer.
 
+### Verification
+
+| Key | Type | Today | Consumers |
+|---|---|---|---|
+| `verification_enabled` | bool | *(new — no prior equivalent)* | `api.assign_verified_role`, `api.assign_roles_from_profile` |
+
+Off means the CAS and Discord OAuth routes run unchanged and still record the
+member, but both grant paths return early: no verified role, no unverified-role
+removal, and no Salesforce-derived roles. They return rather than raise, because
+the OAuth callback turns a `DiscordAPIError` into a 502.
+
+Both gates sit in `asu_discord/api.py` — the boundary the web flow calls. The
+`/verify` and whitelist slash commands reach the cog directly and are deliberately
+**not** gated: a moderator running one is an explicit override. Removal and refresh
+(`remove_verified_role`, `refresh_roles_from_profile`) are likewise ungated, so
+cleanup and the nightly Salesforce re-sync keep working while the switch is off.
+
 ### Channels
 
 | Key | Today | Consumers |

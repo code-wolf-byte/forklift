@@ -50,6 +50,7 @@ def _build_defaults() -> dict[str, Any]:
         or _FALLBACK_UNVERIFIED_ROLE_ID
     )
     return {
+        "verification_enabled": True,
         "qna_forum_channel_id": CONFIG.QNA_FORUM_CHANNEL_ID,
         "verified_role_id": verified_role_id,
         "unverified_role_id": unverified_role_id,
@@ -81,6 +82,7 @@ def defaults() -> dict[str, Any]:
 
 
 KEYS: tuple[str, ...] = (
+    "verification_enabled",
     "qna_forum_channel_id",
     "verified_role_id",
     "unverified_role_id",
@@ -103,6 +105,7 @@ SNOWFLAKE_KEYS = frozenset(
     }
 )
 SNOWFLAKE_LIST_KEYS = frozenset({"admin_restricted_role_ids"})
+BOOL_KEYS = frozenset({"verification_enabled"})
 
 # ponytail: 30s TTL over a whole-table read. Per-key invalidation only if this
 # grows past a few dozen rows.
@@ -217,6 +220,11 @@ def validate(key: str, value: Any) -> Any:
     """Return the normalized value for ``key``, or raise SettingsValidationError."""
     if key not in KEYS:
         raise SettingsValidationError(f"Unknown setting: {key}")
+
+    if key in BOOL_KEYS:
+        if not isinstance(value, bool):
+            raise SettingsValidationError(f"{key}: expected true or false")
+        return value
 
     if key in SNOWFLAKE_KEYS:
         if value in (None, ""):

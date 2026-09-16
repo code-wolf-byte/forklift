@@ -119,3 +119,17 @@ class TestRoleCategoriesStayInSync:
             "MEMBER_ROLE_CATEGORIES lists role names absent from DEFAULT_ROLE_ID_MAP: "
             f"{sorted(categorised - set(DEFAULT_ROLE_ID_MAP))}"
         )
+
+
+class TestVerificationToggle:
+    def test_enabled_by_default(self, clean_settings):
+        assert app_settings.get("verification_enabled") is True
+
+    def test_can_be_switched_off(self, clean_settings):
+        app_settings.set_many({"verification_enabled": False}, updated_by="tester")
+        assert app_settings.get("verification_enabled") is False
+
+    @pytest.mark.parametrize("bad", ["true", "yes", 1, 0])
+    def test_rejects_non_boolean(self, bad):
+        with pytest.raises(SettingsValidationError):
+            app_settings.validate("verification_enabled", bad)

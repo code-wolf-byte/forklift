@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -217,6 +218,50 @@ export default function Settings() {
           <AlertDescription>Settings saved.</AlertDescription>
         </Alert>
       )}
+
+      {/* ── Verification ── */}
+      <Card className="mb-3">
+        <CardContent className="p-4">
+          <div className="flex justify-between items-start gap-3 flex-wrap mb-2">
+            <h5 className="text-base font-semibold mb-0">Verification</h5>
+            <OverrideBadge
+              meta={settings.verification_enabled}
+              onReset={() => reset("verification_enabled")}
+            />
+          </div>
+          <div className="flex items-center gap-2 mb-2">
+            <Switch
+              id="verification-enabled"
+              checked={draft.verification_enabled !== false}
+              onCheckedChange={(checked) => set("verification_enabled", checked)}
+            />
+            <Label htmlFor="verification-enabled" className="cursor-pointer">
+              {draft.verification_enabled !== false
+                ? "Verification enabled"
+                : "Verification disabled"}
+            </Label>
+          </div>
+          <p className="text-xs text-muted-foreground mb-3">
+            While disabled, the CAS and Discord sign-in flows still run and members are
+            still recorded as verified in the database — they simply receive no roles.
+            The verified role is not granted, the unverified role is not removed, and no
+            Salesforce-derived roles (cohort, college, campus) are assigned. Members
+            verified earlier keep the roles they already have, and re-enabling does not
+            retroactively grant roles to anyone who signed in while it was off. The
+            <code>/verify</code> and whitelist slash commands are unaffected, so a
+            moderator can still verify someone by hand.
+          </p>
+          {draft.verification_enabled === false && (
+            <Alert variant="destructive" className="mb-3">
+              <AlertDescription className="text-sm">
+                New members will not receive the verified role until this is switched
+                back on.
+              </AlertDescription>
+            </Alert>
+          )}
+          <SaveBar keys={["verification_enabled"]} />
+        </CardContent>
+      </Card>
 
       {/* ── Channels ── */}
       <Card className="mb-3">

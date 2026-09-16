@@ -138,7 +138,32 @@ def fetch_user_profile(access_token: str) -> DiscordProfile:
     return DiscordProfile.model_validate(_safe_json(response))
 
 
+def _verification_enabled() -> bool:
+    """Whether the admin verification switch is on.
+
+    Deferred import: utils.app_settings reaches back into asu_discord.roles.
+    """
+    from utils.app_settings import get
+
+    return bool(get("verification_enabled"))
+
+
 def assign_verified_role(user_id: str, *, asurite: str | None = None) -> None:
+    """Grant the verified role, unless verification is switched off.
+
+    While off the CAS/OAuth flow is unchanged and the member is still recorded,
+    but no roles move: the verified role is not granted and the unverified role
+    is not removed. Returns rather than raising, because the OAuth callback
+    turns a DiscordAPIError into a 502. The /verify and whitelist slash commands
+    call the cog directly and are deliberately not gated.
+    """
+    if not _verification_enabled():
+        logger.info(
+            "Verification disabled — skipping verified role for Discord user %s (ASURITE: %s)",
+            user_id,
+            asurite,
+        )
+        return
     _config()
     _dispatch_to_cog(
         user_id,
@@ -157,6 +182,12 @@ def remove_verified_role(user_id: str, *, reason: str | None = None) -> None:
 
 
 def assign_roles_from_profile(user_id: str, student_profile: StudentProfile) -> None:
+    """Assign Salesforce-derived roles, unless verification is switched off."""
+    if not _verification_enabled():
+        logger.info(
+            "Verification disabled — skipping Salesforce roles for Discord user %s", user_id
+        )
+        return
     _config()
     _dispatch_to_cog(
         user_id,

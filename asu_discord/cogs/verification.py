@@ -517,7 +517,11 @@ class VerificationCog(commands.Cog):
     async def verify_member_by_id(
         self, user_id: int, *, asurite: str | None = None
     ) -> None:
-        """Assign the verified role to a Discord user identified by ID."""
+        """Assign the verified role to a Discord user identified by ID.
+
+        The verification kill switch is enforced by ``api.assign_verified_role``,
+        which is what the CAS/OAuth flow calls; this method itself always acts.
+        """
         await self.bot.wait_until_ready()
         guild = await self._resolve_guild()
         role = self._get_verified_role(guild)
