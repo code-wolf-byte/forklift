@@ -1,110 +1,98 @@
-## Forklift
+# Forklift
 
-This Flask app links an ASU SSO session with a Discord account so admitted or
-current students can join the Devil2Devil community with the verified role.
-The HTML template mirrors the public ASU site while exposing states for new,
-ASU-authenticated, and fully verified users.
+Forklift is the backend for **Devil2Devil**, ASU's Discord community. It's a Flask
+application paired with a Discord bot (py-cord) that verifies students, manages
+Discord roles, tracks server activity, runs a support-ticket system, and answers
+student questions with an AI-backed Q&A bot — all behind a React admin dashboard.
 
-## Local development
+# Test Commit
+
+## What it does
+
+- **Student verification** — students sign in with ASU CAS and link their Discord
+  account via OAuth; verified members are granted Discord roles automatically
+  (`asu_discord/cogs/verification.py`, `routes/cas.py`, `routes/discord.py`).
+- **Salesforce sync** — verified users' ASURITE IDs are matched against Salesforce
+  to pull enrollment/opportunity data and keep role assignments accurate
+  (`asu_discord/salesforce.py`, `utils/salesforce.py`).
+- **Support tickets** — a Discord-based ticketing system (categories, transcripts,
+  attachments) manageable from the admin dashboard (`asu_discord/cogs/ticketing.py`).
+- **Server analytics** — messages, voice sessions, forum activity, moderation
+  events, and scheduled-event attendance are logged for reporting
+  (`asu_discord/cogs/analytics.py`, `asu_discord/cogs/event_tracker.py`).
+- **Q&A bot ("Forkman")** — answers student questions in the Gold Guide forum using
+  an AWS Bedrock (Claude) knowledge base (`asu_discord/cogs/qna.py`,
+  `asu_discord/cogs/forklift_qna.py`).
+- **Admin dashboard** — a React (Vite + ASU Unity theme) SPA for managing
+  verification exceptions, membership charts, tickets, automations, and analytics
+  exports, served from `asu-unity-react/` and backed by `routes/admin.py`.
+- **Scheduled jobs** — a lightweight cron manager (`cron/`) that, for example,
+  uploads verified-user emails to SFTP and syncs departed users to Google Sheets.
+
+## Project layout
+
+```
+main.py                 Flask app entrypoint; wires up blueprints, DB, cron, bot
+asu_discord/             Discord bot (py-cord) and cogs
+routes/                  Flask blueprints (admin, discord OAuth, CAS)
+services/                External integrations (Google Sheets)
+clients/                 External clients (SFTP)
+cron/                    Background job scheduler
+utils/                   Settings, database models, Salesforce client
+scripts/                 One-off/admin CLI scripts (backfills, lookups, reports)
+config/verification.yaml Verification role/eligibility config
+asu-unity-react/         Admin dashboard frontend (React + Vite)
+tests/                   Pytest suite
+```
+
+## Getting started
+
+### Requirements
+
+- Python 3.11+
+- Node.js (for the admin dashboard)
+- A Discord application/bot, and (optionally) ASU CAS, Salesforce, SFTP, and
+  Google Sheets credentials for the integrations you want to enable
+
+### Backend setup
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env  # update secrets before running
+cp .env.example .env   # fill in the values you need
 python main.py
 ```
 
-The server listens on `http://127.0.0.1:8000/`. Adjust values in `.env` to match
-your CAS endpoints, Discord application, and cookie preferences.
+The app reads configuration entirely from environment variables — see
+`.env.example` for the full list (Flask session settings, database URL, CAS,
+Discord OAuth/bot, Salesforce, SFTP, and Google Sheets). Most integrations are
+optional and no-op when their credentials are left unset.
 
-## Required environment variables
+### Frontend setup
 
-```
-DISCORD_CLIENT_ID=<Discord application client id>
-DISCORD_CLIENT_SECRET=<Discord application client secret>
-DISCORD_REDIRECT_URI=https://your-domain/auth/discord/callback
-DISCORD_BOT_TOKEN=<Discord bot token with Manage Roles permission>
-DISCORD_GUILD_ID=<Target guild snowflake>
-DISCORD_VERIFIED_ROLE_ID=<Role snowflake to assign after verification>
-FLASK_SECRET_KEY=<random string used for Flask sessions>
-DATABASE_URL=sqlite:////absolute/path/to/forklift.db
+```bash
+cd asu-unity-react
+npm install
+npm run build   # or `npm run dev` for local development
 ```
 
-Optional overrides:
+`main.py` serves the built SPA from `asu-unity-react/dist` (override with
+`REACT_BUILD_DIR`).
 
-```
-FORKLIFT_ENABLE_DISCORD_BOT=true
-DISCORD_SCOPE=identify
-DISCORD_TEST_GUILD_IDS=1082823852322725888
-DISCORD_SUCCESS_REDIRECT=/verified
-DISCORD_FAILURE_REDIRECT=/verification-error
-PUBLIC_BASE_URL=https://verify.example.asu.edu
-CAS_BASE_URL=https://cas.example.edu/cas
-CAS_LOGIN_URL=
-CAS_VALIDATE_URL=
-CAS_LOGOUT_URL=
-CAS_SERVICE_URL=https://verify.example.asu.edu/auth/cas/callback
-CAS_ENABLED=true
-# CAS attribute mapping (prefers CAS_ATTR_*, falls back to SAML_ATTR_* for compatibility)
-CAS_ATTR_ASURITE=uid
-CAS_ATTR_EMAIL=mail
-CAS_ATTR_FULL_NAME=displayName
-CAS_ATTR_FIRST_NAME=givenName
-CAS_ATTR_LAST_NAME=sn
-CAS_ATTR_AFFILIATIONS=eduPersonAffiliation
-SFTP_UPLOAD_ENABLED=true
-SFTP_HOST=sftp.example.com
-SFTP_PORT=22
-SFTP_USERNAME=forklift
-SFTP_PASSWORD=super-secret
-SFTP_KEY_FILE=/path/to/private/key
-SFTP_REMOTE_DIR=/Export
-SFTP_FILENAME_PREFIX=D2D_Verified
-SFTP_STATE_PATH=/app/data/upload_emails_to_sftp.state
-SFTP_TIMEOUT=30
+### Docker
+
+```bash
+docker compose up --build
 ```
 
-## Verification flow
+See `docker-compose.yml` for the `forklift` service (web app + bot) and the
+`lookup-members` one-off tool profile.
 
-1. `/auth/cas/login` starts ASU SSO through CAS and persists key identity attributes when CAS returns to `/auth/cas/callback`.
-2. On success the browser continues to `/auth/discord/login` for Discord OAuth2
-   consent.
-3. `/auth/discord/callback` exchanges the authorization code and assigns the
-   verified role to members who are already in the guild.
-4. The combined record is stored in the `users` table and the session is marked
-   complete so the landing page shows the verified state.
+## Testing
 
-## SFTP email export
-
-When `SFTP_UPLOAD_ENABLED=true`, the app starts a daily scheduler that uploads a
-CSV of verified users (`email,verified_at`) over SFTP to `SFTP_REMOTE_DIR`
-(default: `/Export`). Filenames default to `D2D_Verified_YYYYMMDD.csv`. The
-first run sends all verified users; subsequent runs send only those verified
-since the previous upload. A state file (default:
-`/app/data/upload_emails_to_sftp.state`) tracks the last successful upload.
-Provide either `SFTP_PASSWORD` or `SFTP_KEY_FILE` for authentication.
-
-## Discord bot
-
-The project ships with a lightweight Discord bot (powered by [py-cord]) that can
-manage verification directly in the guild. Instantiate it with:
-
-```python
-from asu_discord import create_bot
-from utils.settings import DISCORD_CONFIG
-
-bot = create_bot(command_prefix="!")
-bot.run(DISCORD_CONFIG.bot_token)
+```bash
+pytest
 ```
 
-The bot loads a verification cog that exposes `!verify @member` and
-`!unverify @member` commands (requires the `Manage Roles` permission) to assign
-or remove the configured verification role. Use `/setup_verification` (requires
-`Manage Server`) to post the Devil2Devil verification embed and "Verify
-Here" button in the current channel. Populate `DISCORD_TEST_GUILD_IDS` (comma-
-separated) to register the slash command as a guild command for those IDs so it
-appears immediately while testing. Set `FORKLIFT_ENABLE_DISCORD_BOT=true` to run
-the bot inside the Flask container; disable it if you prefer a separate process.
+## Contributing
 
-[py-cord]: https://pypi.org/project/py-cord/
+Contributions are welcome — please open a pull request against `master`.

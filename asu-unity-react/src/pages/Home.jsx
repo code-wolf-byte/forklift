@@ -1,40 +1,59 @@
-import heroImage from "../assets/devil2devil-hero.jpeg";
+import { useState } from "react";
 import profileGif from "../assets/devil2devil-profile.gif";
 
-// ─── Hero ─────────────────────────────────────────────────────────────────────
+const isAndroid = /android/i.test(navigator.userAgent);
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
 
-function HeroSection() {
-  return (
-    <div className="uds-hero-lg">
-      <div className="hero-overlay" />
-      <img
-        className="hero"
-        src={heroImage}
-        alt=""
-        loading="lazy"
-        decoding="async"
-      />
-      <h1>
-        <span className="highlight-gold">Devil2Devil</span>
-      </h1>
-      <div className="content hero-cta">
-        <p className="text-white">
-          Find new friends, join communities and make connections in ASU's
-          Devil2Devil Discord server for admitted students.
-        </p>
-        <div className="d-flex flex-wrap gap-3 align-items-center mt-4 hero-cta-buttons">
-          <a
-            className="btn btn-maroon text-white"
-            href="https://devil2devil.asu.edu/"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Learn more
-          </a>
-        </div>
-      </div>
-    </div>
-  );
+function toAndroidIntentUrl(url) {
+  const parsed = new URL(url);
+  const fallback = encodeURIComponent(url);
+  return `intent://${parsed.host}${parsed.pathname}${parsed.search}#Intent;scheme=https;package=com.discord;S.browser_fallback_url=${fallback};end`;
+}
+
+function navigateWithIOSFallback(appUrl, webUrl) {
+  const start = Date.now();
+  window.location.href = appUrl;
+  setTimeout(() => {
+    if (Date.now() - start < 1800) {
+      window.location.href = webUrl;
+    }
+  }, 1500);
+}
+
+function useDiscordRedirect() {
+  const [loading, setLoading] = useState(false);
+
+  const handleClick = async (e) => {
+    e.preventDefault();
+    if (loading) return;
+    setLoading(true);
+    try {
+      const res = await fetch("/auth/discord/prepare", { method: "POST" });
+      const data = await res.json();
+      if (data.authorize_url) {
+        if (isAndroid) {
+          window.location.href = toAndroidIntentUrl(data.authorize_url);
+        } else if (isIOS) {
+          const parsed = new URL(data.authorize_url);
+          const appUrl = `discord://${parsed.host}${parsed.pathname}${parsed.search}`;
+          navigateWithIOSFallback(appUrl, data.authorize_url);
+        } else {
+          window.location.href = data.authorize_url;
+        }
+        return;
+      }
+      if (data.redirect) {
+        window.location.href = data.redirect;
+        return;
+      }
+    } catch {
+      window.location.href = "/auth/discord/login";
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { handleClick, loading };
 }
 
 // ─── Verification step card ────────────────────────────────────────────────────
@@ -78,6 +97,7 @@ function VerificationSection({
   discordUser,
   isAdmin,
 }) {
+  const { handleClick: handleDiscordClick, loading: discordLoading } = useDiscordRedirect();
   const step2Enabled = casComplete;
   const step3Enabled = discordComplete;
 
@@ -175,13 +195,19 @@ function VerificationSection({
               enabled={step2Enabled}
             >
               {discordConfigured && discordLoginUrl ? (
-                <a
-                  href={discordLoginUrl}
+                <button
+                  type="button"
+                  onClick={handleDiscordClick}
+                  disabled={!step2Enabled || discordLoading}
                   className={`btn btn-maroon${!step2Enabled ? " disabled" : ""}`}
                   aria-disabled={!step2Enabled || undefined}
                 >
-                  {discordComplete ? "Manage Discord Link" : "Connect Discord"}
-                </a>
+                  {discordLoading
+                    ? "Connecting…"
+                    : discordComplete
+                    ? "Manage Discord Link"
+                    : "Connect Discord"}
+                </button>
               ) : (
                 <div className="alert alert-secondary small mb-0">
                   Discord integration is not configured.
@@ -320,7 +346,6 @@ export default function Home({ status }) {
 
   return (
     <>
-      <HeroSection />
       <VerificationSection
         casComplete={cas_complete}
         discordComplete={discord_complete}

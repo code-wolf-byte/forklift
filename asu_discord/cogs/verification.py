@@ -11,7 +11,7 @@ from discord.commands import Option, slash_command
 from sqlalchemy import func, select
 
 from utils.settings import DISCORD_CONFIG
-from utils.database import User, session_scope, save_user_roles, get_user_by_discord_id, get_exceptions_for_discord_id
+from utils.database import DiscordMember, User, UserRoleException, session_scope, save_user_roles, get_user_by_discord_id, get_exceptions_for_discord_id
 from services.google_sheets import write_user_left
 from ..models import SalesforceOpportunity, StudentProfile
 from ..roles import role_id_map
@@ -59,6 +59,59 @@ def _admin_command_kwargs(name: str, description: str) -> dict[str, Any]:
     return kwargs
 
 
+CAMPUS_ROLES: list[str] = [
+    "Tempe",
+    "Downtown Phoenix",
+    "Polytechnic",
+    "LA Center",
+    "West Valley",
+    "Online",
+]
+
+
+def _asurite_from_email(email: str) -> str | None:
+    """ASU emails are {asurite}@asu.edu; anything else has no derivable ASURITE."""
+    local, _, domain = email.strip().lower().partition("@")
+    if not local or not (domain == "asu.edu" or domain.endswith(".asu.edu")):
+        return None
+    return local
+
+
+def _record_verification(discord_user_id: str, email: str) -> str | None:
+    """Link the Discord account to a User row, storing ``email``, and return its ASURITE.
+
+    Keyed on ASURITE (the only unique identity) when an ASU email is supplied,
+    falling back to the existing Discord link. Returns None when there is no
+    record to update and none can be created.
+    """
+    asurite = _asurite_from_email(email) if email else None
+    with session_scope() as session:
+        user = None
+        if asurite:
+            user = (
+                session.query(User)
+                .filter(func.lower(User.asurite_id) == asurite)
+                .one_or_none()
+            )
+        if user is None:
+            user = (
+                session.query(User)
+                .filter(User.discord_user_id == discord_user_id)
+                .order_by(User.id.desc())
+                .first()
+            )
+        if user is None:
+            if not asurite:
+                return None
+            user = User(asurite_id=asurite, email=email)
+            session.add(user)
+
+        if email:
+            user.email = email
+        user.discord_user_id = discord_user_id
+        user.verified = True
+        user.verified_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        return user.asurite_id or None
 def _is_enrolled_or_admitted(opp: SalesforceOpportunity) -> bool:
     stage = (opp.stageName or "").strip().lower()
     return stage in {"enrolled", "admitted"}
@@ -393,6 +446,7 @@ class VerificationCog(commands.Cog):
         else:
             logger.info("VerificationCog ready in guild %s (%s)", guild.id, guild.name)
             asyncio.ensure_future(self._strip_unverified_role_from_verified_members(guild))
+            asyncio.ensure_future(self._backfill_discord_members(guild))
 
     async def _strip_unverified_role_from_verified_members(self, guild: discord.Guild) -> None:
         """On startup, remove the unverified role from any member already verified in the DB."""
@@ -425,44 +479,100 @@ class VerificationCog(commands.Cog):
 
         logger.info("Startup strip complete: removed unverified role from %d member(s)", removed)
 
+    async def _backfill_discord_members(self, guild: discord.Guild) -> None:
+        """On startup, ensure every current guild member has a DiscordMember row."""
+        with session_scope() as session:
+            existing_ids = {
+                row[0]
+                for row in session.query(DiscordMember.discord_user_id).all()
+            }
+            new_rows = []
+            for member in guild.members:
+                discord_id = str(member.id)
+                if discord_id in existing_ids:
+                    continue
+                joined = (
+                    member.joined_at.replace(tzinfo=None)
+                    if member.joined_at
+                    else datetime.utcnow()
+                )
+                new_rows.append(
+                    DiscordMember(
+                        discord_user_id=discord_id,
+                        discord_username=str(member),
+                        joined_at=joined,
+                    )
+                )
+            if new_rows:
+                session.bulk_save_objects(new_rows)
+        logger.info("Discord member backfill complete: inserted %d row(s)", len(new_rows))
+
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
-        """Track when a linked Discord user joins the guild."""
+        """Track every guild join in DiscordMember; also update User if already linked."""
         if member.guild.id != self.guild_id:
             return
 
+        now = datetime.utcnow()
+        discord_id = str(member.id)
+
         with session_scope() as session:
-            user = (
-                session.query(User)
-                .filter(User.discord_user_id == str(member.id))
+            dm = (
+                session.query(DiscordMember)
+                .filter(DiscordMember.discord_user_id == discord_id)
                 .one_or_none()
             )
-            if user is None:
-                return
+            if dm is None:
+                session.add(
+                    DiscordMember(
+                        discord_user_id=discord_id,
+                        discord_username=str(member),
+                        joined_at=now,
+                    )
+                )
+            else:
+                dm.discord_username = str(member)
+                dm.joined_at = now
+                dm.left_at = None
 
-            user.joined_at = datetime.utcnow()
-            user.left_at = None
+            user = (
+                session.query(User)
+                .filter(User.discord_user_id == discord_id)
+                .order_by(User.id.desc())
+                .first()
+            )
+            if user is not None:
+                user.joined_at = now
+                user.left_at = None
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member) -> None:
-        """Track when a linked Discord user leaves the guild."""
+        """Track every guild leave in DiscordMember; also update User if linked."""
         if member.guild.id != self.guild_id:
             return
 
+        now = datetime.utcnow()
+        discord_id = str(member.id)
+
         with session_scope() as session:
-            user = (
-                session.query(User)
-                .filter(User.discord_user_id == str(member.id))
+            dm = (
+                session.query(DiscordMember)
+                .filter(DiscordMember.discord_user_id == discord_id)
                 .one_or_none()
             )
-            if user is None:
-                return
+            if dm is not None:
+                dm.left_at = now
 
-            now = datetime.utcnow()
-            user.left_at = now
-
-            if user.verified and user.email:
-                write_user_left(user.email, now)
+            user = (
+                session.query(User)
+                .filter(User.discord_user_id == discord_id)
+                .order_by(User.id.desc())
+                .first()
+            )
+            if user is not None:
+                user.left_at = now
+                if user.verified and user.email:
+                    write_user_left(user.email, now)
 
     # Alias to match common terminology
     on_member_leave = on_member_remove
@@ -476,8 +586,14 @@ class VerificationCog(commands.Cog):
         self,
         ctx: discord.ApplicationContext,
         member: discord.Member = Option(discord.Member, "Member to verify"),
+        email: str = Option(
+            str,
+            "ASU email to record for this member and look up in Salesforce",
+            required=False,
+            default=None,
+        ),
     ) -> None:
-        """Assign the verification role to a member."""
+        """Assign the verification role to a member, optionally recording their ASU email."""
         if not await self._require_home_guild(ctx):
             return
 
@@ -486,23 +602,29 @@ class VerificationCog(commands.Cog):
             await ctx.respond("Unable to locate the configured verification role for this server.")
             return
 
-        if role in member.roles:
+        email = (email or "").strip()
+        if email and "@" not in email:
+            await ctx.respond(f"`{email}` is not a valid email address.", ephemeral=True)
+            return
+
+        if role in member.roles and not email:
             await ctx.respond(f"{member.mention} already has the verification role.")
             return
 
+        await ctx.defer()
+
         reason = f"Manual verification by {ctx.author}"
-        await member.add_roles(role, reason=reason)
+        if role not in member.roles:
+            await member.add_roles(role, reason=reason)
         await self._remove_unverified_role(ctx.guild, member, reason=reason)
 
         try:
-            with session_scope() as session:
-                user = session.query(User).filter(User.discord_user_id == str(member.id)).one_or_none()
-            asurite = user.asurite_id if user else None
+            asurite = await asyncio.to_thread(_record_verification, str(member.id), email)
             if asurite:
                 profile = await asyncio.to_thread(get_student_profile, asurite)
-                if "asurite" in profile:
+                if profile and "asurite" in profile:
                     asyncio.create_task(asyncio.to_thread(cache_sf_profile, asurite, profile))
-                if not profile.get("error"):
+                if profile and not profile.get("error"):
                     await self.assign_roles_from_profile(member.id, profile)
         except Exception:
             logger.exception("Failed to assign Salesforce-based roles for user %s", member.id)
@@ -512,7 +634,15 @@ class VerificationCog(commands.Cog):
             )
             return
 
-        await ctx.respond(f"{member.mention} has been marked as verified. ✅")
+        if asurite is None:
+            await ctx.respond(
+                f"{member.mention} has been marked as verified, but they have no record "
+                "in the system — pass an `@asu.edu` email to create one and assign roles.",
+            )
+            return
+
+        recorded = f" Recorded `{email}` and synced roles from Salesforce." if email else ""
+        await ctx.respond(f"{member.mention} has been marked as verified. ✅{recorded}")
 
     async def verify_member_by_id(
         self, user_id: int, *, asurite: str | None = None
@@ -744,6 +874,49 @@ class VerificationCog(commands.Cog):
             ", ".join(sorted(effective_names)) if effective_names else "none",
         )
 
+    async def strip_unregistered_members(
+        self, registered_discord_ids: set[str]
+    ) -> tuple[int, int]:
+        """Remove verified and all ROLE_ID_MAP roles from guild members not in the DB.
+
+        Returns (stripped_count, error_count).
+        """
+        await self.bot.wait_until_ready()
+        guild = await self._resolve_guild()
+
+        verified_role = self._get_verified_role(guild)
+        managed_role_ids = set(ROLE_ID_MAP.values())
+        if verified_role is not None:
+            managed_role_ids.add(verified_role.id)
+
+        stripped = 0
+        errors = 0
+        for member in guild.members:
+            if str(member.id) in registered_discord_ids:
+                continue
+            roles_to_remove = [r for r in member.roles if r.id in managed_role_ids]
+            if not roles_to_remove:
+                continue
+            try:
+                await member.remove_roles(
+                    *roles_to_remove,
+                    reason="Admin: purge roles from non-registered member",
+                )
+                stripped += 1
+                logger.info("Stripped roles from non-registered member %s", member.id)
+            except discord.HTTPException as exc:
+                logger.warning(
+                    "Failed to strip roles from non-registered member %s: %s",
+                    member.id,
+                    exc,
+                )
+                errors += 1
+
+        logger.info(
+            "strip_unregistered_members complete: stripped=%d errors=%d", stripped, errors
+        )
+        return stripped, errors
+
     @slash_command(
         **_moderation_command_kwargs(
             "unverify", "Remove the verification role from a member."
@@ -803,7 +976,8 @@ class VerificationCog(commands.Cog):
                 linked = (
                     db_session.query(User)
                     .filter(User.discord_user_id == str(member.id))
-                    .one_or_none()
+                    .order_by(User.id.desc())
+                    .first()
                 )
             if linked is None or not linked.asurite_id:
                 await ctx.followup.send(
@@ -915,7 +1089,8 @@ class VerificationCog(commands.Cog):
             db_user = (
                 db_session.query(User)
                 .filter(User.discord_user_id == str(member.id))
-                .one_or_none()
+                .order_by(User.id.desc())
+                .first()
             )
             if db_user is None:
                 no_record = True
@@ -1021,6 +1196,99 @@ class VerificationCog(commands.Cog):
             "Verification prompt posted with the Verify Here button.", ephemeral=True
         )
 
+    @slash_command(
+        **_admin_command_kwargs(
+            "changecampus", "Update a member's campus role in the Devil2Devil server."
+        )
+    )
+    async def changecampus(
+        self,
+        ctx: discord.ApplicationContext,
+        member: discord.Member = Option(discord.Member, "Member to update"),
+        campus: str = Option(
+            str,
+            "Campus to assign",
+            choices=CAMPUS_ROLES,
+            required=True,
+        ),
+    ) -> None:
+        """Allow an admin to update a member's campus role."""
+        if not await self._require_home_guild(ctx):
+            return
+
+        await ctx.defer(ephemeral=True)
+
+        with session_scope() as db_session:
+            db_user = (
+                db_session.query(User)
+                .filter(User.discord_user_id == str(member.id))
+                .order_by(User.id.desc())
+                .first()
+            )
+            if db_user is None or not db_user.verified:
+                await ctx.followup.send(
+                    f"{member.mention} must be verified to have their campus role changed.",
+                    ephemeral=True,
+                )
+                return
+
+        guild = ctx.guild
+        reason = f"Campus change via /changecampus by {ctx.author}: {campus!r}"
+
+        # Swap campus roles on Discord
+        roles_to_remove = [
+            guild.get_role(ROLE_ID_MAP[name])
+            for name in CAMPUS_ROLES
+            if name != campus and name in ROLE_ID_MAP
+        ]
+        roles_to_remove = [r for r in roles_to_remove if r is not None and r in member.roles]
+        if roles_to_remove:
+            try:
+                await member.remove_roles(*roles_to_remove, reason=reason)
+            except discord.HTTPException as exc:
+                logger.warning("Failed to remove campus roles from %s: %s", member.id, exc)
+
+        new_role_id = ROLE_ID_MAP.get(campus)
+        if new_role_id is not None:
+            new_role = guild.get_role(new_role_id)
+            if new_role is not None and new_role not in member.roles:
+                try:
+                    await member.add_roles(new_role, reason=reason)
+                except discord.HTTPException as exc:
+                    logger.warning("Failed to add campus role %r to %s: %s", campus, member.id, exc)
+
+        # Write exceptions so Salesforce syncs honour the admin's choice:
+        # "added" for the selected campus, "paused" for all others.
+        discord_user_id = str(member.id)
+        admin_id = str(ctx.author.id)
+        with session_scope() as db_session:
+            db_session.query(UserRoleException).filter(
+                UserRoleException.discord_user_id == discord_user_id,
+                UserRoleException.role_name.in_(CAMPUS_ROLES),
+            ).delete(synchronize_session=False)
+
+            db_session.add(UserRoleException(
+                discord_user_id=discord_user_id,
+                role_name=campus,
+                exception_type="added",
+                note=f"Admin-set via /changecampus by {ctx.author}",
+                created_by=admin_id,
+            ))
+            for other in CAMPUS_ROLES:
+                if other != campus:
+                    db_session.add(UserRoleException(
+                        discord_user_id=discord_user_id,
+                        role_name=other,
+                        exception_type="paused",
+                        note=f"Suppressed by /changecampus selection: {campus!r} (set by {ctx.author})",
+                        created_by=admin_id,
+                    ))
+
+        await ctx.followup.send(
+            f"{member.mention}'s campus has been updated to **{campus}**. ✅",
+            ephemeral=True,
+        )
+
     @slash_command(**_admin_command_kwargs("email", "Look up the ASU email for a verified member."))
     async def get_member_email(
         self,
@@ -1035,7 +1303,8 @@ class VerificationCog(commands.Cog):
             db_user = (
                 db_session.query(User)
                 .filter(User.discord_user_id == str(user.id))
-                .one_or_none()
+                .order_by(User.id.desc())
+                .first()
             )
 
         if db_user is None:

@@ -184,19 +184,12 @@ def remove_roles_from_profile(user_id: str, student_profile: StudentProfile) -> 
     )
 
 
-_DISCORD_TEXT_CHANNEL_TYPES = frozenset({0, 5})   # GUILD_TEXT, GUILD_ANNOUNCEMENT
-_DISCORD_FORUM_CHANNEL_TYPES = frozenset({15})    # GUILD_FORUM
+_DISCORD_TEXT_CHANNEL_TYPES = frozenset({0, 5})  # GUILD_TEXT, GUILD_ANNOUNCEMENT
+_DISCORD_FORUM_CHANNEL_TYPES = frozenset({15})  # GUILD_FORUM
+_DISCORD_CATEGORY_CHANNEL_TYPE = 4  # GUILD_CATEGORY
 
 
-def get_guild_channels(
-    *, channel_types: frozenset[int] | None = None
-) -> list[dict]:
-    """Return guild channels as {id, name, type} dicts, text-only by default.
-
-    Uses the Discord REST API directly so it works whether or not the bot
-    process is running.
-    """
-    wanted = channel_types or _DISCORD_TEXT_CHANNEL_TYPES
+def _fetch_guild_channels_raw() -> list[dict]:
     cfg = _config()
     url = f"{cfg.api_base}/guilds/{cfg.guild_id}/channels"
     headers = {"Authorization": f"Bot {cfg.bot_token}"}
@@ -210,7 +203,17 @@ def get_guild_channels(
         logger.error("Discord API returned %s fetching guild channels", response.status_code)
         return []
 
-    channels = response.json() if isinstance(response.json(), list) else []
+    return response.json() if isinstance(response.json(), list) else []
+
+
+def get_guild_channels(*, channel_types: frozenset[int] | None = None) -> list[dict]:
+    """Return guild channels as {id, name, type} dicts, text-only by default.
+
+    Uses the Discord REST API directly so it works whether or not the bot
+    process is running.
+    """
+    wanted = channel_types or _DISCORD_TEXT_CHANNEL_TYPES
+    channels = _fetch_guild_channels_raw()
     return sorted(
         [
             {"id": ch["id"], "name": ch["name"], "type": ch["type"]}
@@ -247,13 +250,28 @@ def get_guild_roles() -> list[dict]:
             {
                 "id": role["id"],
                 "name": role["name"],
-                "color": role.get("color", 0),
+                "color": f"#{role['color']:06x}" if role.get("color") else None,
                 "position": role.get("position", 0),
             }
             for role in roles
-            if role["id"] != str(cfg.guild_id) and not role.get("managed")
+            if role.get("id") != str(cfg.guild_id)
+            and role.get("name") != "@everyone"
+            and not role.get("managed")
         ],
         key=lambda r: -r["position"],
+    )
+
+
+def get_guild_category_channels() -> list[dict]:
+    """Return category channels in the guild as a list of {id, name} dicts."""
+    channels = _fetch_guild_channels_raw()
+    return sorted(
+        [
+            {"id": ch["id"], "name": ch["name"]}
+            for ch in channels
+            if ch.get("type") == _DISCORD_CATEGORY_CHANNEL_TYPE
+        ],
+        key=lambda c: c["name"],
     )
 
 
@@ -382,6 +400,59 @@ def check_member_has_any_role(discord_user_id: str, role_ids: list[str]) -> bool
     return bool(member_role_ids & set(role_ids))
 
 
+def get_live_member_counts() -> dict | None:
+    """Return live verified/unverified counts from the bot's guild cache.
+
+    Returns None if the bot or guild is unavailable.
+    """
+    bot = get_running_bot()
+    if bot is None:
+        return None
+    cfg = _config()
+    guild = bot.get_guild(int(cfg.guild_id))
+    if guild is None:
+        return None
+
+    verified_role_id = str(cfg.verified_role_id) if cfg.verified_role_id else None
+    unverified_role_id = str(cfg.unverified_role_id) if cfg.unverified_role_id else None
+
+    total = 0
+    verified = 0
+    unverified = 0
+    for member in guild.members:
+        if member.bot:
+            continue
+        total += 1
+        role_ids = {str(r.id) for r in member.roles}
+        if verified_role_id and verified_role_id in role_ids:
+            verified += 1
+        elif unverified_role_id and unverified_role_id in role_ids:
+            unverified += 1
+
+    return {"total": total, "verified": verified, "unverified": unverified}
+
+
+def get_role_member_ids(role_id: int) -> set[str] | None:
+    """Return the discord_user_ids currently holding the given role.
+
+    Returns None if the bot or guild is unavailable, or an empty set if the
+    role itself doesn't exist. Reflects current role membership only — not a
+    historical snapshot.
+    """
+    bot = get_running_bot()
+    if bot is None:
+        return None
+    cfg = _config()
+    guild = bot.get_guild(int(cfg.guild_id))
+    if guild is None:
+        return None
+
+    role = guild.get_role(role_id)
+    if role is None:
+        return set()
+    return {str(m.id) for m in role.members}
+
+
 def _safe_json(response: requests.Response) -> Dict[str, Any]:
     try:
         data = response.json()
@@ -402,9 +473,12 @@ __all__ = [
     "check_member_is_admin",
     "exchange_code_for_token",
     "fetch_user_profile",
+    "get_guild_category_channels",
     "get_guild_channels",
     "get_guild_roles",
+    "get_live_member_counts",
     "get_member_info",
+    "get_role_member_ids",
     "refresh_roles_from_profile",
     "remove_role_from_member",
     "remove_roles_from_profile",

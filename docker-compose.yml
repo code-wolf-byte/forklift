@@ -1,12 +1,20 @@
+secrets:
+  npm_token:
+    environment: NPM_AUTH_TOKEN
+
 services:
   forklift:
-    image: codewolfbyte/forklift:latest
+    image: codewolfbyte/forklift:staging
     build:
       context: .
-      args:
-        NPM_AUTH_TOKEN: ${NPM_AUTH_TOKEN}
+      secrets:
+        - npm_token
     env_file:
       - .env
+    environment:
+      # Overrides the host path in .env — inside the container the DB lives on the
+      # ./data bind mount at /app/data.
+      - DATABASE_URL=sqlite:////app/data/forklift.db
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -18,13 +26,15 @@ services:
       - "com.centurylinklabs.watchtower.scope=forklift"
 
   lookup-members:
-    image: codewolfbyte/forklift:latest
+    image: codewolfbyte/forklift:staging
     build:
       context: .
-      args:
-        NPM_AUTH_TOKEN: ${NPM_AUTH_TOKEN}
+      secrets:
+        - npm_token
     env_file:
       - .env
+    environment:
+      - DATABASE_URL=sqlite:////app/data/forklift.db
     volumes:
       - ./data:/app/data
     entrypoint: ["python", "scripts/lookup_members.py"]
