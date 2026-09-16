@@ -4,17 +4,11 @@ import logging
 import secrets
 import threading
 from datetime import datetime
-from pathlib import Path
 
-import yaml
 from flask import Blueprint, redirect, request, session, url_for
 from sqlalchemy.exc import IntegrityError
 
-_ADMIN_CONFIG_PATH = Path(__file__).parent.parent / "config" / "verification.yaml"
-with _ADMIN_CONFIG_PATH.open() as _f:
-    _ADMIN_RESTRICTED_ROLE_IDS: list[str] = (
-        yaml.safe_load(_f).get("admin", {}).get("restricted_role_ids", [])
-    )
+from utils.app_settings import get as get_setting
 
 from asu_discord.api import (
     DiscordAPIError,
@@ -355,7 +349,7 @@ def discord_callback():
 
     is_officer = False
     try:
-        is_officer = (not is_admin) and check_member_has_any_role(discord_user_id, _ADMIN_RESTRICTED_ROLE_IDS)
+        is_officer = (not is_admin) and check_member_has_any_role(discord_user_id, get_setting("admin_restricted_role_ids"))
     except Exception:
         logger.warning("Failed to check officer role for Discord user %s", discord_user_id)
     session["is_officer"] = is_officer

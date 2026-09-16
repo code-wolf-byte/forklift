@@ -8,13 +8,12 @@ import threading
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from functools import wraps
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import yaml
 from flask import Blueprint, Response, abort, jsonify, redirect, request, send_from_directory, session
 from sqlalchemy import func
 
+from utils import app_settings
 from utils.database import (
     CronJobConfig,
     EventParticipant,
@@ -37,12 +36,6 @@ AZ_TZ = ZoneInfo("America/Phoenix")
 
 admin_bp = Blueprint("admin", __name__)
 logger = logging.getLogger(__name__)
-
-_ADMIN_CONFIG_PATH = Path(__file__).parent.parent / "config" / "verification.yaml"
-with _ADMIN_CONFIG_PATH.open() as _f:
-    _ADMIN_RESTRICTED_ROLE_IDS: list[str] = (
-        yaml.safe_load(_f).get("admin", {}).get("restricted_role_ids", [])
-    )
 
 REACT_BUILD_DIR = os.getenv(
     "REACT_BUILD_DIR",
@@ -115,7 +108,7 @@ def admin_me():
     if not is_admin:
         try:
             from asu_discord.api import check_member_has_any_role
-            is_officer = check_member_has_any_role(discord_user_id, _ADMIN_RESTRICTED_ROLE_IDS)
+            is_officer = check_member_has_any_role(discord_user_id, app_settings.get("admin_restricted_role_ids"))
         except Exception:
             logger.warning("Failed to refresh officer role for %s", discord_user_id)
     session["is_officer"] = is_officer
@@ -419,12 +412,118 @@ def admin_reset_automation(job_name: str):
 @admin_bp.route("/api/admin/discord-channels")
 @require_admin
 def admin_discord_channels():
+    """Text channels by default; ?include=forum adds forum channels."""
     try:
-        from asu_discord.api import get_guild_channels
-        channels = get_guild_channels()
+        from asu_discord.api import (
+            _DISCORD_FORUM_CHANNEL_TYPES,
+            _DISCORD_TEXT_CHANNEL_TYPES,
+            get_guild_channels,
+        )
+
+        wanted = _DISCORD_TEXT_CHANNEL_TYPES
+        include = {part.strip() for part in (request.args.get("include") or "").split(",")}
+        if "forum" in include:
+            wanted = wanted | _DISCORD_FORUM_CHANNEL_TYPES
+        channels = get_guild_channels(channel_types=wanted)
     except Exception:
+        logger.exception("Failed to fetch guild channels")
         channels = []
     return jsonify(channels)
+
+
+@admin_bp.route("/api/admin/discord-roles")
+@require_admin
+def admin_discord_roles():
+    try:
+        from asu_discord.api import get_guild_roles
+        roles = get_guild_roles()
+    except Exception:
+        logger.exception("Failed to fetch guild roles")
+        roles = []
+    return jsonify(roles)
+
+
+# ─── Settings ─────────────────────────────────────────────────────────────────
+
+
+def _known_guild_ids() -> set[str] | None:
+    """IDs of every role and channel in the guild, or None if Discord is unreachable.
+
+    Used to reject a setting that points at something that does not exist — a
+    typo here silently disables verification, so it is worth the round trip.
+    """
+    try:
+        from asu_discord.api import get_guild_channels, get_guild_roles
+
+        roles = get_guild_roles()
+        channels = get_guild_channels(
+            channel_types=frozenset({0, 5, 15})
+        )
+    except Exception:
+        logger.exception("Could not fetch guild roles/channels to validate settings")
+        return None
+
+    if not roles and not channels:
+        return None
+    return {item["id"] for item in roles} | {item["id"] for item in channels}
+
+
+@admin_bp.route("/api/admin/settings")
+@require_full_admin
+def admin_settings():
+    return jsonify(app_settings.get_all())
+
+
+@admin_bp.route("/api/admin/settings", methods=["PUT"])
+@require_full_admin
+def admin_update_settings():
+    """Partial update. A null value resets that key to its built-in default."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not data:
+        return jsonify({"error": "Expected a non-empty object of settings"}), 400
+
+    unknown = sorted(set(data) - set(app_settings.KEYS))
+    if unknown:
+        return jsonify({"error": f"Unknown setting(s): {', '.join(unknown)}"}), 400
+
+    # Structural validation first, so a typo never reaches the guild lookup.
+    try:
+        cleaned = {
+            key: (None if value is None else app_settings.validate(key, value))
+            for key, value in data.items()
+        }
+    except app_settings.SettingsValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    known_ids = _known_guild_ids()
+    if known_ids is not None:
+        missing = sorted(
+            {
+                snowflake
+                for key, value in cleaned.items()
+                if value is not None
+                for snowflake in app_settings.iter_snowflakes(key, value)
+                if snowflake not in known_ids
+            }
+        )
+        if missing:
+            return (
+                jsonify(
+                    {
+                        "error": "No such role or channel in the guild: "
+                        + ", ".join(missing)
+                    }
+                ),
+                400,
+            )
+
+    updated_by = (session.get("verification_state") or {}).get("discord_user_id")
+    try:
+        app_settings.set_many(data, updated_by=updated_by)
+    except app_settings.SettingsValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify(app_settings.get_all())
 
 
 # ─── Roles ────────────────────────────────────────────────────────────────────
@@ -1792,8 +1891,8 @@ def admin_exceptions_pause(discord_user_id: str):
     role_name = (data.get("role_name") or "").strip()
     note = (data.get("note") or "").strip() or None
 
-    from asu_discord.roles import ROLE_ID_MAP
-    if role_name not in ROLE_ID_MAP:
+    from asu_discord.roles import role_id_map
+    if role_name not in role_id_map():
         return jsonify({"error": f"Unknown role: {role_name!r}"}), 400
 
     admin_discord_id = (session.get("verification_state") or {}).get("discord_user_id")
@@ -1826,8 +1925,8 @@ def admin_exceptions_add(discord_user_id: str):
     role_name = (data.get("role_name") or "").strip()
     note = (data.get("note") or "").strip() or None
 
-    from asu_discord.roles import ROLE_ID_MAP
-    if role_name not in ROLE_ID_MAP:
+    from asu_discord.roles import role_id_map
+    if role_name not in role_id_map():
         return jsonify({"error": f"Unknown role: {role_name!r}"}), 400
 
     admin_discord_id = (session.get("verification_state") or {}).get("discord_user_id")

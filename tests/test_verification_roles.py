@@ -5,12 +5,12 @@ from __future__ import annotations
 import pytest
 
 from asu_discord.cogs.verification import (
-    TARGET_TERM_CODE,
     _college_role_from_name,
     _campus_role_from_location,
     role_names_from_student_profile,
 )
 from asu_discord.models import SalesforceOpportunity, StudentProfile
+from utils.app_settings import get as get_setting
 from tests.conftest import make_opportunity, make_student_profile
 
 
@@ -20,11 +20,12 @@ from tests.conftest import make_opportunity, make_student_profile
 
 class TestTargetTermCode:
     def test_loaded_from_yaml(self):
-        assert isinstance(TARGET_TERM_CODE, str)
-        assert len(TARGET_TERM_CODE) == 4
+        term_code = get_setting("target_term_code")
+        assert isinstance(term_code, str)
+        assert len(term_code) == 4
 
     def test_current_value(self):
-        assert TARGET_TERM_CODE == "2267"
+        assert get_setting("target_term_code") == "2267"
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +205,6 @@ class TestRoleNamesFromStudentProfile:
         assert "Graduate Student" in roles
 
     def test_profile_level_college_fallback(self):
-        from asu_discord.roles import ROLE_ID_MAP
         college = "W.P. Carey School of Business"
         profile = make_student_profile(college=college)
         roles = role_names_from_student_profile(profile)

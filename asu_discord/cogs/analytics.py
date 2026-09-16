@@ -25,6 +25,7 @@ from typing import Optional
 import discord
 from discord.ext import commands
 
+from utils.app_settings import get as get_setting
 from utils.database import (
     ForumPost,
     GoldGuideContribution,
@@ -37,7 +38,16 @@ from utils.database import (
 
 logger = logging.getLogger(__name__)
 
-GOLD_GUIDE_ROLE_ID = 1187156709597270157
+
+def _normalize_id(raw) -> Optional[int]:
+    """Coerce a configured snowflake string to int, or None when unset/invalid."""
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        logger.warning("Invalid Discord snowflake configured: %s", raw)
+        return None
 
 # ── Message backfill settings (carried over from MessageLoggerCog) ────────────
 BACKFILL_LOOKBACK_DAYS = 365
@@ -97,10 +107,12 @@ class AnalyticsCog(commands.Cog):
         )
 
         # Gold Guide contribution in a QnA thread
+        gold_guide_role_id = _normalize_id(get_setting("gold_guide_role_id"))
         if (
-            isinstance(message.channel, discord.Thread)
+            gold_guide_role_id is not None
+            and isinstance(message.channel, discord.Thread)
             and isinstance(message.author, discord.Member)
-            and any(r.id == GOLD_GUIDE_ROLE_ID for r in message.author.roles)
+            and any(r.id == gold_guide_role_id for r in message.author.roles)
         ):
             qna_forum_id = self._get_qna_forum_id()
             if qna_forum_id is not None and message.channel.parent_id == qna_forum_id:

@@ -46,25 +46,10 @@ class ForkliftBot(commands.Bot):
             )
             return
 
-        unverified_role_id: Optional[int] = None
-        if DISCORD_CONFIG.unverified_role_id:
-            try:
-                unverified_role_id = int(DISCORD_CONFIG.unverified_role_id)
-            except ValueError:
-                logger.warning(
-                    "Invalid DISCORD_UNVERIFIED_ROLE_ID value: %s",
-                    DISCORD_CONFIG.unverified_role_id,
-                )
-
-        cog_kwargs: dict = {
-            "guild_id": int(DISCORD_CONFIG.guild_id),
-            "verified_role_id": int(DISCORD_CONFIG.verified_role_id),
-        }
-        if unverified_role_id is not None:
-            cog_kwargs["unverified_role_id"] = unverified_role_id
-
+        # Role IDs come from app settings (whose defaults are the DISCORD_*_ROLE_ID
+        # env values), so an admin can change them without a restart.
         try:
-            self.add_cog(VerificationCog(self, **cog_kwargs))
+            self.add_cog(VerificationCog(self, guild_id=int(DISCORD_CONFIG.guild_id)))
         except Exception:  # pragma: no cover - defensive
             logger.exception("Failed to load VerificationCog")
             raise

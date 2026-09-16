@@ -94,7 +94,11 @@ PROGRAM_CODE_TO_COLLEGE_ROLE = {
     "GRTH": "School of Technology for Public Health",
 }
 
-TARGET_TERM_CODES = {"2267", "2261"}
+def _target_term_codes() -> set[str]:
+    """Term codes an opportunity may carry to be preferred, from app settings."""
+    from utils.app_settings import get
+
+    return set(get("active_term_codes"))
 
 
 def _parse_bool(value: Any) -> bool:
@@ -136,9 +140,10 @@ def _select_opportunity(
     """
     eligible = _eligible_opportunities(opportunities)
 
+    target_term_codes = _target_term_codes()
     for opp in eligible:
         term_code = str(opp.get("termCode") or "")
-        if term_code in TARGET_TERM_CODES:
+        if term_code in target_term_codes:
             return opp, False
 
     if eligible:

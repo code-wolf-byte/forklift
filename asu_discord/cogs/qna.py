@@ -17,13 +17,13 @@ except ImportError:  # pragma: no cover - optional dependency
 
 from utils.database import GoldGuideContribution, QnaModule, QnaPost, session_scope
 from utils.settings import CONFIG, DISCORD_CONFIG
+from utils.app_settings import get as get_setting
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_COMMAND_STATE = {"qna-enable": True, "qna-disable": True}
 SATISFACTORY_CUSTOM_ID = "qna:satisfied"
 ASSISTANCE_CUSTOM_ID = "qna:assist"
-GOLD_GUIDE_ROLE_ID = 1187156709597270157
 GOLD_GUIDE_TAG_SUBSTRING = "gold guide"
 TEST_GUILD_IDS: list[int] = []
 if DISCORD_CONFIG and DISCORD_CONFIG.test_guild_ids:
@@ -55,8 +55,6 @@ class QnACog(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.forum_channel_id = _normalize_id(CONFIG.QNA_FORUM_CHANNEL_ID)
-        self.helper_role_id = _normalize_id(CONFIG.QNA_HELPER_ROLE_ID)
         self.knowledge_base_id = CONFIG.QNA_KNOWLEDGE_BASE_ID
         self.model_arn = CONFIG.QNA_MODEL_ARN
         self.aws_region = CONFIG.QNA_AWS_REGION
@@ -96,6 +94,19 @@ class QnACog(commands.Cog):
         logger.info("QnACog: scheduling QnA backfill task")
         self._backfill_task = asyncio.ensure_future(self._run_backfill())
         return True
+
+    # Read live from app settings so an admin change takes effect without a restart.
+    @property
+    def forum_channel_id(self) -> Optional[int]:
+        return _normalize_id(get_setting("qna_forum_channel_id"))
+
+    @property
+    def helper_role_id(self) -> Optional[int]:
+        return _normalize_id(get_setting("qna_helper_role_id"))
+
+    @property
+    def gold_guide_role_id(self) -> Optional[int]:
+        return _normalize_id(get_setting("gold_guide_role_id"))
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
@@ -293,7 +304,10 @@ class QnACog(commands.Cog):
                 raise RuntimeError(f"QnA forum channel {self.forum_channel_id} not found or wrong type")
 
             # Build Gold Guide member ID set
-            gold_guide_role = guild.get_role(GOLD_GUIDE_ROLE_ID)
+            gold_guide_role_id = self.gold_guide_role_id
+            gold_guide_role = (
+                guild.get_role(gold_guide_role_id) if gold_guide_role_id else None
+            )
             gold_guide_ids: set[int] = set()
             if gold_guide_role:
                 gold_guide_ids = {m.id for m in gold_guide_role.members}
@@ -516,9 +530,10 @@ class QnACog(commands.Cog):
                     record.assistant_message_id = str(answer_msg.id)
 
         # Ping Gold Guides if the thread carries a Gold Guide tag
-        if self._has_gold_guide_tag(thread):
+        gold_guide_role_id = self.gold_guide_role_id
+        if gold_guide_role_id and self._has_gold_guide_tag(thread):
             await thread.send(
-                f"<@&{GOLD_GUIDE_ROLE_ID}> A question tagged for Gold Guide assistance has been posted!",
+                f"<@&{gold_guide_role_id}> A question tagged for Gold Guide assistance has been posted!",
                 allowed_mentions=discord.AllowedMentions(roles=True),
             )
             with session_scope() as db_session:

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from asu_discord.cogs.verification import VerificationCog
-from asu_discord.roles import ROLE_ID_MAP
+from asu_discord.roles import role_id_map
 from tests.conftest import make_guild, make_member, make_role
 
 
@@ -86,7 +86,7 @@ class TestApplyBanDiscordRoles:
         member.remove_roles.assert_called()
 
     async def test_removes_managed_roles(self, cog, mock_guild):
-        managed_role_id = next(iter(ROLE_ID_MAP.values()))
+        managed_role_id = next(iter(role_id_map().values()))
         managed_role = make_role(managed_role_id, "First Year")
         member = make_member(roles=[managed_role])
         await cog._apply_ban_discord_roles(mock_guild, member, reason="ban test")

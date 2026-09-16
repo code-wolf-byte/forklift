@@ -31,8 +31,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import discord
 
 from utils.database import User, UserRoleException, init_db, session_scope, get_exceptions_for_discord_id
-from asu_discord.roles import ROLE_ID_MAP
+from asu_discord.roles import role_id_map
 from asu_discord.cogs.verification import role_names_from_student_profile
+
+ROLE_ID_MAP = role_id_map()
 
 logging.basicConfig(
     level=logging.INFO,

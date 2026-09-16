@@ -3,11 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Callable, Optional
 
 import discord
-import yaml
 from discord.ext import commands
 from discord.commands import Option, slash_command
 from sqlalchemy import func, select
@@ -16,15 +14,12 @@ from utils.settings import DISCORD_CONFIG
 from utils.database import User, session_scope, save_user_roles, get_user_by_discord_id, get_exceptions_for_discord_id
 from services.google_sheets import write_user_left
 from ..models import SalesforceOpportunity, StudentProfile
-from ..roles import ROLE_ID_MAP
+from ..roles import role_id_map
 from ..salesforce import get_student_profile
 from utils.salesforce import cache_sf_profile
+from utils.app_settings import get as get_setting
 
 logger = logging.getLogger(__name__)
-
-_CONFIG_PATH = Path(__file__).parent.parent.parent / "config" / "verification.yaml"
-with _CONFIG_PATH.open() as _f:
-    _VERIFICATION_CONFIG: dict = yaml.safe_load(_f).get("verification", {})
 
 TEST_GUILD_IDS: list[int] = []
 if DISCORD_CONFIG and DISCORD_CONFIG.test_guild_ids:
@@ -62,9 +57,6 @@ def _admin_command_kwargs(name: str, description: str) -> dict[str, Any]:
     if TEST_GUILD_IDS:
         kwargs["guild_ids"] = TEST_GUILD_IDS
     return kwargs
-
-
-TARGET_TERM_CODE: str = _VERIFICATION_CONFIG.get("target_term_code", "2267")
 
 
 def _is_enrolled_or_admitted(opp: SalesforceOpportunity) -> bool:
@@ -140,15 +132,16 @@ def role_names_from_student_profile(student_profile: StudentProfile) -> set[str]
     """
     Derive logical role names from a Salesforce student profile.
 
-    The returned names correspond to keys in ROLE_ID_MAP.
+    The returned names correspond to keys in the role map.
     """
     roles: set[str] = set()
+    target_term_code = get_setting("target_term_code")
     enrolled_opps = _select_enrolled_opps(student_profile.opportunities)
 
     # 1. Term-specific classification for target term (e.g., 2267)
     for opp in enrolled_opps:
         term_code = _normalize_str(opp.termCode)
-        if term_code != TARGET_TERM_CODE:
+        if term_code != target_term_code:
             continue
         career = _normalize_str(opp.career)
         opp_type = _normalize_str(opp.type)
@@ -173,7 +166,7 @@ def role_names_from_student_profile(student_profile: StudentProfile) -> set[str]
 
     if not has_level_role:
         for opp in enrolled_opps:
-            if _normalize_str(opp.termCode) != TARGET_TERM_CODE and _normalize_str(opp.career) == "undergraduate":
+            if _normalize_str(opp.termCode) != target_term_code and _normalize_str(opp.career) == "undergraduate":
                 roles.add("Upperclassmen")
                 break
 
@@ -222,7 +215,7 @@ def role_names_from_student_profile(student_profile: StudentProfile) -> set[str]
     elif student_profile.outOfState:
         roles.add("Out of State")
 
-    if isinstance(student_profile.college, str) and student_profile.college in ROLE_ID_MAP:
+    if isinstance(student_profile.college, str) and student_profile.college in role_id_map():
         roles.add(student_profile.college)
 
     campus_role = _campus_role_from_profile(student_profile)
@@ -244,13 +237,36 @@ class VerificationCog(commands.Cog):
         bot: commands.Bot,
         *,
         guild_id: int,
-        verified_role_id: int,
-        unverified_role_id: int = 1207441184218161182,
+        verified_role_id: int | None = None,
+        unverified_role_id: int | None = None,
     ) -> None:
         self.bot = bot
         self.guild_id = guild_id
-        self.verified_role_id = verified_role_id
-        self.unverified_role_id = unverified_role_id
+        # Explicit IDs win (tests wire them directly); otherwise the admin setting
+        # is used, whose own default is the DISCORD_*_ROLE_ID environment value.
+        self._verified_role_id = verified_role_id
+        self._unverified_role_id = unverified_role_id
+
+    @staticmethod
+    def _role_id_setting(key: str) -> int | None:
+        raw = get_setting(key)
+        try:
+            return int(raw) if raw else None
+        except (TypeError, ValueError):
+            logger.error("Setting %s is not a valid role ID: %r", key, raw)
+            return None
+
+    @property
+    def verified_role_id(self) -> int | None:
+        if self._verified_role_id is not None:
+            return self._verified_role_id
+        return self._role_id_setting("verified_role_id")
+
+    @property
+    def unverified_role_id(self) -> int | None:
+        if self._unverified_role_id is not None:
+            return self._unverified_role_id
+        return self._role_id_setting("unverified_role_id")
 
     def _get_verified_role(
         self, guild: Optional[discord.Guild]
@@ -264,7 +280,8 @@ class VerificationCog(commands.Cog):
                 self.guild_id,
             )
             return None
-        return guild.get_role(self.verified_role_id)
+        role_id = self.verified_role_id
+        return guild.get_role(role_id) if role_id is not None else None
 
     def _get_unverified_role(
         self, guild: Optional[discord.Guild]
@@ -279,7 +296,8 @@ class VerificationCog(commands.Cog):
                 self.guild_id,
             )
             return None
-        return guild.get_role(self.unverified_role_id)
+        role_id = self.unverified_role_id
+        return guild.get_role(role_id) if role_id is not None else None
 
     async def _remove_role(
         self,
@@ -341,7 +359,7 @@ class VerificationCog(commands.Cog):
         """Strip all verification-managed roles and assign the unverified role."""
         await self._remove_verified_role(guild, member, reason=reason)
 
-        managed_role_ids = set(ROLE_ID_MAP.values())
+        managed_role_ids = set(role_id_map().values())
         roles_to_remove = [r for r in member.roles if r.id in managed_role_ids]
         if roles_to_remove:
             try:
@@ -524,9 +542,9 @@ class VerificationCog(commands.Cog):
         return await self._remove_verified_role(guild, member, reason=reason or "Automatic re-verification")
 
     async def add_role_to_member_by_id(self, user_id: int, role_name: str) -> None:
-        """Add a named role (from ROLE_ID_MAP) to a guild member by Discord user ID."""
+        """Add a named role (from the role map) to a guild member by Discord user ID."""
         await self.bot.wait_until_ready()
-        role_id = ROLE_ID_MAP.get(role_name)
+        role_id = role_id_map().get(role_name)
         if role_id is None:
             raise ValueError(f"Unknown role name: {role_name!r}")
         guild = await self._resolve_guild()
@@ -538,9 +556,9 @@ class VerificationCog(commands.Cog):
             await member.add_roles(role, reason="Manual exception — admin role add")
 
     async def remove_role_from_member_by_id(self, user_id: int, role_name: str) -> None:
-        """Remove a named role (from ROLE_ID_MAP) from a guild member by Discord user ID."""
+        """Remove a named role (from the role map) from a guild member by Discord user ID."""
         await self.bot.wait_until_ready()
-        role_id = ROLE_ID_MAP.get(role_name)
+        role_id = role_id_map().get(role_name)
         if role_id is None:
             raise ValueError(f"Unknown role name: {role_name!r}")
         guild = await self._resolve_guild()
@@ -568,11 +586,12 @@ class VerificationCog(commands.Cog):
         paused_roles = {e.role_name for e in exceptions if e.exception_type == "paused"}
 
         roles_to_add: list[discord.Role] = []
+        known_roles = role_id_map()
         for logical_name in sorted(logical_role_names):
             if logical_name in paused_roles:
                 logger.debug("Skipping paused role %s for user %s", logical_name, user_id)
                 continue
-            role_id = ROLE_ID_MAP.get(logical_name)
+            role_id = known_roles.get(logical_name)
             if role_id is None:
                 logger.debug("No configured Discord role id for %s", logical_name)
                 continue
@@ -606,8 +625,9 @@ class VerificationCog(commands.Cog):
                 return
 
             roles_to_save: list[tuple[str, int]] = []
+            known_roles = role_id_map()
             for role_name in sorted(role_names):
-                role_id = ROLE_ID_MAP.get(role_name)
+                role_id = known_roles.get(role_name)
                 if role_id is not None:
                     roles_to_save.append((role_name, role_id))
 
@@ -638,8 +658,9 @@ class VerificationCog(commands.Cog):
             return
 
         roles_to_remove: list[discord.Role] = []
+        known_roles = role_id_map()
         for logical_name in sorted(logical_role_names):
-            role_id = ROLE_ID_MAP.get(logical_name)
+            role_id = known_roles.get(logical_name)
             if role_id is None:
                 logger.debug("No configured Discord role id for %s", logical_name)
                 continue
@@ -661,7 +682,7 @@ class VerificationCog(commands.Cog):
     async def refresh_roles_from_profile(
         self, user_id: int, student_profile: StudentProfile
     ) -> None:
-        """Remove all ROLE_ID_MAP roles from a member and re-assign based on Salesforce profile."""
+        """Remove all mapped roles from a member and re-assign based on Salesforce profile."""
         await self.bot.wait_until_ready()
         guild = await self._resolve_guild()
         member = await self._resolve_member(guild, user_id)
@@ -669,17 +690,18 @@ class VerificationCog(commands.Cog):
         exceptions = await asyncio.to_thread(get_exceptions_for_discord_id, str(user_id))
         paused_roles = {e.role_name for e in exceptions if e.exception_type == "paused"}
         added_roles = {e.role_name for e in exceptions if e.exception_type == "added"}
+        known_roles = role_id_map()
         protected_role_ids = {
-            ROLE_ID_MAP[name]
+            known_roles[name]
             for name in (paused_roles | added_roles)
-            if name in ROLE_ID_MAP
+            if name in known_roles
         }
 
         # Remove all known Salesforce-managed roles currently held by the member,
         # except those protected by a paused or added exception.
         roles_to_remove = [
             guild.get_role(role_id)
-            for role_id in ROLE_ID_MAP.values()
+            for role_id in known_roles.values()
             if role_id not in protected_role_ids
         ]
         roles_to_remove = [r for r in roles_to_remove if r is not None and r in member.roles]
@@ -692,7 +714,7 @@ class VerificationCog(commands.Cog):
         effective_names = (logical_role_names - paused_roles) | added_roles
         roles_to_add: list[discord.Role] = []
         for logical_name in sorted(effective_names):
-            role_id = ROLE_ID_MAP.get(logical_name)
+            role_id = known_roles.get(logical_name)
             if role_id is None:
                 continue
             role = guild.get_role(role_id)

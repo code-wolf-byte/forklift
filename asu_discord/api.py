@@ -184,15 +184,19 @@ def remove_roles_from_profile(user_id: str, student_profile: StudentProfile) -> 
     )
 
 
-_DISCORD_TEXT_CHANNEL_TYPES = {0, 5}  # GUILD_TEXT, GUILD_ANNOUNCEMENT
+_DISCORD_TEXT_CHANNEL_TYPES = frozenset({0, 5})   # GUILD_TEXT, GUILD_ANNOUNCEMENT
+_DISCORD_FORUM_CHANNEL_TYPES = frozenset({15})    # GUILD_FORUM
 
 
-def get_guild_channels() -> list[dict]:
-    """Return text channels in the guild as a list of {id, name} dicts.
+def get_guild_channels(
+    *, channel_types: frozenset[int] | None = None
+) -> list[dict]:
+    """Return guild channels as {id, name, type} dicts, text-only by default.
 
     Uses the Discord REST API directly so it works whether or not the bot
     process is running.
     """
+    wanted = channel_types or _DISCORD_TEXT_CHANNEL_TYPES
     cfg = _config()
     url = f"{cfg.api_base}/guilds/{cfg.guild_id}/channels"
     headers = {"Authorization": f"Bot {cfg.bot_token}"}
@@ -209,11 +213,47 @@ def get_guild_channels() -> list[dict]:
     channels = response.json() if isinstance(response.json(), list) else []
     return sorted(
         [
-            {"id": ch["id"], "name": ch["name"]}
+            {"id": ch["id"], "name": ch["name"], "type": ch["type"]}
             for ch in channels
-            if ch.get("type") in _DISCORD_TEXT_CHANNEL_TYPES
+            if ch.get("type") in wanted
         ],
         key=lambda c: c["name"],
+    )
+
+
+def get_guild_roles() -> list[dict]:
+    """Return assignable guild roles as {id, name, color, position} dicts.
+
+    Skips @everyone and integration-managed roles, which an admin cannot assign.
+    Ordered highest-first to match how roles read in the Discord UI.
+    """
+    cfg = _config()
+    url = f"{cfg.api_base}/guilds/{cfg.guild_id}/roles"
+    headers = {"Authorization": f"Bot {cfg.bot_token}"}
+    try:
+        response = requests.get(url, headers=headers, timeout=DEFAULT_TIMEOUT)
+    except requests.RequestException as exc:
+        logger.error("Failed to fetch guild roles from Discord API: %s", exc)
+        return []
+
+    if response.status_code >= 400:
+        logger.error("Discord API returned %s fetching guild roles", response.status_code)
+        return []
+
+    payload = response.json()
+    roles = payload if isinstance(payload, list) else []
+    return sorted(
+        [
+            {
+                "id": role["id"],
+                "name": role["name"],
+                "color": role.get("color", 0),
+                "position": role.get("position", 0),
+            }
+            for role in roles
+            if role["id"] != str(cfg.guild_id) and not role.get("managed")
+        ],
+        key=lambda r: -r["position"],
     )
 
 
@@ -363,6 +403,7 @@ __all__ = [
     "exchange_code_for_token",
     "fetch_user_profile",
     "get_guild_channels",
+    "get_guild_roles",
     "get_member_info",
     "refresh_roles_from_profile",
     "remove_role_from_member",

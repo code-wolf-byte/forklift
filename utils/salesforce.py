@@ -284,7 +284,6 @@ _logger = logging.getLogger(__name__)
 _CRM_BASE = _PROD_BASE
 _CONTACT_URL = f"{_CRM_BASE}/v1/crm-contact/contact"
 _OPP_URL = f"{_CRM_BASE}/v1/crm-opportunity/opportunity"
-_ASYNC_TARGET_TERM_CODES = {"2267", "2261"}
 
 
 def _async_auth_header(client_id: str, client_secret: str) -> str:
@@ -319,9 +318,12 @@ def _async_parse_bool(value: Any) -> bool:
 
 
 def _async_select_opportunity(opportunities: list[dict]) -> dict | None:
+    from utils.app_settings import get
+
+    target_term_codes = set(get("active_term_codes"))
     eligible = [o for o in opportunities if isinstance(o, dict) and _async_is_admitted_or_enrolled(o)]
     for opp in eligible:
-        if str(opp.get("termCode") or "") in _ASYNC_TARGET_TERM_CODES:
+        if str(opp.get("termCode") or "") in target_term_codes:
             return opp
     return eligible[0] if eligible else None
 

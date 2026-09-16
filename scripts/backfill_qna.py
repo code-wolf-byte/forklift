@@ -269,11 +269,13 @@ async def run(*, forum_channel_id: int) -> None:
 def main() -> None:
     load_env(ENV_PATH)
 
-    raw = os.environ.get("QNA_FORUM_CHANNEL_ID", "")
+    from utils.app_settings import get as get_setting
+
+    raw = get_setting("qna_forum_channel_id")
     try:
         forum_channel_id = int(raw)
     except (TypeError, ValueError):
-        raise SystemExit(f"QNA_FORUM_CHANNEL_ID is not set or invalid: {raw!r}")
+        raise SystemExit(f"qna_forum_channel_id is not set or invalid: {raw!r}")
 
     asyncio.run(run(forum_channel_id=forum_channel_id))
 

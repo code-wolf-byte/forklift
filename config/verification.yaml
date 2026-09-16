@@ -1,4 +1,8 @@
 # Verification configuration
+#
+# These are DEFAULTS. Admins can override them from the admin dashboard
+# (Settings), which stores overrides in the app_settings table. An override
+# wins over anything set here; use the Reset link to fall back to this file.
 # Update target_term_code each term to correctly classify incoming/current students.
 # Format: 4-digit ASU term code (e.g. 2267 = Fall 2026, 2261 = Spring 2026)
 verification:

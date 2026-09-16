@@ -13,6 +13,7 @@ import MessageLogs from "./admin/MessageLogs.jsx";
 import QnA from "./admin/QnA.jsx";
 import Exceptions from "./admin/Exceptions.jsx";
 import Analytics from "./admin/Analytics.jsx";
+import Settings from "./admin/Settings.jsx";
 
 // ─── Sidebar navigation config ────────────────────────────────────────────────
 
@@ -52,6 +53,7 @@ const NAV = [
     label: "System",
     items: [
       { id: "automations",  icon: "fa-robot",        label: "Automations"   },
+      { id: "settings",     icon: "fa-sliders-h",    label: "Settings", fullAdminOnly: true },
     ],
   },
 ];
@@ -136,6 +138,7 @@ export default function Admin() {
       case "events":        return <Events />;
       case "message-logs":  return <MessageLogs />;
       case "automations":   return <Automations />;
+      case "settings":      return adminUser?.is_admin ? <Settings /> : null;
       case "qna":           return <QnA />;
       case "exceptions":    return <Exceptions />;
       default:              return null;
@@ -175,14 +178,16 @@ export default function Admin() {
             >
               {section.label}
             </div>
-            {section.items.map((item) => (
-              <NavItem
-                key={item.id}
-                {...item}
-                active={activeView === item.id}
-                onClick={setActiveView}
-              />
-            ))}
+            {section.items
+              .filter((item) => !item.fullAdminOnly || adminUser?.is_admin)
+              .map((item) => (
+                <NavItem
+                  key={item.id}
+                  {...item}
+                  active={activeView === item.id}
+                  onClick={setActiveView}
+                />
+              ))}
           </div>
         ))}
 

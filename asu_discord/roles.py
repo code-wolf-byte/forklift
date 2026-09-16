@@ -1,15 +1,15 @@
-"""Hard-coded mapping of logical role names to Discord role IDs.
+"""Mapping of logical role names to Discord role IDs.
 
-Populate ROLE_ID_MAP with the role names and corresponding numeric IDs from
-your Discord server. These IDs are used when assigning roles based on
-Salesforce student profile data.
+DEFAULT_ROLE_ID_MAP is the built-in mapping; admins can override individual
+entries from the admin dashboard. Always read the effective mapping through
+``role_id_map()`` so those overrides are picked up without a restart.
 """
 
 from __future__ import annotations
 
 from typing import Dict
 
-ROLE_ID_MAP: Dict[str, int] = {
+DEFAULT_ROLE_ID_MAP: Dict[str, int] = {
     # Special Roles
     "First Generation Student": 1210322592544596030,
     "Commited": 1356257786563920023,
@@ -46,3 +46,10 @@ ROLE_ID_MAP: Dict[str, int] = {
     "Arizona Resident": 1333934478887882823,
     "International Student": 1187457897966338129,
 }
+
+
+def role_id_map() -> Dict[str, int]:
+    """Return the effective role-name → role-ID mapping, admin overrides applied."""
+    from utils.app_settings import get
+
+    return get("role_id_map")

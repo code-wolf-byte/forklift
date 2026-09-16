@@ -343,6 +343,20 @@ class UserSalesforceProfile(Base):
     )
 
 
+
+class AppSetting(Base):
+    """Admin-editable runtime setting. Absent key = fall back to the code default."""
+
+    __tablename__ = "app_settings"
+
+    key = Column(String(64), primary_key=True)
+    value = Column(Text, nullable=False)                   # JSON-encoded
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+    updated_by = Column(String(64), nullable=True)         # discord_user_id
+
+
 # Default rows seeded on first startup.
 _CRON_JOB_DEFAULTS = [
     {
