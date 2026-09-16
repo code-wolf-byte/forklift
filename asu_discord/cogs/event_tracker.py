@@ -103,7 +103,7 @@ class EventTrackerCog(commands.Cog):
             return
 
         try:
-            events = await guild.fetch_scheduled_events(with_counts=False)
+            events = await guild.fetch_scheduled_events(with_user_count=False)
         except Exception:
             logger.exception("EventTrackerCog: failed to fetch scheduled events on startup")
             return
