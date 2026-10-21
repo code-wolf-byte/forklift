@@ -75,7 +75,7 @@ class AppConfig:
     DISCORD_SUCCESS_REDIRECT: str | None = _env_value("DISCORD_SUCCESS_REDIRECT")
     DISCORD_FAILURE_REDIRECT: str | None = _env_value("DISCORD_FAILURE_REDIRECT")
     QNA_FORUM_CHANNEL_ID: str | None = _env_value("QNA_FORUM_CHANNEL_ID")
-    QNA_KNOWLEDGE_BASE_ID: str | None = _env_value("QNA_KNOWLEDGE_BASE_ID")
+    QNA_GATEWAY_URL: str | None = _env_value("QNA_GATEWAY_URL")
     QNA_MODEL_ARN: str | None = _env_value("QNA_MODEL_ARN")
     QNA_AWS_REGION: str | None = _env_value("QNA_AWS_REGION")
     QNA_HELPER_ROLE_ID: str | None = _env_value("QNA_HELPER_ROLE_ID")
