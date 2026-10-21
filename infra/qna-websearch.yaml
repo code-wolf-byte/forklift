@@ -1,0 +1,89 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Forkman Q&A live search: an AgentCore Gateway (AWS_IAM inbound auth) exposing the
+  managed Web Search connector, plus a policy for the bot's IAM user to call it.
+  Web Search is only available in us-east-1 (as of 2026-06). Adapted from
+  github.com/aws-samples/sample-agentcore-websearch-agent-skill.
+
+  Deploy:
+    aws cloudformation deploy --region us-east-1 --stack-name forkman-qna-websearch \
+      --template-file infra/qna-websearch.yaml --capabilities CAPABILITY_IAM
+  Then set QNA_GATEWAY_URL to the GatewayUrl output and attach BotPolicy to the bot's IAM user.
+
+Resources:
+  # Role the gateway assumes to call the web-search connector.
+  GatewayServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:gateway/*"
+      Policies:
+        - PolicyName: InvokeWebSearch
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # The region must be in this ARN; the docs' empty-region form is rejected.
+              - Effect: Allow
+                Action: bedrock-agentcore:InvokeWebSearch
+                Resource: !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:aws:tool/web-search.v1"
+
+  Gateway:
+    Type: AWS::BedrockAgentCore::Gateway
+    Properties:
+      Name: forkman-qna-websearch
+      ProtocolType: MCP
+      AuthorizerType: AWS_IAM
+      RoleArn: !GetAtt GatewayServiceRole.Arn
+
+  # Target name "web-search-tool" namespaces the tool as web-search-tool___WebSearch,
+  # which forklift_qna.py calls by name.
+  WebSearchTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Properties:
+      GatewayIdentifier: !GetAtt Gateway.GatewayIdentifier
+      Name: web-search-tool
+      CredentialProviderConfigurations:
+        - CredentialProviderType: GATEWAY_IAM_ROLE
+      TargetConfiguration:
+        Mcp:
+          Connector:
+            Source:
+              ConnectorId: web-search
+            Configurations:
+              - Name: WebSearch
+                ParameterValues: {}
+
+  # Attach to the IAM user whose keys the bot uses (AWS_ACCESS_KEY_ID).
+  BotPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Lets the Forkman bot call the web search gateway and Bedrock models.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: bedrock-agentcore:InvokeGateway
+            Resource: !GetAtt Gateway.GatewayArn
+          - Effect: Allow
+            Action: bedrock:InvokeModel
+            Resource:
+              - "arn:aws:bedrock:*::foundation-model/*"
+              - !Sub "arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*"
+
+Outputs:
+  GatewayUrl:
+    Description: Set as QNA_GATEWAY_URL.
+    Value: !GetAtt Gateway.GatewayUrl
+  BotPolicyArn:
+    Description: Attach to the bot's IAM user.
+    Value: !Ref BotPolicy

@@ -52,11 +52,11 @@ def _normalize_id(raw: Optional[str]) -> Optional[int]:
         logger.warning("Invalid Discord snowflake configured: %s", raw)
         return None
 class QnACog(commands.Cog):
-    """Cog that mirrors Forkman Q&A functionality with Bedrock knowledge base responses."""
+    """Cog that mirrors Forkman Q&A functionality with live ASU web search answers."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.knowledge_base_id = CONFIG.QNA_KNOWLEDGE_BASE_ID
+        self.gateway_url = CONFIG.QNA_GATEWAY_URL
         self.model_arn = CONFIG.QNA_MODEL_ARN
         self.aws_region = CONFIG.QNA_AWS_REGION
         self.aws_access_key_id = CONFIG.AWS_ACCESS_KEY_ID
@@ -78,7 +78,7 @@ class QnACog(commands.Cog):
     def _is_ready(self) -> bool:
         return bool(
             self.forum_channel_id
-            and self.knowledge_base_id
+            and self.gateway_url
             and self.model_arn
             and ForkmanQNA
         )
@@ -120,9 +120,9 @@ class QnACog(commands.Cog):
         if not self.forum_channel_id:
             logger.info(
                 "QnACog loaded but incomplete configuration prevents automation "
-                "(channel: %s, knowledge_base: %s, model: %s, forkman_available: %s)",
+                "(channel: %s, gateway: %s, model: %s, forkman_available: %s)",
                 self.forum_channel_id,
-                bool(self.knowledge_base_id),
+                bool(self.gateway_url),
                 bool(self.model_arn),
                 bool(ForkmanQNA),
             )
@@ -485,7 +485,7 @@ class QnACog(commands.Cog):
 
         await thread.send(
             f"Hi <@{author_id}>, I'm Forkman, your friendly support bot. "
-            "I'm looking through our knowledge base to see if I can answer your question. :wave:"
+            "I'm checking the latest ASU info to see if I can answer your question. :wave:"
         )
 
         thread_title = thread.name.strip()
@@ -683,15 +683,6 @@ class QnACog(commands.Cog):
             logger.warning("Unable to fetch starter message for thread %s", thread.id)
         return None
 
-    def _build_forkman_kwargs(self) -> Optional[dict[str, Any]]:
-        return ForkmanQNA(
-            region_name=self.aws_region,
-            knowledge_base_id=self.knowledge_base_id,
-            model_arn=self.model_arn,
-            aws_access_key_id=self.aws_access_key_id,
-            aws_secret_access_key=self.aws_secret_access_key,
-        )
-
     async def _generate_answer(
         self,
         *,
@@ -701,7 +692,7 @@ class QnACog(commands.Cog):
     ) -> Optional[dict[str, Any]]:
         qna = ForkmanQNA(
             region_name=self.aws_region,
-            knowledge_base_id=self.knowledge_base_id,
+            gateway_url=self.gateway_url,
             model_arn=self.model_arn,
             aws_access_key_id=self.aws_access_key_id,
             aws_secret_access_key=self.aws_secret_access_key,
@@ -712,7 +703,9 @@ class QnACog(commands.Cog):
         max_attempts = 3
         response = None
         for attempt in range(1, max_attempts + 1):
-            response = qna.get_answer(
+            # boto3/requests block, so run off the event loop to keep the bot responsive
+            response = await asyncio.to_thread(
+                qna.get_answer,
                 thread_title=thread_title,
                 message_content=question_text,
                 user_id=str(author_id) if author_id else None,
