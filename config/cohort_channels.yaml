@@ -25,42 +25,42 @@ categories:
   - name: 🌐・futuresundevils
     type: announcement
     permissions:
-      '@everyone':
-        allow: [view_channel]
-        deny: [send_messages]
+      Admin:
+        allow: [create_instant_invite, manage_channels, add_reactions, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history, mention_everyone,
+          external_emojis, manage_roles, manage_webhooks, use_slash_commands, manage_threads, create_public_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages,
+          send_polls, use_external_apps, 6755399441055744]
       Unverified:
         allow: [view_channel]
       Muted:
         deny: [send_messages]
-      Admin:
-        allow: [create_instant_invite, manage_channels, add_reactions, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history, mention_everyone,
-          external_emojis, manage_roles, manage_webhooks, use_slash_commands, manage_threads, create_public_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages,
-          send_polls, use_external_apps, 6755399441055744]
-  - name: 🥅・sun-devil-athletics
-    type: announcement
-    permissions:
       '@everyone':
         allow: [view_channel]
         deny: [send_messages]
-      Muted:
-        deny: [send_messages]
+  - name: 🥅・sun-devil-athletics
+    type: announcement
+    permissions:
       Admin:
         allow: [create_instant_invite, manage_channels, add_reactions, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history, mention_everyone,
           external_emojis, manage_roles, manage_webhooks, use_slash_commands, manage_threads, create_public_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages,
           send_polls, use_external_apps, 6755399441055744]
+      Muted:
+        deny: [send_messages]
+      '@everyone':
+        allow: [view_channel]
+        deny: [send_messages]
   - name: 📢・announcements
     type: announcement
     permissions:
-      '@everyone':
-        allow: [add_reactions, view_channel, external_emojis]
-        deny: [send_messages]
-      Muted:
-        allow: [view_channel, read_message_history]
-        deny: [send_messages]
       Admin:
         allow: [create_instant_invite, manage_channels, add_reactions, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history, mention_everyone,
           external_emojis, manage_roles, manage_webhooks, use_slash_commands, manage_threads, create_public_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages,
           send_polls, use_external_apps, 6755399441055744]
+      Muted:
+        allow: [view_channel, read_message_history]
+        deny: [send_messages]
+      '@everyone':
+        allow: [add_reactions, view_channel, external_emojis]
+        deny: [send_messages]
 - name: Server Guide
   permissions:
     Ticketed:
@@ -94,13 +94,13 @@ categories:
         deny: [view_channel]
       Unverified:
         deny: [view_channel]
+      Muted:
+        deny: [send_messages]
       '@everyone':
         allow: [view_channel, read_message_history]
         deny: [create_instant_invite, manage_channels, add_reactions, priority_speaker, stream, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, mention_everyone, external_emojis,
           connect, speak, mute_members, deafen_members, move_members, use_voice_activation, manage_roles, manage_webhooks, use_slash_commands, request_to_speak, manage_events, manage_threads, create_public_threads,
           create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls, use_external_apps, 6812574045700096]
-      Muted:
-        deny: [send_messages]
 - name: Support
   permissions:
     Ticketed:
@@ -111,24 +111,24 @@ categories:
       allow: [view_channel]
   channels:
   - name: 🤔・ask-asu-staff
-    qna_forum: true
     type: forum
+    qna_forum: true
     permissions:
+      Ticketed:
+        deny: [view_channel]
+      Moderator:
+        allow: [view_channel]
+      ASU Staff:
+        allow: [manage_channels, add_reactions, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, use_slash_commands, external_stickers, send_messages_in_threads,
+          send_voice_messages, send_polls, 6755399441055744]
+      Unverified:
+        deny: [view_channel]
+      Verified:
+        allow: [view_channel]
       Muted:
         deny: [send_messages]
       '@everyone':
         deny: [view_channel]
-      Ticketed:
-        deny: [view_channel]
-      Verified:
-        allow: [view_channel]
-      Unverified:
-        deny: [view_channel]
-      ASU Staff:
-        allow: [manage_channels, add_reactions, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, use_slash_commands, external_stickers, send_messages_in_threads,
-          send_voice_messages, send_polls, 6755399441055744]
-      Moderator:
-        allow: [view_channel]
     topic: "**\U0001F31E Welcome to Ask ASU Staff!**\n\nGot a question for ASU staff or current students? You’re in the right place! This is your one-stop spot to get help with all things ASU — just make\
       \ sure to tag your post with the right topic so it reaches the right people. \U0001F4AC\n\n**\U0001F50D Before you post:**\n\n**1️⃣ Check the <#1187152488273559572> channel.**\n A lot of common questions\
       \ are already answered there!\n**2️⃣ Search the forum.**\n Click the \U0001F50D icon or press Ctrl + F / Command + F to see if someone’s already asked the same thing. You might find your answer even\
@@ -154,12 +154,12 @@ categories:
         deny: [create_instant_invite, manage_channels, add_reactions, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, mention_everyone, external_emojis, manage_roles, manage_webhooks,
           use_slash_commands, manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, send_polls, use_external_apps,
           6755399441055744]
+      Muted:
+        deny: [send_messages]
       '@everyone':
         allow: [view_channel, read_message_history]
         deny: [create_instant_invite, manage_channels, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, mention_everyone, manage_roles, manage_webhooks, use_slash_commands,
           manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, send_polls, use_external_apps, 6755399441055744]
-      Muted:
-        deny: [send_messages]
   - name: ⁉️・how-to-discord
     type: text
     permissions:
@@ -170,11 +170,11 @@ categories:
         deny: [create_instant_invite, manage_channels, add_reactions, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, mention_everyone, external_emojis, manage_roles, manage_webhooks,
           use_slash_commands, manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, send_polls, use_external_apps,
           6755399441055744]
+      Muted:
+        deny: [send_messages]
       '@everyone':
         allow: [view_channel, read_message_history]
         deny: [send_messages, mention_everyone, create_public_threads, create_private_threads, send_messages_in_threads]
-      Muted:
-        deny: [send_messages]
   - name: 🎟️・open-a-ticket
     type: text
     permissions:
@@ -201,10 +201,10 @@ categories:
         allow: [view_channel]
         deny: [manage_channels, add_reactions, send_messages, manage_messages, embed_links, attach_files, mention_everyone, external_emojis, manage_roles, manage_webhooks, create_public_threads, create_private_threads,
           external_stickers, send_messages_in_threads]
-      '@everyone':
-        deny: [manage_channels, view_channel, manage_messages]
       Muted:
         deny: [send_messages]
+      '@everyone':
+        deny: [manage_channels, view_channel, manage_messages]
 - name: Rewards
   permissions:
     Verified:
@@ -223,10 +223,10 @@ categories:
         allow: [add_reactions, view_channel, read_message_history, external_emojis, external_stickers]
         deny: [create_instant_invite, manage_channels, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, mention_everyone, manage_roles, manage_webhooks, use_slash_commands,
           manage_threads, create_public_threads, create_private_threads, send_messages_in_threads, start_embedded_activities, send_voice_messages, send_polls, use_external_apps, 6755399441055744]
-      '@everyone':
-        deny: [connect]
       Muted:
         deny: [send_messages]
+      '@everyone':
+        deny: [connect]
   - name: 🏫・shop
     type: text
     permissions:
@@ -238,25 +238,25 @@ categories:
         allow: [add_reactions, view_channel, read_message_history, external_emojis]
         deny: [create_instant_invite, manage_channels, send_messages, manage_messages, embed_links, attach_files, mention_everyone, manage_roles, manage_webhooks, use_slash_commands, manage_threads, create_public_threads,
           create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, send_polls, use_external_apps, 6755399441055744]
-      '@everyone':
-        deny: [connect]
       Muted:
         deny: [send_messages]
+      '@everyone':
+        deny: [connect]
   - name: 🔱・proof-for-pitchforks
     type: text
     permissions:
-      Verified:
-        allow: [add_reactions, view_channel, attach_files, read_message_history, external_emojis, external_stickers, send_messages_in_threads]
-        deny: [create_instant_invite, manage_channels, send_messages, send_tts_messages, manage_messages, embed_links, mention_everyone, manage_roles, manage_webhooks, use_slash_commands, manage_threads,
-          create_public_threads, create_private_threads, start_embedded_activities, send_voice_messages, send_polls, use_external_apps, 6755399441055744]
       Unverified:
         deny: [create_instant_invite, manage_channels, add_reactions, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history, mention_everyone,
           external_emojis, manage_roles, manage_webhooks, use_slash_commands, manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities,
           send_voice_messages, send_polls, use_external_apps, 6755399441055744]
-      '@everyone':
-        deny: [connect]
+      Verified:
+        allow: [add_reactions, view_channel, attach_files, read_message_history, external_emojis, external_stickers, send_messages_in_threads]
+        deny: [create_instant_invite, manage_channels, send_messages, send_tts_messages, manage_messages, embed_links, mention_everyone, manage_roles, manage_webhooks, use_slash_commands, manage_threads,
+          create_public_threads, create_private_threads, start_embedded_activities, send_voice_messages, send_polls, use_external_apps, 6755399441055744]
       Muted:
         deny: [send_messages]
+      '@everyone':
+        deny: [connect]
   - name: 🏆・achievements
     type: text
     permissions:
@@ -268,22 +268,22 @@ categories:
         allow: [add_reactions, view_channel, read_message_history, external_emojis, external_stickers]
         deny: [create_instant_invite, manage_channels, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, mention_everyone, manage_roles, manage_webhooks, use_slash_commands,
           manage_threads, create_public_threads, create_private_threads, send_messages_in_threads, start_embedded_activities, send_voice_messages, send_polls, use_external_apps, 6755399441055744]
-      '@everyone':
-        deny: [connect]
       Muted:
         deny: [send_messages]
+      '@everyone':
+        deny: [connect]
 - name: Connect
   permissions:
-    Verified:
-      allow: [add_reactions, stream, view_channel, send_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, request_to_speak, external_stickers,
-        send_messages_in_threads, start_embedded_activities]
-      deny: [priority_speaker, send_tts_messages, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_events, manage_threads, send_voice_messages, set_voice_channel_status,
-        send_polls, 6812574045700096]
     Unverified:
       deny: [create_instant_invite, manage_channels, add_reactions, priority_speaker, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history,
         mention_everyone, external_emojis, connect, speak, mute_members, deafen_members, move_members, use_voice_activation, manage_roles, manage_webhooks, use_slash_commands, request_to_speak, manage_events,
         manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls,
         use_external_apps, 6812574045700096]
+    Verified:
+      allow: [add_reactions, stream, view_channel, send_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, request_to_speak, external_stickers,
+        send_messages_in_threads, start_embedded_activities]
+      deny: [priority_speaker, send_tts_messages, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_events, manage_threads, send_voice_messages, set_voice_channel_status,
+        send_polls, 6812574045700096]
     '@everyone': {}
   channels:
   - name: 🔎・looking-for-group
@@ -370,9 +370,9 @@ categories:
           send_messages_in_threads, start_embedded_activities]
         deny: [priority_speaker, send_tts_messages, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_events, manage_threads, send_voice_messages, set_voice_channel_status,
           send_polls, 6812574045700096]
-      '@everyone': {}
       Muted:
         deny: [send_messages]
+      '@everyone': {}
     topic: "\U0001F393 **Welcome to Connect by Major!**\n\nThis is your space to meet other Sun Devils studying the same thing as you! \U0001F49B\nFind classmates, share tips and start building your academic\
       \ support network. You might even meet someone who’ll be in your classes this semester. \U0001F44B\n\n\U0001F3F7️** Before you post:**\n\n1️⃣ **Tag your college.**\nWhen creating a new thread, make\
       \ sure to add your college tag (like W. P. Carey, Herberger, Engineering, etc.). \n\n2️⃣ **Keep it degree-related.**\nThis forum is for connecting with others in your major or program only. Off-topic\
@@ -400,19 +400,19 @@ categories:
   - name: 👋・introductions
     type: text
     permissions:
-      Verified:
-        allow: [add_reactions, stream, view_channel, send_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, request_to_speak, external_stickers,
-          send_messages_in_threads]
-        deny: [priority_speaker, send_tts_messages, manage_messages, mention_everyone, mute_members, deafen_members, move_members, use_slash_commands, manage_events, manage_threads, start_embedded_activities,
-          send_voice_messages, set_voice_channel_status, send_polls, use_external_apps, 6812574045700096]
       Unverified:
         deny: [create_instant_invite, manage_channels, add_reactions, priority_speaker, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history,
           mention_everyone, external_emojis, connect, speak, mute_members, deafen_members, move_members, use_voice_activation, manage_roles, manage_webhooks, use_slash_commands, request_to_speak, manage_events,
           manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls,
           use_external_apps, 6812574045700096]
-      '@everyone': {}
+      Verified:
+        allow: [add_reactions, stream, view_channel, send_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, request_to_speak, external_stickers,
+          send_messages_in_threads]
+        deny: [priority_speaker, send_tts_messages, manage_messages, mention_everyone, mute_members, deafen_members, move_members, use_slash_commands, manage_events, manage_threads, start_embedded_activities,
+          send_voice_messages, set_voice_channel_status, send_polls, use_external_apps, 6812574045700096]
       Muted:
         deny: [send_messages]
+      '@everyone': {}
   - name: 🔒・committed
     type: text
     permissions:
@@ -420,73 +420,57 @@ categories:
         allow: [add_reactions, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, create_public_threads, create_private_threads, external_stickers,
           send_messages_in_threads, send_voice_messages, send_polls]
         deny: [create_instant_invite, manage_channels, manage_messages, mention_everyone, manage_roles, manage_webhooks, manage_threads, 6755399441055744]
-      '@everyone':
-        deny: [view_channel, connect]
       Muted:
         deny: [send_messages]
+      '@everyone':
+        deny: [view_channel, connect]
     default_auto_archive_duration: 10080
 - name: Talk
   permissions:
     Moderator:
       allow: [manage_messages, 6755399441055744]
-    Verified:
-      allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, use_slash_commands,
-        request_to_speak, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps, 35184372088832]
-      deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, manage_events, manage_threads,
-        create_public_threads, create_private_threads, set_voice_channel_status, send_polls, 6777389673611264]
     Unverified:
       deny: [create_instant_invite, manage_channels, add_reactions, priority_speaker, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history,
         mention_everyone, external_emojis, connect, speak, mute_members, deafen_members, move_members, use_voice_activation, manage_roles, manage_webhooks, use_slash_commands, request_to_speak, manage_events,
         manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls,
         use_external_apps, 6812574045700096]
+    Verified:
+      allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, use_slash_commands,
+        request_to_speak, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps, 35184372088832]
+      deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, manage_events, manage_threads,
+        create_public_threads, create_private_threads, set_voice_channel_status, send_polls, 6777389673611264]
     '@everyone': {}
   channels:
   - name: 🗣️・Voice Chat
     type: voice
     permissions:
+      Moderator:
+        allow: [manage_channels, add_reactions, priority_speaker, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history, external_emojis,
+          connect, speak, mute_members, deafen_members, move_members, use_voice_activation, use_slash_commands, external_stickers, start_embedded_activities, send_voice_messages, set_voice_channel_status,
+          send_polls, use_external_apps, 39582418599936]
+      Unverified:
+        deny: [create_instant_invite, manage_channels, add_reactions, priority_speaker, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history,
+          mention_everyone, external_emojis, connect, speak, mute_members, deafen_members, move_members, use_voice_activation, manage_roles, manage_webhooks, use_slash_commands, request_to_speak, manage_events,
+          manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls,
+          use_external_apps, 6812574045700096]
       Verified:
         allow: [add_reactions, stream, view_channel, send_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, use_slash_commands, request_to_speak,
           external_stickers, send_messages_in_threads, start_embedded_activities, use_external_apps, 35184372088832]
         deny: [create_instant_invite, manage_channels, priority_speaker, send_tts_messages, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks,
           manage_events, manage_threads, create_public_threads, create_private_threads, send_voice_messages, set_voice_channel_status, send_polls, 6777389673611264]
-      Unverified:
-        deny: [create_instant_invite, manage_channels, add_reactions, priority_speaker, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history,
-          mention_everyone, external_emojis, connect, speak, mute_members, deafen_members, move_members, use_voice_activation, manage_roles, manage_webhooks, use_slash_commands, request_to_speak, manage_events,
-          manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls,
-          use_external_apps, 6812574045700096]
-      Moderator:
-        allow: [manage_channels, add_reactions, priority_speaker, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history, external_emojis,
-          connect, speak, mute_members, deafen_members, move_members, use_voice_activation, use_slash_commands, external_stickers, start_embedded_activities, send_voice_messages, set_voice_channel_status,
-          send_polls, use_external_apps, 39582418599936]
-      '@everyone': {}
       Muted:
         deny: [send_messages]
+      '@everyone': {}
     bitrate: 64000
   - name: 👉・general
     type: text
     permissions:
-      Muted:
-        deny: [send_messages]
-      Moderator:
-        allow: [manage_messages, 6755399441055744]
-      Verified:
-        allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, use_slash_commands,
-          request_to_speak, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps, 35184372088832]
-        deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, manage_events, manage_threads,
-          create_public_threads, create_private_threads, set_voice_channel_status, send_polls, 6777389673611264]
-      Unverified:
-        deny: [create_instant_invite, manage_channels, add_reactions, priority_speaker, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history,
-          mention_everyone, external_emojis, connect, speak, mute_members, deafen_members, move_members, use_voice_activation, manage_roles, manage_webhooks, use_slash_commands, request_to_speak, manage_events,
-          manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls,
-          use_external_apps, 6812574045700096]
-      '@everyone': {}
       Club Officer:
         allow: [add_reactions, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history, mention_everyone, external_emojis, manage_webhooks, use_slash_commands,
           manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, send_polls, use_external_apps, 6755399441055744]
         deny: [create_instant_invite, manage_channels, manage_roles]
-  - name: 🎲・gaming
-    type: text
-    permissions:
+      Moderator:
+        allow: [manage_messages, 6755399441055744]
       Unverified:
         deny: [create_instant_invite, manage_channels, add_reactions, priority_speaker, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history,
           mention_everyone, external_emojis, connect, speak, mute_members, deafen_members, move_members, use_voice_activation, manage_roles, manage_webhooks, use_slash_commands, request_to_speak, manage_events,
@@ -497,62 +481,78 @@ categories:
           request_to_speak, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps, 35184372088832]
         deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, manage_events, manage_threads,
           create_public_threads, create_private_threads, set_voice_channel_status, send_polls, 6777389673611264]
-      Moderator:
-        allow: [manage_messages, 6755399441055744]
-      '@everyone': {}
       Muted:
         deny: [send_messages]
+      '@everyone': {}
+  - name: 🎲・gaming
+    type: text
+    permissions:
+      Moderator:
+        allow: [manage_messages, 6755399441055744]
+      Unverified:
+        deny: [create_instant_invite, manage_channels, add_reactions, priority_speaker, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history,
+          mention_everyone, external_emojis, connect, speak, mute_members, deafen_members, move_members, use_voice_activation, manage_roles, manage_webhooks, use_slash_commands, request_to_speak, manage_events,
+          manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls,
+          use_external_apps, 6812574045700096]
+      Verified:
+        allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, use_slash_commands,
+          request_to_speak, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps, 35184372088832]
+        deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, manage_events, manage_threads,
+          create_public_threads, create_private_threads, set_voice_channel_status, send_polls, 6777389673611264]
+      Muted:
+        deny: [send_messages]
+      '@everyone': {}
   - name: ⚽・sports
     type: text
     permissions:
       Moderator:
         allow: [manage_messages, 6755399441055744]
-      Verified:
-        allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, use_slash_commands,
-          request_to_speak, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps, 35184372088832]
-        deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, manage_events, manage_threads,
-          create_public_threads, create_private_threads, set_voice_channel_status, send_polls, 6777389673611264]
       Unverified:
         deny: [create_instant_invite, manage_channels, add_reactions, priority_speaker, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history,
           mention_everyone, external_emojis, connect, speak, mute_members, deafen_members, move_members, use_voice_activation, manage_roles, manage_webhooks, use_slash_commands, request_to_speak, manage_events,
           manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls,
           use_external_apps, 6812574045700096]
-      '@everyone': {}
+      Verified:
+        allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, use_slash_commands,
+          request_to_speak, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps, 35184372088832]
+        deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, manage_events, manage_threads,
+          create_public_threads, create_private_threads, set_voice_channel_status, send_polls, 6777389673611264]
       Muted:
         deny: [send_messages]
+      '@everyone': {}
   - name: 🚗・vroom-vroom
     type: text
     permissions:
-      Verified:
-        allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, use_slash_commands,
-          request_to_speak, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps, 35184372088832]
-        deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, manage_events, manage_threads,
-          create_public_threads, create_private_threads, set_voice_channel_status, send_polls, 6777389673611264]
+      Moderator:
+        allow: [manage_messages, 6755399441055744]
       Unverified:
         deny: [create_instant_invite, manage_channels, add_reactions, priority_speaker, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history,
           mention_everyone, external_emojis, connect, speak, mute_members, deafen_members, move_members, use_voice_activation, manage_roles, manage_webhooks, use_slash_commands, request_to_speak, manage_events,
           manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls,
           use_external_apps, 6812574045700096]
-      Moderator:
-        allow: [manage_messages, 6755399441055744]
-      '@everyone': {}
+      Verified:
+        allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, use_slash_commands,
+          request_to_speak, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps, 35184372088832]
+        deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, manage_events, manage_threads,
+          create_public_threads, create_private_threads, set_voice_channel_status, send_polls, 6777389673611264]
       Muted:
         deny: [send_messages]
+      '@everyone': {}
   - name: 🌍・international
     type: text
     permissions:
-      Verified:
-        allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, use_slash_commands,
-          request_to_speak, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps, 35184372088832]
-        deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, manage_events, manage_threads,
-          create_public_threads, create_private_threads, set_voice_channel_status, send_polls, 6777389673611264]
+      Moderator:
+        allow: [manage_messages, 6755399441055744]
       Unverified:
         deny: [create_instant_invite, manage_channels, add_reactions, priority_speaker, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history,
           mention_everyone, external_emojis, connect, speak, mute_members, deafen_members, move_members, use_voice_activation, manage_roles, manage_webhooks, use_slash_commands, request_to_speak, manage_events,
           manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls,
           use_external_apps, 6812574045700096]
-      Moderator:
-        allow: [manage_messages, 6755399441055744]
+      Verified:
+        allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, use_slash_commands,
+          request_to_speak, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps, 35184372088832]
+        deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, manage_events, manage_threads,
+          create_public_threads, create_private_threads, set_voice_channel_status, send_polls, 6777389673611264]
       Muted:
         deny: [send_messages]
       '@everyone': {}
@@ -562,37 +562,37 @@ categories:
       allow: [add_reactions, priority_speaker, stream, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, mute_members,
         deafen_members, move_members, use_voice_activation, use_slash_commands, request_to_speak, manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads,
         start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls, use_external_apps, 6794981859655680]
-    Verified:
-      allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, request_to_speak,
-        external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps]
-      deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, use_slash_commands, manage_threads,
-        create_public_threads, create_private_threads, set_voice_channel_status, send_polls, 6794981859655680]
     Unverified:
       deny: [create_instant_invite, manage_channels, add_reactions, priority_speaker, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history,
         mention_everyone, external_emojis, connect, speak, mute_members, deafen_members, move_members, use_voice_activation, manage_roles, manage_webhooks, use_slash_commands, request_to_speak, manage_events,
         manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls,
         use_external_apps, 6812574045700096]
+    Verified:
+      allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, request_to_speak,
+        external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps]
+      deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, use_slash_commands, manage_threads,
+        create_public_threads, create_private_threads, set_voice_channel_status, send_polls, 6794981859655680]
   channels:
   - name: 😋・food
     type: text
     permissions:
-      Verified:
-        allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, request_to_speak,
-          external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps]
-        deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, use_slash_commands,
-          manage_threads, create_public_threads, create_private_threads, set_voice_channel_status, send_polls, 6794981859655680]
+      Moderator:
+        allow: [add_reactions, priority_speaker, stream, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, mute_members,
+          deafen_members, move_members, use_voice_activation, use_slash_commands, request_to_speak, manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads,
+          start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls, use_external_apps, 6794981859655680]
       Unverified:
         deny: [create_instant_invite, manage_channels, add_reactions, priority_speaker, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history,
           mention_everyone, external_emojis, connect, speak, mute_members, deafen_members, move_members, use_voice_activation, manage_roles, manage_webhooks, use_slash_commands, request_to_speak, manage_events,
           manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls,
           use_external_apps, 6812574045700096]
-      Moderator:
-        allow: [add_reactions, priority_speaker, stream, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, mute_members,
-          deafen_members, move_members, use_voice_activation, use_slash_commands, request_to_speak, manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads,
-          start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls, use_external_apps, 6794981859655680]
-      '@everyone': {}
+      Verified:
+        allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, request_to_speak,
+          external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps]
+        deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, use_slash_commands,
+          manage_threads, create_public_threads, create_private_threads, set_voice_channel_status, send_polls, 6794981859655680]
       Muted:
         deny: [send_messages]
+      '@everyone': {}
   - name: 🐇・pets
     type: text
     permissions:
@@ -610,21 +610,21 @@ categories:
           external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps]
         deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, use_slash_commands,
           manage_threads, create_public_threads, create_private_threads, set_voice_channel_status, send_polls, 6794981859655680]
-      '@everyone': {}
       Muted:
         deny: [send_messages]
+      '@everyone': {}
   - name: 🖼️・memes
     type: text
     permissions:
+      Moderator:
+        allow: [add_reactions, priority_speaker, stream, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, mute_members,
+          deafen_members, move_members, use_voice_activation, use_slash_commands, request_to_speak, manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads,
+          start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls, use_external_apps, 6794981859655680]
       Unverified:
         deny: [create_instant_invite, manage_channels, add_reactions, priority_speaker, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history,
           mention_everyone, external_emojis, connect, speak, mute_members, deafen_members, move_members, use_voice_activation, manage_roles, manage_webhooks, use_slash_commands, request_to_speak, manage_events,
           manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls,
           use_external_apps, 6812574045700096]
-      Moderator:
-        allow: [add_reactions, priority_speaker, stream, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, mute_members,
-          deafen_members, move_members, use_voice_activation, use_slash_commands, request_to_speak, manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads,
-          start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls, use_external_apps, 6794981859655680]
       Verified:
         allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, request_to_speak,
           external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps]
@@ -636,23 +636,23 @@ categories:
   - name: 📽️・media
     type: text
     permissions:
-      Verified:
-        allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, request_to_speak,
-          external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps]
-        deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, use_slash_commands,
-          manage_threads, create_public_threads, create_private_threads, set_voice_channel_status, send_polls, 6794981859655680]
+      Moderator:
+        allow: [add_reactions, priority_speaker, stream, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, mute_members,
+          deafen_members, move_members, use_voice_activation, use_slash_commands, request_to_speak, manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads,
+          start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls, use_external_apps, 6794981859655680]
       Unverified:
         deny: [create_instant_invite, manage_channels, add_reactions, priority_speaker, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history,
           mention_everyone, external_emojis, connect, speak, mute_members, deafen_members, move_members, use_voice_activation, manage_roles, manage_webhooks, use_slash_commands, request_to_speak, manage_events,
           manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls,
           use_external_apps, 6812574045700096]
-      Moderator:
-        allow: [add_reactions, priority_speaker, stream, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, mute_members,
-          deafen_members, move_members, use_voice_activation, use_slash_commands, request_to_speak, manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads,
-          start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls, use_external_apps, 6794981859655680]
-      '@everyone': {}
+      Verified:
+        allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, request_to_speak,
+          external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps]
+        deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, use_slash_commands,
+          manage_threads, create_public_threads, create_private_threads, set_voice_channel_status, send_polls, 6794981859655680]
       Muted:
         deny: [send_messages]
+      '@everyone': {}
 - name: Campus Chat
   permissions:
     Unverified:
@@ -673,10 +673,10 @@ categories:
           use_external_apps, 6812574045700096]
       Tempe:
         allow: [view_channel]
-      '@everyone':
-        deny: [view_channel, connect]
       Muted:
         deny: [send_messages]
+      '@everyone':
+        deny: [view_channel, connect]
   - name: 💬・downtown
     type: text
     permissions:
@@ -689,10 +689,10 @@ categories:
         allow: [add_reactions, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, use_slash_commands, external_stickers, send_messages_in_threads,
           start_embedded_activities, send_voice_messages, send_polls, use_external_apps]
         deny: [create_instant_invite, manage_channels, manage_messages, mention_everyone, manage_roles, manage_webhooks, manage_threads, create_public_threads, create_private_threads, 6755399441055744]
-      '@everyone':
-        deny: [view_channel, connect]
       Muted:
         deny: [send_messages]
+      '@everyone':
+        deny: [view_channel, connect]
     topic: Looking for a roommate (or a few) on the Downtown Phoenix campus? Start by making a post in this channel! Tell others a little bit about yourself and what you’re looking for in a place to live
       and in a roommate. Be sure to include important information such as location preference, gender preference and anything else that a potential roommate should know. Please remember to remain respectful,
       and post serious inquiries only.
@@ -714,15 +714,15 @@ categories:
   - name: 💬・west-valley
     type: text
     permissions:
-      West Valley:
-        allow: [add_reactions, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, use_slash_commands, external_stickers, send_messages_in_threads,
-          start_embedded_activities, send_voice_messages, send_polls, use_external_apps]
-        deny: [create_instant_invite, manage_channels, manage_messages, mention_everyone, manage_roles, manage_webhooks, manage_threads, create_public_threads, create_private_threads, 6755399441055744]
       Unverified:
         deny: [create_instant_invite, manage_channels, add_reactions, priority_speaker, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history,
           mention_everyone, external_emojis, connect, speak, mute_members, deafen_members, move_members, use_voice_activation, manage_roles, manage_webhooks, use_slash_commands, request_to_speak, manage_events,
           manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls,
           use_external_apps, 6812574045700096]
+      West Valley:
+        allow: [add_reactions, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, use_slash_commands, external_stickers, send_messages_in_threads,
+          start_embedded_activities, send_voice_messages, send_polls, use_external_apps]
+        deny: [create_instant_invite, manage_channels, manage_messages, mention_everyone, manage_roles, manage_webhooks, manage_threads, create_public_threads, create_private_threads, 6755399441055744]
       Muted:
         deny: [send_messages]
       '@everyone':
@@ -730,33 +730,56 @@ categories:
   - name: 💬・la-center
     type: text
     permissions:
-      LA Center:
-        allow: [add_reactions, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, use_slash_commands, external_stickers, send_messages_in_threads,
-          start_embedded_activities, send_voice_messages, send_polls, use_external_apps]
-        deny: [create_instant_invite, manage_channels, manage_messages, mention_everyone, manage_roles, manage_webhooks, manage_threads, create_public_threads, create_private_threads, 6755399441055744]
       Unverified:
         deny: [create_instant_invite, manage_channels, add_reactions, priority_speaker, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history,
           mention_everyone, external_emojis, connect, speak, mute_members, deafen_members, move_members, use_voice_activation, manage_roles, manage_webhooks, use_slash_commands, request_to_speak, manage_events,
           manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls,
           use_external_apps, 6812574045700096]
-      '@everyone':
-        deny: [view_channel, connect]
+      LA Center:
+        allow: [add_reactions, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, use_slash_commands, external_stickers, send_messages_in_threads,
+          start_embedded_activities, send_voice_messages, send_polls, use_external_apps]
+        deny: [create_instant_invite, manage_channels, manage_messages, mention_everyone, manage_roles, manage_webhooks, manage_threads, create_public_threads, create_private_threads, 6755399441055744]
       Muted:
         deny: [send_messages]
+      '@everyone':
+        deny: [view_channel, connect]
 - name: Roommate Finder
   permissions:
-    Verified:
-      allow: [add_reactions, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, external_stickers, send_messages_in_threads, send_voice_messages]
-      deny: [create_instant_invite, manage_channels, manage_messages, mention_everyone, manage_roles, manage_webhooks, manage_threads, create_public_threads, create_private_threads, send_polls, 6755399441055744]
     Unverified:
       deny: [view_channel, read_message_history]
+    Verified:
+      allow: [add_reactions, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, external_stickers, send_messages_in_threads, send_voice_messages]
+      deny: [create_instant_invite, manage_channels, manage_messages, mention_everyone, manage_roles, manage_webhooks, manage_threads, create_public_threads, create_private_threads, send_polls, 6755399441055744]
+    Tempe:
+      allow: [view_channel]
+    Downtown Phoenix:
+      allow: [view_channel]
+    Polytechnic:
+      allow: [view_channel]
+    West Valley:
+      allow: [view_channel]
+    LA Center:
+      allow: [view_channel]
+    Muted:
+      deny: [send_messages]
+    '@everyone':
+      deny: [view_channel]
   channels:
   - name: 🔎・off-campus-roommate-finder
     type: forum
     permissions:
       Verified:
-        allow: [add_reactions, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, external_stickers, send_messages_in_threads, send_voice_messages,
-          2251799813685248]
+        allow: [add_reactions, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, external_stickers, send_messages_in_threads, send_voice_messages, 2251799813685248]
+      Tempe:
+        allow: [view_channel]
+      Downtown Phoenix:
+        allow: [view_channel]
+      Polytechnic:
+        allow: [view_channel]
+      West Valley:
+        allow: [view_channel]
+      LA Center:
+        allow: [view_channel]
       Muted:
         deny: [send_messages]
       '@everyone':
@@ -780,13 +803,17 @@ categories:
   - name: 🔎・tempe-roommate-finder
     type: forum
     permissions:
-      Verified:
-        allow: [add_reactions, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, external_stickers, send_messages_in_threads, send_voice_messages]
-        deny: [create_instant_invite, manage_channels, manage_messages, mention_everyone, manage_roles, manage_webhooks, manage_threads, create_public_threads, create_private_threads, send_polls, 6755399441055744]
       Unverified:
         deny: [view_channel, read_message_history]
+      Verified:
+        allow: [add_reactions, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, external_stickers, send_messages_in_threads, send_voice_messages]
+        deny: [create_instant_invite, manage_channels, manage_messages, mention_everyone, manage_roles, manage_webhooks, manage_threads, create_public_threads, create_private_threads, send_polls, 6755399441055744]
+      Tempe:
+        allow: [view_channel]
       Muted:
         deny: [send_messages]
+      '@everyone':
+        deny: [view_channel]
     topic: Looking for a roommate (or a few) on the Tempe campus? Start by making a post in this channel! Tell others a little bit about yourself and what you're looking for in a place to live and in a
       roommate. Be sure to include important information, such as location preference, gender preference and anything else that a potential roommate should know. Please remember to remain respectful, and
       post serious inquiries only.
@@ -818,10 +845,14 @@ categories:
       Unverified:
         deny: [view_channel, read_message_history]
       Verified:
-        allow: [add_reactions, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, external_stickers, send_messages_in_threads, send_voice_messages]
+        allow: [add_reactions, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, external_stickers, send_messages_in_threads, send_voice_messages]
         deny: [create_instant_invite, manage_channels, manage_messages, mention_everyone, manage_roles, manage_webhooks, manage_threads, create_public_threads, create_private_threads, send_polls, 6755399441055744]
+      Downtown Phoenix:
+        allow: [view_channel]
       Muted:
         deny: [send_messages]
+      '@everyone':
+        deny: [view_channel]
     topic: Use our forums to help you find a roommate! Make sure you're not violating any of our rules and make sure to check the roommate finder you're using to ensure you're in the correct place!
     available_tags:
     - {name: Clean, emoji_name: 🧹}
@@ -839,10 +870,14 @@ categories:
       Unverified:
         deny: [view_channel, read_message_history]
       Verified:
-        allow: [add_reactions, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, external_stickers, send_messages_in_threads, send_voice_messages]
+        allow: [add_reactions, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, external_stickers, send_messages_in_threads, send_voice_messages]
         deny: [create_instant_invite, manage_channels, manage_messages, mention_everyone, manage_roles, manage_webhooks, manage_threads, create_public_threads, create_private_threads, send_polls, 6755399441055744]
+      Polytechnic:
+        allow: [view_channel]
       Muted:
         deny: [send_messages]
+      '@everyone':
+        deny: [view_channel]
     topic: Looking for a roommate (or a few) on the Polytechnic campus? Start by making a post in this channel! Tell others a little bit about yourself and what you're looking for in a place to live and
       in a roommate. Be sure to include important information, such as location preference, gender preference and anything else that a potential roommate should know. Please remember to remain respectful,
       and post serious inquiries only.
@@ -862,10 +897,14 @@ categories:
       Unverified:
         deny: [view_channel, read_message_history]
       Verified:
-        allow: [add_reactions, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, external_stickers, send_messages_in_threads, send_voice_messages]
+        allow: [add_reactions, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, external_stickers, send_messages_in_threads, send_voice_messages]
         deny: [create_instant_invite, manage_channels, manage_messages, mention_everyone, manage_roles, manage_webhooks, manage_threads, create_public_threads, create_private_threads, send_polls, 6755399441055744]
+      West Valley:
+        allow: [view_channel]
       Muted:
         deny: [send_messages]
+      '@everyone':
+        deny: [view_channel]
     topic: Looking for a roommate (or a few) on the West Valley campus? Start by making a post in this channel! Tell others a little bit about yourself, and what you’re looking for in a place to live and
       in a roommate. Be sure to include important information, such as location preference, gender preference and anything else that a potential roommate should know. Please remember to remain respectful,
       and post serious inquiries only.
@@ -884,10 +923,14 @@ categories:
       Unverified:
         deny: [view_channel, read_message_history]
       Verified:
-        allow: [add_reactions, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, external_stickers, send_messages_in_threads, send_voice_messages]
+        allow: [add_reactions, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, external_stickers, send_messages_in_threads, send_voice_messages]
         deny: [create_instant_invite, manage_channels, manage_messages, mention_everyone, manage_roles, manage_webhooks, manage_threads, create_public_threads, create_private_threads, send_polls, 6755399441055744]
+      LA Center:
+        allow: [view_channel]
       Muted:
         deny: [send_messages]
+      '@everyone':
+        deny: [view_channel]
     topic: Looking for a roommate (or a few) at ASU’s California Center location? Start by making a post in this channel! Tell others a little bit about yourself, and what you're looking for in a place
       to live and in a roommate. Be sure to include important information such as location preference, target rent, gender preference and anything else that a potential roommate should know (pets, utilities,
       etc.). Please remember to remain respectful, and post serious inquiries only.
@@ -905,63 +948,63 @@ categories:
       deny: [view_channel]
     Verified:
       deny: [view_channel, read_message_history]
-    '@everyone':
-      deny: [view_channel]
     Graduate Student:
       allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, use_slash_commands,
         create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls, use_external_apps,
         39582418599936]
       deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, manage_threads, 6755399441055744]
+    '@everyone':
+      deny: [view_channel]
   channels:
   - name: 🗣️・graduate vc
     type: voice
     permissions:
-      Muted:
-        deny: [send_messages]
       Unverified:
         deny: [view_channel]
       Verified:
         deny: [view_channel, read_message_history]
-      '@everyone':
-        deny: [view_channel]
       Graduate Student:
         allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, use_slash_commands,
           create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls, use_external_apps,
           39582418599936]
         deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, manage_threads, 6755399441055744]
+      Muted:
+        deny: [send_messages]
+      '@everyone':
+        deny: [view_channel]
     bitrate: 64000
   - name: 💬・graduate-general
     type: text
     permissions:
-      '@everyone':
-        deny: [view_channel]
-      Verified:
-        deny: [view_channel, read_message_history]
       Unverified:
         deny: [view_channel, send_messages, read_message_history]
-      Muted:
-        deny: [send_messages]
+      Verified:
+        deny: [view_channel, read_message_history]
       Graduate Student:
         allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, use_slash_commands,
           create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls, use_external_apps,
           39582418599936]
         deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, manage_threads, 6755399441055744]
+      Muted:
+        deny: [send_messages]
+      '@everyone':
+        deny: [view_channel]
   - name: 🤪・unc-memes
     type: text
     permissions:
-      Muted:
-        deny: [send_messages]
-      Verified:
-        deny: [view_channel, read_message_history]
       Unverified:
         deny: [view_channel]
-      '@everyone':
-        deny: [view_channel]
+      Verified:
+        deny: [view_channel, read_message_history]
       Graduate Student:
         allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, use_slash_commands,
           create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, set_voice_channel_status, send_polls, use_external_apps,
           39582418599936]
         deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, manage_threads, 6755399441055744]
+      Muted:
+        deny: [send_messages]
+      '@everyone':
+        deny: [view_channel]
 - name: Activities and Games
   permissions:
     Unverified:
@@ -975,26 +1018,26 @@ categories:
   - name: 🎭・the-stage
     type: stage
     permissions:
+      Moderator:
+        allow: [manage_channels, mute_members, move_members, 4503599627370496]
       Server Navigators:
         allow: [manage_channels, mute_members, move_members, 4503599627370496]
-      '@everyone':
-        allow: [request_to_speak]
-      Muted:
-        deny: [send_messages]
+      Hype Squad:
+        allow: [manage_channels, mute_members, move_members, 4503599627370496]
       Keeper:
         allow: [create_instant_invite, manage_channels, add_reactions, stream, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history, mention_everyone,
           external_emojis, connect, mute_members, move_members, manage_roles, use_slash_commands, manage_events, external_stickers, send_voice_messages, send_polls, use_external_apps, 4521191813414912]
+      Unverified:
+        deny: [view_channel, read_message_history]
       Verified:
         allow: [add_reactions, stream, view_channel, send_messages, send_tts_messages, embed_links, attach_files, read_message_history, external_emojis, connect, speak, use_voice_activation, use_slash_commands,
           request_to_speak, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps]
         deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, manage_threads, create_public_threads,
           create_private_threads, set_voice_channel_status, send_polls, 6794981859655680]
-      Hype Squad:
-        allow: [manage_channels, mute_members, move_members, 4503599627370496]
-      Unverified:
-        deny: [view_channel, read_message_history]
-      Moderator:
-        allow: [manage_channels, mute_members, move_members, 4503599627370496]
+      Muted:
+        deny: [send_messages]
+      '@everyone':
+        allow: [request_to_speak]
     bitrate: 64000
     user_limit: 10000
   - name: 👥・community
@@ -1021,26 +1064,26 @@ categories:
           request_to_speak, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, use_external_apps]
         deny: [create_instant_invite, manage_channels, priority_speaker, manage_messages, mention_everyone, mute_members, deafen_members, move_members, manage_roles, manage_webhooks, manage_threads, create_public_threads,
           create_private_threads, set_voice_channel_status, send_polls, 6794981859655680]
-      '@everyone': {}
       Muted:
         deny: [send_messages]
+      '@everyone': {}
     bitrate: 64000
   - name: 📢・activities-announcements
     type: announcement
     permissions:
-      Muted:
-        deny: [send_messages]
+      Club Officer:
+        allow: [create_instant_invite, manage_channels, add_reactions, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history, mention_everyone,
+          external_emojis, manage_roles, use_slash_commands, manage_threads, create_public_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, send_polls,
+          use_external_apps, 6755399441055744]
       Unverified:
         deny: [view_channel, read_message_history]
       Verified:
         allow: [add_reactions, view_channel, read_message_history, external_emojis]
         deny: [send_messages_in_threads]
+      Muted:
+        deny: [send_messages]
       '@everyone':
         deny: [send_messages]
-      Club Officer:
-        allow: [create_instant_invite, manage_channels, add_reactions, view_channel, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, read_message_history, mention_everyone,
-          external_emojis, manage_roles, use_slash_commands, manage_threads, create_public_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages, send_polls,
-          use_external_apps, 6755399441055744]
   - name: 👉・reaction-roles
     type: text
     permissions:
@@ -1051,6 +1094,6 @@ categories:
         deny: [create_instant_invite, manage_channels, priority_speaker, send_messages, send_tts_messages, manage_messages, embed_links, attach_files, mention_everyone, mute_members, deafen_members, move_members,
           manage_roles, manage_webhooks, use_slash_commands, manage_threads, create_public_threads, create_private_threads, external_stickers, send_messages_in_threads, start_embedded_activities, send_voice_messages,
           set_voice_channel_status, send_polls, use_external_apps, 6794981859655680]
-      '@everyone': {}
       Muted:
         deny: [send_messages]
+      '@everyone': {}

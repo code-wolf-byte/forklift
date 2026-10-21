@@ -85,7 +85,8 @@ def perm_bits(spec: list) -> int:
 
 def to_config_perms(overwrites: list[dict], role_names: dict[str, str]) -> dict:
     out = {}
-    for o in overwrites:
+    order = list(role_names)  # Discord returns overwrites in no stable order; use the role order given
+    for o in sorted(overwrites, key=lambda o: order.index(o["id"]) if o["id"] in order else len(order)):
         if o["type"] != 0:  # per-member overwrites don't carry over between cohorts
             continue
         spec = {k: perm_names(o[k]) for k in ("allow", "deny") if int(o[k])}
@@ -103,9 +104,9 @@ def to_overwrites(perms: dict, role_ids: dict[str, str]) -> list[dict]:
     return out
 
 
-def channel_config(c: dict, cat: dict, role_names: dict[str, str], qna_id: str | None) -> dict:
+def channel_config(c: dict, cat: dict, role_names: dict[str, str], qna_id: str | None, qna_names=()) -> dict:
     entry = {"name": c["name"], "type": TYPE_NAMES[c["type"]]}
-    if c["id"] == qna_id:
+    if c["id"] == qna_id or c["name"] in qna_names:
         entry["qna_forum"] = True
     perms = to_config_perms(c["permission_overwrites"], role_names)
     if perms != to_config_perms(cat["permission_overwrites"], role_names):
@@ -127,7 +128,9 @@ def channel_payload(entry: dict, parent_id: str, cat_perms: dict, role_ids: dict
 
 
 def export(s, channels, roles, config, args, env) -> None:
-    role_names = {r["id"]: r["name"] for r in roles}
+    role_names = {r["id"]: r["name"] for r in sorted(roles, key=lambda r: -r["position"])}
+    # Keep existing qna_forum marks, so a stale QNA_FORUM_CHANNEL_ID doesn't drop them.
+    qna_names = {ch["name"] for cat in config["categories"] for ch in cat["channels"] if ch.get("qna_forum")}
     cats = {c["name"]: c for c in channels if c["type"] == 4}
     names = args.categories or [c["name"] for c in config["categories"]]
     missing = [n for n in names if n not in cats]
@@ -141,7 +144,7 @@ def export(s, channels, roles, config, args, env) -> None:
         out["categories"].append({
             "name": n,
             "permissions": to_config_perms(cat["permission_overwrites"], role_names),
-            "channels": [channel_config(c, cat, role_names, env.get("QNA_FORUM_CHANNEL_ID")) for c in kids],
+            "channels": [channel_config(c, cat, role_names, env.get("QNA_FORUM_CHANNEL_ID"), qna_names) for c in kids],
         })
     CONFIG.write_text(HEADER + "\n" + yaml.safe_dump(out, sort_keys=False, allow_unicode=True, width=200, default_flow_style=None),
                       encoding="utf-8")
