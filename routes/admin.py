@@ -1693,12 +1693,24 @@ def admin_analytics():
         if to_dt:
             fp_q = fp_q.filter(ForumPost.created_at <= to_dt)
 
-        connect_posts = (
-            fp_q.filter(ForumPost.parent_channel_name.ilike("%major%")).count()
-        )
-        roommate_posts = (
-            fp_q.filter(ForumPost.parent_channel_name.ilike("%roommate%")).count()
-        )
+        # Each forum group is its configured channels, or a name match when unset.
+        major_ids = app_settings.get("connect_by_major_channel_ids")
+        lfg_ids = app_settings.get("looking_for_group_channel_ids")
+        roommate_ids = app_settings.get("roommate_finder_channel_ids")
+
+        def _forum_filter(channel_ids, name_fragment):
+            if channel_ids:
+                return ForumPost.parent_channel_id.in_(channel_ids)
+            return ForumPost.parent_channel_name.ilike(f"%{name_fragment}%")
+
+        def _in_forum(parent_cid, parent_cname, channel_ids, name_fragment):
+            if channel_ids:
+                return parent_cid in channel_ids
+            return bool(parent_cname) and name_fragment in parent_cname.lower()
+
+        connect_posts = fp_q.filter(_forum_filter(major_ids, "major")).count()
+        lfg_posts = fp_q.filter(_forum_filter(lfg_ids, "looking-for-group")).count()
+        roommate_posts = fp_q.filter(_forum_filter(roommate_ids, "roommate")).count()
         forum_by_channel = (
             fp_q.with_entities(
                 ForumPost.parent_channel_id,
@@ -1712,7 +1724,7 @@ def admin_analytics():
 
         # Connect by Major / forums per college — map each post's author to their
         # college role (via UserRole), bucket unmatched authors as "Unknown".
-        major_posts = fp_q.filter(ForumPost.parent_channel_name.ilike("%major%")).all()
+        major_posts = fp_q.filter(_forum_filter(major_ids, "major")).all()
         major_discord_ids = {p.discord_user_id for p in major_posts if p.discord_user_id}
         college_by_discord_id: dict[str, str] = {}
         if major_discord_ids:
@@ -1754,10 +1766,42 @@ def admin_analytics():
         major_threads = [
             {"channel_id": cid, "channel_name": cname or cid, "messages": cnt}
             for cid, cname, parent_cid, parent_cname, cnt in ch_rows
-            if parent_cname and "major" in parent_cname.lower()
+            if _in_forum(parent_cid, parent_cname, major_ids, "major")
         ]
         major_messages_sent = sum(t["messages"] for t in major_threads) or None
         top_major_threads = sorted(major_threads, key=lambda x: -x["messages"])[:5] or None
+
+        # Roommate Finder — one forum per campus (plus off-campus), so posts per
+        # forum stand in for posts per campus. Tags carry dorm and lifestyle picks.
+        roommate_forum_posts = fp_q.filter(_forum_filter(roommate_ids, "roommate")).all()
+        roommate_forum_counts: dict[str, int] = {}
+        roommate_tag_counts: dict[str, int] = {}
+        for p in roommate_forum_posts:
+            # Strip the "🔎・" style prefix from channel names for display.
+            forum = (p.parent_channel_name or p.parent_channel_id).split("・")[-1]
+            roommate_forum_counts[forum] = roommate_forum_counts.get(forum, 0) + 1
+            try:
+                tags = json.loads(p.tag_names) if p.tag_names else []
+            except ValueError:
+                tags = []
+            for tag in tags:
+                roommate_tag_counts[tag] = roommate_tag_counts.get(tag, 0) + 1
+        roommate_posts_by_forum = sorted(
+            [{"forum": f, "count": n} for f, n in roommate_forum_counts.items()],
+            key=lambda x: -x["count"],
+        ) or None
+        roommate_by_tag = sorted(
+            [{"tag": t, "count": n} for t, n in roommate_tag_counts.items()],
+            key=lambda x: -x["count"],
+        ) or None
+
+        roommate_threads = [
+            {"channel_id": cid, "channel_name": cname or cid, "messages": cnt}
+            for cid, cname, parent_cid, parent_cname, cnt in ch_rows
+            if _in_forum(parent_cid, parent_cname, roommate_ids, "roommate")
+        ]
+        roommate_messages_sent = sum(t["messages"] for t in roommate_threads) or None
+        top_roommate_threads = sorted(roommate_threads, key=lambda x: -x["messages"])[:5] or None
 
         # ── International / Country of Origin ─────────────────────────────────
         country_q = (
@@ -2033,8 +2077,15 @@ def admin_analytics():
                     "activity_by_major": activity_by_major,
                     "top_threads": top_major_threads,
                 },
+                "looking_for_group": {
+                    "posts_created": lfg_posts or None,
+                },
                 "roommate_finder": {
-                    "posts_by_campus": roommate_posts or None,
+                    "posts_created": roommate_posts or None,
+                    "messages_sent": roommate_messages_sent,
+                    "posts_by_forum": roommate_posts_by_forum,
+                    "by_tag": roommate_by_tag,
+                    "top_threads": top_roommate_threads,
                 },
                 "all_forum_channels": [
                     {"channel_id": cid, "channel_name": cname or cid, "posts": posts}

@@ -98,6 +98,55 @@ function RoleSelect({ value, roles, onChange, allowEmpty = true, placeholder = "
   );
 }
 
+// Chips plus an "add" dropdown, for settings holding several forum channels.
+function ForumListSelect({ value, channels, onChange }) {
+  const selected = value || [];
+  const name = (id) => channels.find((c) => c.id === id)?.name || id;
+  return (
+    <>
+      <div className="flex flex-wrap gap-2 mb-2">
+        {selected.length === 0 && (
+          <span className="text-sm text-muted-foreground">
+            None — matched by channel name.
+          </span>
+        )}
+        {selected.map((id) => (
+          <span
+            key={id}
+            className="inline-flex items-center gap-1.5 text-sm rounded px-2 py-0.5"
+            style={{ background: "hsl(var(--muted))" }}
+          >
+            #{name(id)}
+            <button
+              type="button"
+              aria-label={`Remove ${name(id)}`}
+              className="bg-transparent border-0 p-0 cursor-pointer text-muted-foreground hover:text-foreground"
+              onClick={() => onChange(selected.filter((c) => c !== id))}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+      <Select value={NONE} onValueChange={(v) => v !== NONE && onChange([...selected, v])}>
+        <SelectTrigger className="max-w-sm h-8 text-sm">
+          <SelectValue placeholder="— Add a forum channel —" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={NONE}>— Add a forum channel —</SelectItem>
+          {channels
+            .filter((c) => !selected.includes(c.id))
+            .map((c) => (
+              <SelectItem key={c.id} value={c.id}>
+                #{c.name}
+              </SelectItem>
+            ))}
+        </SelectContent>
+      </Select>
+    </>
+  );
+}
+
 export default function Settings() {
   const [settings, setSettings] = useState(null);
   const [draft, setDraft] = useState({});
@@ -289,6 +338,55 @@ export default function Settings() {
             </Select>
           )}
           <SaveBar keys={["qna_forum_channel_id"]} />
+        </CardContent>
+      </Card>
+
+      {/* ── Community forums ── */}
+      <Card className="mb-3">
+        <CardContent className="p-4">
+          <h5 className="text-base font-semibold mb-1">Community Forums</h5>
+          <p className="text-xs text-muted-foreground mb-3">
+            Which forum channels Analytics counts for each feature. Leave a feature empty
+            to match forums by channel name instead. Changes apply to all history,
+            because posts are looked up by channel when the report runs.
+          </p>
+          {field(
+            "connect_by_major_channel_ids",
+            "Connect by Major",
+            "Default: forums whose name contains “major”.",
+            <ForumListSelect
+              value={draft.connect_by_major_channel_ids}
+              channels={forumChannels}
+              onChange={(v) => set("connect_by_major_channel_ids", v)}
+            />
+          )}
+          {field(
+            "looking_for_group_channel_ids",
+            "Looking for Group",
+            "Default: forums whose name contains “looking-for-group”.",
+            <ForumListSelect
+              value={draft.looking_for_group_channel_ids}
+              channels={forumChannels}
+              onChange={(v) => set("looking_for_group_channel_ids", v)}
+            />
+          )}
+          {field(
+            "roommate_finder_channel_ids",
+            "Roommate Finder",
+            "Default: forums whose name contains “roommate”. Add every campus forum.",
+            <ForumListSelect
+              value={draft.roommate_finder_channel_ids}
+              channels={forumChannels}
+              onChange={(v) => set("roommate_finder_channel_ids", v)}
+            />
+          )}
+          <SaveBar
+            keys={[
+              "connect_by_major_channel_ids",
+              "looking_for_group_channel_ids",
+              "roommate_finder_channel_ids",
+            ]}
+          />
         </CardContent>
       </Card>
 

@@ -120,6 +120,37 @@ function SubLabel({ children, tooltip }) {
   );
 }
 
+// Compact two-column table of label → count, used by the forum breakdowns.
+function CountTable({ title, tooltip, rows, labelKey, valueKey = "count" }) {
+  if (!rows?.length) return null;
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="px-3 py-2 border-b flex items-center gap-1">
+          <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+            {title}
+          </span>
+          {tooltip && <Tooltip text={tooltip} />}
+        </div>
+        <table className="w-full text-sm">
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row[labelKey]} className="border-b last:border-0 hover:bg-muted/30">
+                <td className="px-3 py-1.5 truncate max-w-[12rem]" title={row[labelKey]}>
+                  {row[labelKey]}
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums font-semibold w-16">
+                  {row[valueKey].toLocaleString()}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+  );
+}
+
 function ProgressBar({ name, count, total, color = "#8c1d40" }) {
   const pct = total > 0 ? Math.round((count / total) * 100) : 0;
   return (
@@ -1151,8 +1182,8 @@ export default function Analytics() {
       <SectionHeader
         title="Forums"
         icon="fa-comments"
-        subtitle="Ask ASU Staff · Connect by Major · Roommate Finder"
-        tooltip="Tracks activity across Discord forum channels. Ask ASU Staff is the AI-assisted Q&A channel. Connect by Major and Roommate Finder are peer connection forums. All forum threads are tracked in forum_posts."
+        subtitle="Ask ASU Staff · Connect by Major · Looking for Group · Roommate Finder"
+        tooltip="Tracks activity across Discord forum channels. Ask ASU Staff is the AI-assisted Q&A channel. Connect by Major, Looking for Group and Roommate Finder are peer connection forums. All forum threads are tracked in forum_posts."
         collapsible
         collapsed={collapsedSections.forums}
         onToggle={() => toggleSection("forums")}
@@ -1308,17 +1339,58 @@ export default function Analytics() {
           )}
         </div>
         <div>
-          <SubLabel tooltip="Forum channel where students looking for roommates post listings. Posts are tracked in forum_posts by parent channel name.">
-            Roommate Finder
+          <SubLabel tooltip="Forum channel where students find others to game, meet up or hang out with. The channels counted are set in Settings → Community Forums.">
+            Looking for Group
           </SubLabel>
           <StatCard
-            label="Posts by Campus"
-            value={forums.roommate_finder?.posts_by_campus}
-            icon="fa-home"
-            color="#10b981"
-            tooltip="Threads started in channels whose name contains 'roommate'. A proxy for demand for roommate matching at each campus."
+            label="Posts Created"
+            value={forums.looking_for_group?.posts_created}
+            icon="fa-users"
+            color="#6366f1"
+            tooltip="Threads started in the Looking for Group forum during the period."
           />
         </div>
+      </div>
+
+      <SubLabel tooltip="Forum channels where students looking for roommates post listings — one per campus plus off-campus. The channels counted are set in Settings → Community Forums.">
+        Roommate Finder
+      </SubLabel>
+      <div className="grid grid-cols-2 gap-3 mb-3 max-w-md">
+        <StatCard
+          label="Posts Created"
+          value={forums.roommate_finder?.posts_created}
+          icon="fa-home"
+          color="#10b981"
+          tooltip="Threads started in the Roommate Finder forums during the period (by default, channels whose name contains 'roommate')."
+        />
+        <StatCard
+          label="Messages Sent"
+          value={forums.roommate_finder?.messages_sent}
+          icon="fa-comment"
+          color="#3b82f6"
+          tooltip="Total messages sent within Roommate Finder threads during the period, summed across every thread in those forums."
+        />
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6 items-start">
+        <CountTable
+          title="Posts by Campus Forum"
+          tooltip="Roommate Finder posts during the period, by forum. Each campus has its own forum, so this is a proxy for roommate demand at each campus."
+          rows={forums.roommate_finder?.posts_by_forum}
+          labelKey="forum"
+        />
+        <CountTable
+          title="Posts by Tag"
+          tooltip="Tags chosen when the post was opened — residence halls, gender and lifestyle preferences. A post with several tags counts once per tag."
+          rows={forums.roommate_finder?.by_tag}
+          labelKey="tag"
+        />
+        <CountTable
+          title="Top 5 Threads"
+          tooltip="The 5 Roommate Finder threads with the most messages during the selected period."
+          rows={forums.roommate_finder?.top_threads}
+          labelKey="channel_name"
+          valueKey="messages"
+        />
       </div>
       </>
       )}

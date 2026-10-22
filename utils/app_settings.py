@@ -64,6 +64,10 @@ def _build_defaults() -> dict[str, Any]:
             cfg.get("verification", {}).get("target_term_code", _FALLBACK_TERM_CODE)
         ),
         "active_term_codes": list(_FALLBACK_ACTIVE_TERM_CODES),
+        # Empty = match forum channels by name, as analytics always has.
+        "connect_by_major_channel_ids": [],
+        "looking_for_group_channel_ids": [],
+        "roommate_finder_channel_ids": [],
     }
 
 
@@ -92,6 +96,9 @@ KEYS: tuple[str, ...] = (
     "role_id_map",
     "target_term_code",
     "active_term_codes",
+    "connect_by_major_channel_ids",
+    "looking_for_group_channel_ids",
+    "roommate_finder_channel_ids",
 )
 
 # Keys holding a single Discord snowflake, and those holding a list of them.
@@ -104,7 +111,14 @@ SNOWFLAKE_KEYS = frozenset(
         "qna_helper_role_id",
     }
 )
-SNOWFLAKE_LIST_KEYS = frozenset({"admin_restricted_role_ids"})
+SNOWFLAKE_LIST_KEYS = frozenset(
+    {
+        "admin_restricted_role_ids",
+        "connect_by_major_channel_ids",
+        "looking_for_group_channel_ids",
+        "roommate_finder_channel_ids",
+    }
+)
 BOOL_KEYS = frozenset({"verification_enabled"})
 
 # ponytail: 30s TTL over a whole-table read. Per-key invalidation only if this

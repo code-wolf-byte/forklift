@@ -133,3 +133,27 @@ class TestVerificationToggle:
     def test_rejects_non_boolean(self, bad):
         with pytest.raises(SettingsValidationError):
             app_settings.validate("verification_enabled", bad)
+
+
+class TestForumChannelSettings:
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "connect_by_major_channel_ids",
+            "looking_for_group_channel_ids",
+            "roommate_finder_channel_ids",
+        ],
+    )
+    def test_defaults_empty_and_accepts_channel_list(self, key):
+        assert app_settings.defaults()[key] == []
+        assert app_settings.validate(key, [VALID_ID]) == [VALID_ID]
+        assert app_settings.validate(key, []) == []
+        assert list(app_settings.iter_snowflakes(key, [VALID_ID])) == [VALID_ID]
+
+    def test_rejects_bad_channel_id(self):
+        with pytest.raises(SettingsValidationError):
+            app_settings.validate("roommate_finder_channel_ids", ["123"])
+
+    def test_rejects_non_list(self):
+        with pytest.raises(SettingsValidationError):
+            app_settings.validate("roommate_finder_channel_ids", VALID_ID)
