@@ -75,12 +75,8 @@ class AppConfig:
     DISCORD_SUCCESS_REDIRECT: str | None = _env_value("DISCORD_SUCCESS_REDIRECT")
     DISCORD_FAILURE_REDIRECT: str | None = _env_value("DISCORD_FAILURE_REDIRECT")
     QNA_FORUM_CHANNEL_ID: str | None = _env_value("QNA_FORUM_CHANNEL_ID")
-    QNA_KNOWLEDGE_BASE_ID: str | None = _env_value("QNA_KNOWLEDGE_BASE_ID")
-    QNA_MODEL_ARN: str | None = _env_value("QNA_MODEL_ARN")
-    QNA_AWS_REGION: str | None = _env_value("QNA_AWS_REGION")
+    QNA_CREATEAI_TOKEN: str | None = _env_value("QNA_CREATEAI_TOKEN")
     QNA_HELPER_ROLE_ID: str | None = _env_value("QNA_HELPER_ROLE_ID")
-    AWS_ACCESS_KEY_ID: str | None = _env_value("AWS_ACCESS_KEY_ID")
-    AWS_SECRET_ACCESS_KEY: str | None = _env_value("AWS_SECRET_ACCESS_KEY")
     SALESFORCE_API_CLIENT_ID: str | None = _env_value("SALESFORCE_API_CLIENT_ID")
     SALESFORCE_API_CLIENT_SECRET: str | None = _env_value("SALESFORCE_API_CLIENT_SECRET")
     SALESFORCE_API_BASE_URL: str | None = _env_value("SALESFORCE_API_BASE_URL")
@@ -211,8 +207,6 @@ class AppConfig:
         self.CAS_LOGOUT_URL = _env_value("CAS_LOGOUT_URL")
         self.CAS_SERVICE_URL = _env_value("CAS_SERVICE_URL") or f"{self.PUBLIC_BASE_URL}/auth/cas/callback"
         self.CAS_ENABLED = _env_bool("CAS_ENABLED", default=not self.DEV_MODE)
-        if not self.QNA_MODEL_ARN:
-            self.QNA_MODEL_ARN = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 
 @dataclass(slots=True)
