@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -7,6 +7,9 @@ logger = logging.getLogger(__name__)
 
 CREATEAI_QUERY_URL = "https://api-main-beta.aiml.asu.edu/query"
 DEFAULT_TIMEOUT = 60
+RATING_PROMPT = (
+    "We're still improving our answers! Please rate the quality of the answer."
+)
 
 SYSTEM_PROMPT = (
     "You are Forkman, a helpful Q&A assistant for the Devil2Devil Discord server about Arizona State University.\n"
@@ -20,7 +23,8 @@ SYSTEM_PROMPT = (
     "* Avoid corporate, formal, or overly academic language.\n\n"
     "## Response Structure\n\n"
     "* Answer the user's question as directly as possible.\n"
-    "* Keep responses concise and easy to scan.\n"
+    "* Keep responses concise and easy to scan: under about 150 words unless the user asks for more detail.\n"
+    "* For follow-up questions, answer only what is new; do not repeat earlier answers.\n"
     "* Use short paragraphs and bullet points when helpful.\n"
     "* Break up long explanations into smaller sections.\n"
     "* Prioritize the most important information first.\n"
@@ -59,11 +63,22 @@ class ForkmanQNA:
         self.url = url
 
     @staticmethod
-    def build_query(thread_title: str, message_content: str) -> str:
+    def build_query(
+        thread_title: str,
+        message_content: str,
+        history: Optional[List[Tuple[str, str]]] = None,
+    ) -> str:
         """
-        Matches the Go logic: channel.Name + " " + msg.Content
+        Matches the Go logic: channel.Name + " " + msg.Content.
+        With history, earlier (speaker, text) turns are prepended as a transcript.
         """
         query = f"{thread_title} {message_content}".strip()
+        if history:
+            transcript = "\n\n".join(f"{speaker}: {text}" for speaker, text in history)
+            query = (
+                f"Conversation so far:\n{transcript}\n\n"
+                f"Answer the user's latest message:\n{query}"
+            )
         logger.debug(
             "Built ForkmanQNA query (thread=%s, length=%s)", thread_title, len(query)
         )
@@ -75,6 +90,7 @@ class ForkmanQNA:
         message_content: str,
         user_id: Optional[str] = None,
         session_id: Optional[str] = None,
+        history: Optional[List[Tuple[str, str]]] = None,
     ) -> Dict[str, Any]:
         """
         Query CreateAI and return a structured result.
@@ -83,6 +99,7 @@ class ForkmanQNA:
         :param message_content: The actual user question/content.
         :param user_id: Optional user ID, used for logging.
         :param session_id: Optional session ID, used for logging.
+        :param history: Optional earlier (speaker, text) turns of the conversation.
         :return: dict with keys:
             - ok: bool
             - full_message: str (separator + answer OR error message)
@@ -90,7 +107,7 @@ class ForkmanQNA:
             - rating_prompt: Optional[str]
             - raw_response: Optional[dict] (CreateAI raw response when one was received)
         """
-        query = self.build_query(thread_title, message_content)
+        query = self.build_query(thread_title, message_content, history)
         logger.debug(
             "Submitting query to CreateAI (thread=%s, user=%s, session=%s)",
             thread_title,
@@ -142,9 +159,7 @@ class ForkmanQNA:
             }
 
         full_message = "\n----------------------\n" + answer_text
-        rating_prompt = (
-            "We're still improving our answers! Please rate the quality of the answer."
-        )
+        rating_prompt = RATING_PROMPT
         logger.debug(
             "Returning ForkmanQNA answer (thread=%s, user=%s, chars=%s)",
             thread_title,

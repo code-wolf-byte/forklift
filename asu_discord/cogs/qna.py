@@ -11,9 +11,10 @@ from discord.commands import slash_command
 from discord.ext import commands
 
 try:  # pragma: no cover - optional dependency
-    from .forklift_qna import ForkmanQNA
+    from .forklift_qna import RATING_PROMPT, ForkmanQNA
 except ImportError:  # pragma: no cover - optional dependency
     ForkmanQNA = None  # type: ignore[assignment]
+    RATING_PROMPT = ""
 
 from utils.database import GoldGuideContribution, QnaModule, QnaPost, session_scope
 from utils.settings import CONFIG, DISCORD_CONFIG
@@ -26,6 +27,9 @@ SATISFACTORY_CUSTOM_ID = "qna:satisfied"
 ASSISTANCE_CUSTOM_ID = "qna:assist"
 STAFF_CONFIRMED_CUSTOM_ID = "qna:staff_confirmed"
 GOLD_GUIDE_TAG_SUBSTRING = "gold guide"
+DISCORD_MESSAGE_LIMIT = 2000
+HISTORY_MESSAGE_LIMIT = 30  # thread messages fed back to the model as context
+MAX_USER_TURNS = 10  # owner messages before Forkman hands the thread to staff
 TEST_GUILD_IDS: list[int] = []
 if DISCORD_CONFIG and DISCORD_CONFIG.test_guild_ids:
     TEST_GUILD_IDS = list(DISCORD_CONFIG.test_guild_ids)
@@ -51,6 +55,21 @@ def _normalize_id(raw: Optional[str]) -> Optional[int]:
     except (TypeError, ValueError):
         logger.warning("Invalid Discord snowflake configured: %s", raw)
         return None
+
+
+def _split_message(text: str, limit: int = DISCORD_MESSAGE_LIMIT) -> list[str]:
+    """Split text into Discord-sized chunks, preferring to break on newlines."""
+    chunks: list[str] = []
+    while len(text) > limit:
+        cut = text.rfind("\n", 0, limit)
+        if cut <= 0:
+            cut = limit
+        chunks.append(text[:cut])
+        text = text[cut:].lstrip("\n")
+    chunks.append(text)
+    return chunks
+
+
 class QnACog(commands.Cog):
     """Cog that mirrors Forkman Q&A functionality with CreateAI responses."""
 
@@ -59,6 +78,8 @@ class QnACog(commands.Cog):
         self.createai_token = CONFIG.QNA_CREATEAI_TOKEN
         self._enabled_cache: dict[int, bool] = {}
         self._persistent_view_added = False
+        # ponytail: one lock per thread, never pruned; prune if memory ever matters
+        self._thread_locks: dict[int, asyncio.Lock] = {}
         self._backfill_task: Optional[asyncio.Task] = None
         self._backfill_progress: dict = {
             "status": "idle",
@@ -482,12 +503,123 @@ class QnACog(commands.Cog):
             "I'm looking through our knowledge base to see if I can answer your question. :wave:"
         )
 
-        thread_title = thread.name.strip()
-        result = await self._generate_answer(
-            thread_title=thread_title,
-            question_text=question_text,
-            author_id=author_id,
+        async with self._thread_lock(thread.id):
+            answer_msg, result = await self._answer(thread, author_id, question_text)
+
+        # Store answer details in DB
+        if answer_msg and result and result.get("ok"):
+            with session_scope() as db_session:
+                record = db_session.query(QnaPost).filter_by(thread_id=str(thread.id)).one_or_none()
+                if record is not None:
+                    record.answer = result.get("answer") or result.get("full_message")
+                    record.assistant_message_id = str(answer_msg.id)
+
+        # Ping Gold Guides if the thread carries a Gold Guide tag
+        gold_guide_role_id = self.gold_guide_role_id
+        if gold_guide_role_id and self._has_gold_guide_tag(thread):
+            await thread.send(
+                f"<@&{gold_guide_role_id}> A question tagged for Gold Guide assistance has been posted!",
+                allowed_mentions=discord.AllowedMentions(roles=True),
+            )
+            with session_scope() as db_session:
+                record = db_session.query(QnaPost).filter_by(thread_id=str(thread.id)).one_or_none()
+                if record is not None:
+                    record.gold_guide_pinged = True
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        """Answer the thread owner's follow-up messages, chatbot style."""
+        thread = message.channel
+        if (
+            message.author.bot
+            or not isinstance(thread, discord.Thread)
+            or message.id == thread.id  # forum starter message, handled by on_thread_create
+            or thread.parent_id != self.forum_channel_id
+            or message.author.id != thread.owner_id
+            or not self._is_ready()
+            or not self._is_enabled(thread.guild.id)
+        ):
+            return
+        question_text = message.content.strip()
+        if not question_text:
+            return
+
+        with session_scope() as db_session:
+            record = db_session.query(QnaPost).filter_by(thread_id=str(thread.id)).one_or_none()
+            status = record.status if record else None
+        if status is None or status == "needs_help":
+            return  # untracked thread, or staff have taken over
+
+        async with self._thread_lock(thread.id):
+            history, previous_answer = await self._build_history(thread, before=message)
+            if sum(1 for speaker, _ in history if speaker == "User") >= MAX_USER_TURNS:
+                await self._hand_off(thread)
+                return
+            answer_msg, _ = await self._answer(
+                thread, message.author.id, question_text, history
+            )
+            # Keep the feedback buttons on the latest answer only.
+            if answer_msg and previous_answer:
+                try:
+                    await previous_answer.edit(view=None)
+                except discord.HTTPException:
+                    logger.warning(
+                        "Failed to clear feedback buttons on message %s", previous_answer.id
+                    )
+
+    def _thread_lock(self, thread_id: int) -> asyncio.Lock:
+        return self._thread_locks.setdefault(thread_id, asyncio.Lock())
+
+    async def _build_history(
+        self, thread: discord.Thread, *, before: discord.Message
+    ) -> tuple[list[tuple[str, str]], Optional[discord.Message]]:
+        """Return the owner/Forkman turns before ``before`` (oldest first) and the
+        latest Forkman message still carrying feedback buttons."""
+        history: list[tuple[str, str]] = []
+        with_buttons: Optional[discord.Message] = None
+        bot_id = self.bot.user.id
+        async for msg in thread.history(limit=HISTORY_MESSAGE_LIMIT, before=before):
+            if msg.author.id == thread.owner_id:
+                if msg.content.strip():
+                    history.append(("User", msg.content.strip()))
+            # Skip Forkman's greeting and role pings; keep its answers.
+            elif msg.author.id == bot_id and "<@" not in msg.content:
+                if with_buttons is None and self._backfill_has_feedback_buttons(msg):
+                    with_buttons = msg
+                text = msg.content.replace(RATING_PROMPT, "").strip()
+                if text:
+                    history.append(("Forkman", text))
+        history.reverse()
+        return history, with_buttons
+
+    async def _hand_off(self, thread: discord.Thread) -> None:
+        """Stop answering in a long thread and ping staff instead."""
+        mention = f"<@&{self.helper_role_id}> " if self.helper_role_id else ""
+        await thread.send(
+            f"{mention}Assistance requested. We've covered a lot in this thread, "
+            "so I'm handing you over to our team to help further.",
+            allowed_mentions=discord.AllowedMentions(roles=True),
         )
+        with session_scope() as db_session:
+            record = db_session.query(QnaPost).filter_by(thread_id=str(thread.id)).one_or_none()
+            if record is not None:
+                record.status = "needs_help"
+
+    async def _answer(
+        self,
+        thread: discord.Thread,
+        author_id: Optional[int],
+        question_text: str,
+        history: Optional[list[tuple[str, str]]] = None,
+    ) -> tuple[Optional[discord.Message], Optional[dict[str, Any]]]:
+        """Generate an answer and post it; returns (last answer message, result)."""
+        async with thread.typing():
+            result = await self._generate_answer(
+                thread_title=thread.name.strip(),
+                question_text=question_text,
+                author_id=author_id,
+                history=history,
+            )
 
         answer_msg = None
         if not result:
@@ -520,27 +652,11 @@ class QnACog(commands.Cog):
             rating_prompt = result.get("rating_prompt")
             if rating_prompt:
                 answer_text = f"{answer_text}\n\n{rating_prompt}"
-            answer_msg = await thread.send(answer_text, view=QnAFeedbackView(self))
-
-        # Store answer details in DB
-        if answer_msg and result and result.get("ok"):
-            with session_scope() as db_session:
-                record = db_session.query(QnaPost).filter_by(thread_id=str(thread.id)).one_or_none()
-                if record is not None:
-                    record.answer = result.get("answer") or result.get("full_message")
-                    record.assistant_message_id = str(answer_msg.id)
-
-        # Ping Gold Guides if the thread carries a Gold Guide tag
-        gold_guide_role_id = self.gold_guide_role_id
-        if gold_guide_role_id and self._has_gold_guide_tag(thread):
-            await thread.send(
-                f"<@&{gold_guide_role_id}> A question tagged for Gold Guide assistance has been posted!",
-                allowed_mentions=discord.AllowedMentions(roles=True),
-            )
-            with session_scope() as db_session:
-                record = db_session.query(QnaPost).filter_by(thread_id=str(thread.id)).one_or_none()
-                if record is not None:
-                    record.gold_guide_pinged = True
+            chunks = _split_message(answer_text)
+            for chunk in chunks[:-1]:
+                await thread.send(chunk)
+            answer_msg = await thread.send(chunks[-1], view=QnAFeedbackView(self))
+        return answer_msg, result
 
     # Gold Guide contribution tracking has moved to AnalyticsCog.on_message.
 
@@ -683,16 +799,20 @@ class QnACog(commands.Cog):
         thread_title: str,
         question_text: str,
         author_id: Optional[int],
+        history: Optional[list[tuple[str, str]]] = None,
     ) -> Optional[dict[str, Any]]:
         qna = ForkmanQNA(self.createai_token)
 
         max_attempts = 3
         response = None
         for attempt in range(1, max_attempts + 1):
-            response = qna.get_answer(
+            # Run the blocking HTTP call off the event loop so the bot stays responsive.
+            response = await asyncio.to_thread(
+                qna.get_answer,
                 thread_title=thread_title,
                 message_content=question_text,
                 user_id=str(author_id) if author_id else None,
+                history=history,
             )
             logger.info(f"Answer from ForkmanQNA (attempt {attempt}): {response}")
             if response["ok"]:

@@ -74,3 +74,17 @@ def test_empty_answer_returns_failure_with_raw_response():
 
     assert result["ok"] is False
     assert result["raw_response"] == {"response": ""}
+
+
+def test_build_query_with_history():
+    query = ForkmanQNA.build_query(
+        "Housing", "which campus?", [("User", "when?"), ("Forkman", "August.")]
+    )
+    assert "User: when?\n\nForkman: August." in query
+    assert query.endswith("Housing which campus?")
+
+
+def test_history_is_sent_to_createai():
+    with patch(POST, return_value=_resp({"response": "Tempe"})) as mock_post:
+        ForkmanQNA(TOK).get_answer("t", "q", history=[("User", "hi")])
+    assert "User: hi" in mock_post.call_args.kwargs["json"]["query"]
