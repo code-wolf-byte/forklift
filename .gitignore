@@ -35,3 +35,4 @@ build/
 *.zip
 node_modules/
 *.tar.gz
+.env.local

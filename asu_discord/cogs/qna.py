@@ -52,15 +52,11 @@ def _normalize_id(raw: Optional[str]) -> Optional[int]:
         logger.warning("Invalid Discord snowflake configured: %s", raw)
         return None
 class QnACog(commands.Cog):
-    """Cog that mirrors Forkman Q&A functionality with Bedrock knowledge base responses."""
+    """Cog that mirrors Forkman Q&A functionality with CreateAI responses."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.knowledge_base_id = CONFIG.QNA_KNOWLEDGE_BASE_ID
-        self.model_arn = CONFIG.QNA_MODEL_ARN
-        self.aws_region = CONFIG.QNA_AWS_REGION
-        self.aws_access_key_id = CONFIG.AWS_ACCESS_KEY_ID
-        self.aws_secret_access_key = CONFIG.AWS_SECRET_ACCESS_KEY
+        self.createai_token = CONFIG.QNA_CREATEAI_TOKEN
         self._enabled_cache: dict[int, bool] = {}
         self._persistent_view_added = False
         self._backfill_task: Optional[asyncio.Task] = None
@@ -78,8 +74,7 @@ class QnACog(commands.Cog):
     def _is_ready(self) -> bool:
         return bool(
             self.forum_channel_id
-            and self.knowledge_base_id
-            and self.model_arn
+            and self.createai_token
             and ForkmanQNA
         )
 
@@ -120,10 +115,9 @@ class QnACog(commands.Cog):
         if not self.forum_channel_id:
             logger.info(
                 "QnACog loaded but incomplete configuration prevents automation "
-                "(channel: %s, knowledge_base: %s, model: %s, forkman_available: %s)",
+                "(channel: %s, createai_token: %s, forkman_available: %s)",
                 self.forum_channel_id,
-                bool(self.knowledge_base_id),
-                bool(self.model_arn),
+                bool(self.createai_token),
                 bool(ForkmanQNA),
             )
             return
@@ -683,15 +677,6 @@ class QnACog(commands.Cog):
             logger.warning("Unable to fetch starter message for thread %s", thread.id)
         return None
 
-    def _build_forkman_kwargs(self) -> Optional[dict[str, Any]]:
-        return ForkmanQNA(
-            region_name=self.aws_region,
-            knowledge_base_id=self.knowledge_base_id,
-            model_arn=self.model_arn,
-            aws_access_key_id=self.aws_access_key_id,
-            aws_secret_access_key=self.aws_secret_access_key,
-        )
-
     async def _generate_answer(
         self,
         *,
@@ -699,15 +684,7 @@ class QnACog(commands.Cog):
         question_text: str,
         author_id: Optional[int],
     ) -> Optional[dict[str, Any]]:
-        qna = ForkmanQNA(
-            region_name=self.aws_region,
-            knowledge_base_id=self.knowledge_base_id,
-            model_arn=self.model_arn,
-            aws_access_key_id=self.aws_access_key_id,
-            aws_secret_access_key=self.aws_secret_access_key,
-        )
-        if not qna:
-            return None
+        qna = ForkmanQNA(self.createai_token)
 
         max_attempts = 3
         response = None
