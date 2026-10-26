@@ -75,7 +75,7 @@ class AppConfig:
     DISCORD_SUCCESS_REDIRECT: str | None = _env_value("DISCORD_SUCCESS_REDIRECT")
     DISCORD_FAILURE_REDIRECT: str | None = _env_value("DISCORD_FAILURE_REDIRECT")
     QNA_FORUM_CHANNEL_ID: str | None = _env_value("QNA_FORUM_CHANNEL_ID")
-    QNA_CREATEAI_TOKEN: str | None = _env_value("QNA_CREATEAI_TOKEN")
+    CREATEAI_API_KEY: str | None = _env_value("CREATEAI_API_KEY")
     QNA_HELPER_ROLE_ID: str | None = _env_value("QNA_HELPER_ROLE_ID")
     SALESFORCE_API_CLIENT_ID: str | None = _env_value("SALESFORCE_API_CLIENT_ID")
     SALESFORCE_API_CLIENT_SECRET: str | None = _env_value("SALESFORCE_API_CLIENT_SECRET")

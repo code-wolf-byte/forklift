@@ -75,7 +75,7 @@ class QnACog(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.createai_token = CONFIG.QNA_CREATEAI_TOKEN
+        self.createai_token = CONFIG.CREATEAI_API_KEY
         self._enabled_cache: dict[int, bool] = {}
         self._persistent_view_added = False
         # ponytail: one lock per thread, never pruned; prune if memory ever matters
