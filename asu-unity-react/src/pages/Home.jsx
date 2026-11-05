@@ -226,7 +226,7 @@ function VerificationSection({
               <a
                 href={
                   step3Enabled
-                    ? "https://discord.com/channels/1187144343400751234/1435338904994709626"
+                    ? "https://discord.com/channels/1187144343400751234/1562520206486802542"
                     : "#"
                 }
                 className={`btn btn-maroon${!step3Enabled ? " disabled" : ""}`}
