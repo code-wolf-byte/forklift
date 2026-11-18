@@ -1,56 +1,17 @@
 import { useState } from "react";
 import profileGif from "../assets/devil2devil-profile.gif";
 
-const isAndroid = /android/i.test(navigator.userAgent);
-const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-
-function toAndroidIntentUrl(url) {
-  const parsed = new URL(url);
-  const fallback = encodeURIComponent(url);
-  return `intent://${parsed.host}${parsed.pathname}${parsed.search}#Intent;scheme=https;package=com.discord;S.browser_fallback_url=${fallback};end`;
-}
-
-function navigateWithIOSFallback(appUrl, webUrl) {
-  const start = Date.now();
-  window.location.href = appUrl;
-  setTimeout(() => {
-    if (Date.now() - start < 1800) {
-      window.location.href = webUrl;
-    }
-  }, 1500);
-}
-
+// Keep the whole OAuth flow in this browser. Handing off to the Discord app
+// returns the callback in a different cookie jar on iOS, losing the session
+// (and with it the OAuth state) -> "state mismatch: expected=None".
 function useDiscordRedirect() {
   const [loading, setLoading] = useState(false);
 
-  const handleClick = async (e) => {
+  const handleClick = (e) => {
     e.preventDefault();
     if (loading) return;
     setLoading(true);
-    try {
-      const res = await fetch("/auth/discord/prepare", { method: "POST" });
-      const data = await res.json();
-      if (data.authorize_url) {
-        if (isAndroid) {
-          window.location.href = toAndroidIntentUrl(data.authorize_url);
-        } else if (isIOS) {
-          const parsed = new URL(data.authorize_url);
-          const appUrl = `discord://${parsed.host}${parsed.pathname}${parsed.search}`;
-          navigateWithIOSFallback(appUrl, data.authorize_url);
-        } else {
-          window.location.href = data.authorize_url;
-        }
-        return;
-      }
-      if (data.redirect) {
-        window.location.href = data.redirect;
-        return;
-      }
-    } catch {
-      window.location.href = "/auth/discord/login";
-    } finally {
-      setLoading(false);
-    }
+    window.location.href = "/auth/discord/login";
   };
 
   return { handleClick, loading };
