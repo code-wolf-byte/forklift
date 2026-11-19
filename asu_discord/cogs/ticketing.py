@@ -330,6 +330,25 @@ class TicketingCog(commands.Cog):
                 roles.append(role)
         return roles
 
+    def _is_staff(self, guild: discord.Guild, member: discord.Member, ticket: dict) -> bool:
+        """Global staff roles apply to every ticket; category extra roles only if the category still exists."""
+        settings = _load_settings_dict(str(guild.id)) or {}
+        category = (self._get_category(ticket["category_id"]) if ticket.get("category_id") is not None else None) or {}
+        staff_role_ids = {*settings.get("staff_role_ids", []), *category.get("extra_role_ids", [])}
+        return bool(staff_role_ids & {str(r.id) for r in getattr(member, "roles", [])})
+
+    async def _resolve_member(self, guild: discord.Guild | None, user_id: int) -> discord.Member | None:
+        """Cached member, else fetched; None if they've left the guild."""
+        if guild is None:
+            return None
+        member = guild.get_member(user_id)
+        if member is not None:
+            return member
+        try:
+            return await guild.fetch_member(user_id)
+        except discord.NotFound:
+            return None
+
     async def _ensure_category_channel(
         self, guild: discord.Guild, category: dict
     ) -> discord.CategoryChannel:
@@ -552,15 +571,7 @@ class TicketingCog(commands.Cog):
         guild = interaction.guild
         member = interaction.user
         is_opener = str(member.id) == ticket["opener_discord_id"]
-        is_staff = False
-        if guild is not None and ticket["category_id"] is not None:
-            settings = _load_settings_dict(str(guild.id)) or {"staff_role_ids": []}
-            category = self._get_category(ticket["category_id"]) or {"extra_role_ids": []}
-            staff_role_ids = {*settings.get("staff_role_ids", []), *category.get("extra_role_ids", [])}
-            member_role_ids = {str(r.id) for r in getattr(member, "roles", [])}
-            is_staff = bool(staff_role_ids & member_role_ids)
-
-        if not (is_opener or is_staff):
+        if not (is_opener or (guild is not None and self._is_staff(guild, member, ticket))):
             await interaction.response.send_message(
                 "You don't have permission to close this ticket.", ephemeral=True
             )
@@ -568,10 +579,12 @@ class TicketingCog(commands.Cog):
 
         await interaction.response.defer()
 
-        opener_target = discord.Object(id=int(ticket["opener_discord_id"]))
-        await channel.set_permissions(
-            opener_target, overwrite=discord.PermissionOverwrite(view_channel=False)
-        )
+        # set_permissions only accepts a Member/Role; a bare discord.Object raises InvalidArgument.
+        opener = await self._resolve_member(guild, int(ticket["opener_discord_id"]))
+        if opener is not None:
+            await channel.set_permissions(
+                opener, overwrite=discord.PermissionOverwrite(view_channel=False)
+            )
 
         with session_scope() as db:
             row = db.query(Ticket).filter(Ticket.id == ticket["id"]).one_or_none()
@@ -589,6 +602,9 @@ class TicketingCog(commands.Cog):
         ticket = self._get_ticket_by_channel(str(channel.id))
         if ticket is None:
             await interaction.response.send_message("This channel isn't a tracked ticket.", ephemeral=True)
+            return
+        if interaction.guild is None or not self._is_staff(interaction.guild, interaction.user, ticket):
+            await interaction.response.send_message("Only staff can delete ticket channels.", ephemeral=True)
             return
 
         await interaction.response.send_message("Deleting ticket channel…", ephemeral=True)
