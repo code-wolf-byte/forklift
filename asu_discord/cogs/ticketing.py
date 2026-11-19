@@ -269,8 +269,19 @@ class TicketingCog(commands.Cog):
     def __init__(self, bot: commands.Bot, *, guild_id: int) -> None:
         self.bot = bot
         self.guild_id = guild_id
+        self._persistent_views_added = False
 
     # ── Startup / persistent views ────────────────────────────────────────────
+
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        # pycord has no setup_hook; register here so buttons on pre-restart messages still dispatch.
+        if self._persistent_views_added:
+            return
+        for view in self.build_persistent_views():
+            self.bot.add_view(view)
+        self._persistent_views_added = True
+        logger.info("Registered persistent ticketing views")
 
     def build_persistent_views(self) -> list[discord.ui.View]:
         """Build the static views that must be re-registered on every bot start."""

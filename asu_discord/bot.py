@@ -113,27 +113,6 @@ class ForkliftBot(commands.Bot):
 
         logger.info("Loaded TicketingCog")
 
-    async def setup_hook(self) -> None:
-        """Run after the bot connects to Discord."""
-        logger.info("ForkliftBot setup hook starting")
-
-        try:
-            await self.sync_commands()
-        except Exception:  # pragma: no cover - defensive
-            logger.exception("Failed to sync application commands with Discord")
-            raise
-
-        logger.info("Synced application commands")
-
-        ticketing_cog = self.get_cog("TicketingCog")
-        if isinstance(ticketing_cog, TicketingCog):
-            try:
-                for view in ticketing_cog.build_persistent_views():
-                    self.add_view(view)
-                logger.info("Registered persistent ticketing views")
-            except Exception:  # pragma: no cover - defensive
-                logger.exception("Failed to register persistent ticketing views")
-
 
 def create_bot(
     *, command_prefix: str = "!", intents: Optional[discord.Intents] = None
