@@ -16,7 +16,7 @@ except ImportError:  # pragma: no cover - optional dependency
     ForkmanQNA = None  # type: ignore[assignment]
     RATING_PROMPT = ""
 
-from utils.database import GoldGuideContribution, QnaModule, QnaPost, session_scope
+from utils.database import DATA_START, GoldGuideContribution, QnaModule, QnaPost, session_scope
 from utils.settings import CONFIG, DISCORD_CONFIG
 from utils.app_settings import get as get_setting
 
@@ -353,6 +353,9 @@ class QnACog(commands.Cog):
                 tag_names = [tag_name_by_id.get(t.id, str(t.id)) for t in thread.applied_tags]
                 has_gg_tag = any(GOLD_GUIDE_TAG_SUBSTRING in n.lower() for n in tag_names)
                 created_at = thread.created_at.replace(tzinfo=None) if thread.created_at else datetime.utcnow()
+                if created_at < DATA_START:
+                    p["threads_processed"] += 1
+                    continue
 
                 # Check if already fully backfilled (has tags set)
                 with session_scope() as db_session:

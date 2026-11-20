@@ -49,6 +49,11 @@ SessionLocal = scoped_session(
 Base = declarative_base()
 
 
+# Server re-opened 2026-11-18. Startup backfills ignore Discord history older than
+# this so archived pre-reopen data doesn't flow back into production (naive UTC).
+DATA_START = datetime(2026, 11, 18)
+
+
 class User(Base):
     __tablename__ = "users"
 

@@ -28,6 +28,7 @@ from discord.ext import commands
 
 from utils.app_settings import get as get_setting
 from utils.database import (
+    DATA_START,
     ForumPost,
     GoldGuideContribution,
     MessageBackfill,
@@ -891,6 +892,8 @@ class AnalyticsCog(commands.Cog):
                     if thread.created_at
                     else datetime.now(timezone.utc).replace(tzinfo=None)
                 )
+                if created_at < DATA_START:
+                    continue
                 tag_names_json = json.dumps(
                     [tag.name for tag in getattr(thread, "applied_tags", [])]
                 )
@@ -956,6 +959,8 @@ class AnalyticsCog(commands.Cog):
             try:
                 async for entry in guild.audit_logs(limit=None, action=action):
                     if entry.target is None:
+                        continue
+                    if entry.created_at.replace(tzinfo=None) < DATA_START:
                         continue
                     events.append(
                         {
@@ -1195,7 +1200,10 @@ class AnalyticsCog(commands.Cog):
             logger.error("AnalyticsCog: guild %s not found for backfill", self.guild_id)
             return
 
-        cutoff = datetime.now(timezone.utc) - timedelta(days=BACKFILL_LOOKBACK_DAYS)
+        cutoff = max(
+            datetime.now(timezone.utc) - timedelta(days=BACKFILL_LOOKBACK_DAYS),
+            DATA_START.replace(tzinfo=timezone.utc),
+        )
         channels = await self._collect_backfill_targets(guild)
         logger.info(
             "AnalyticsCog backfill started: %d channels/threads, cutoff %s",
