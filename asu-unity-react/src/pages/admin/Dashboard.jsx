@@ -101,12 +101,12 @@ export default function Dashboard() {
   return (
     <>
       <h2 className="text-2xl font-bold mb-1">Overview</h2>
-      <p className="text-sm text-muted-foreground mb-6">Verification stats across all members.</p>
+      <p className="text-sm text-muted-foreground mb-6">Member counts are live from the Discord server; period stats come from verification records.</p>
 
       {/* All-time stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 mb-6">
-        <StatCard value={stats?.total_users} label="Total Members" icon="fa-users" color="#8c1d40" />
-        <StatCard value={stats?.verified_count} label="Verified" icon="fa-user-check" color="#10b981" />
+        <StatCard value={stats?.server_members} label="Server Members" icon="fa-users" color="#8c1d40" />
+        <StatCard value={stats?.server_verified} label="Verified in Server" icon="fa-user-check" color="#10b981" />
         <StatCard value={stats?.today_verifications} label="Verified Today" icon="fa-calendar-check" color="#3b82f6" />
       </div>
 

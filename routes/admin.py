@@ -214,6 +214,11 @@ def admin_stats():
             .count()
         )
 
+    # Headline counts come from the live guild so they match the Discord server;
+    # the users table only holds people who started verification.
+    from asu_discord.api import get_live_member_counts
+    live = get_live_member_counts() or {}
+
     retention_rate = (
         round(((verified_at_start - verified_leaves) / verified_at_start) * 100, 1)
         if verified_at_start > 0
@@ -222,6 +227,8 @@ def admin_stats():
 
     return jsonify(
         {
+            "server_members": live.get("total"),
+            "server_verified": live.get("verified"),
             "total_users": total_users,
             "verified_count": verified_count,
             "today_verifications": today_verifications,
